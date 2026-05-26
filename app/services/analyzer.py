@@ -105,14 +105,13 @@ def _find_leaf_by_path(rows: list[Category], path: str) -> Optional[Category]:
     return None
 
 
-def _normalize(item: dict, reviews_by_id: dict[int, Review], categories: list[Category]) -> AnalyzerOutput:
+def _normalize(item: dict, reviews_by_id: dict[int, Review], categories: list[Category]) -> Optional[AnalyzerOutput]:
     rid = item.get("id")
-    if rid is None or rid not in reviews_by_id:
-        return AnalyzerOutput(
-            review_id=rid or -1, category_path=None, sentiment=None,
-            sentiment_score=None, confidence=None, summary=None,
-            error="missing or unknown review id in response",
-        )
+    # Drop responses with a missing or hallucinated id; we can't safely attach
+    # them to a Review (FK would fail) and the fallback loop in analyze_batch
+    # will mark the corresponding real review as "no output for this review".
+    if not isinstance(rid, int) or rid not in reviews_by_id:
+        return None
 
     sentiment_raw = (item.get("sentiment") or "").strip().lower()
     try:
@@ -198,7 +197,13 @@ async def analyze_batch(
             )
             for r in reviews
         ]
-    outputs = [_normalize(item, reviews_by_id, categories) for item in raw if isinstance(item, dict)]
+    outputs: list[AnalyzerOutput] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        norm = _normalize(item, reviews_by_id, categories)
+        if norm is not None:
+            outputs.append(norm)
     seen = {o.review_id for o in outputs}
     for r in reviews:
         if r.id not in seen:
@@ -268,7 +273,12 @@ async def run_analysis_job(
                     async with AsyncSessionLocal() as s2:
                         rows = (await s2.execute(select(Review).where(Review.id.in_(batch_ids)))).scalars().all()
                         outs = await analyze_batch(model, summary_lang, rows, cat_rows)
+                        valid_ids = {r.id for r in rows}
                         for out in outs:
+                            # Defensive: never try to insert against a review_id
+                            # that isn't in this batch — would FK-violate.
+                            if out.review_id not in valid_ids:
+                                continue
                             existing = (
                                 await s2.execute(select(Analysis).where(Analysis.review_id == out.review_id))
                             ).scalar_one_or_none()
