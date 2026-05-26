@@ -150,14 +150,20 @@ async def list_reviews(
 
 
 @router.get("/api/stats")
-async def api_stats(session: AsyncSession = Depends(get_session)):
-    return await stats_summary(session)
+async def api_stats(
+    source_ids: List[str] = Query(default_factory=list),
+    session: AsyncSession = Depends(get_session),
+):
+    ids = [v for v in (_parse_int(s) for s in source_ids) if v is not None]
+    return await stats_summary(session, source_ids=ids or None)
 
 
 @router.get("/api/stats/trend")
 async def api_stats_trend(
     mode: str = "distribution",
     period: str = "week",
+    source_ids: List[str] = Query(default_factory=list),
     session: AsyncSession = Depends(get_session),
 ):
-    return await stats_trend(session, mode=mode, period=period)
+    ids = [v for v in (_parse_int(s) for s in source_ids) if v is not None]
+    return await stats_trend(session, mode=mode, period=period, source_ids=ids or None)

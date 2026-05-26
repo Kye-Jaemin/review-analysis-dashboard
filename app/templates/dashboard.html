@@ -3,7 +3,21 @@
 {% block title %}{{ t('dashboard.title') }} — {{ t('app.name') }}{% endblock %}
 
 {% block content %}
-<h1 class="text-2xl font-semibold mb-6">{{ t('dashboard.title') }}</h1>
+<h1 class="text-2xl font-semibold mb-4">{{ t('dashboard.title') }}</h1>
+
+<div class="bg-white rounded shadow-sm px-4 py-3 mb-5">
+  <div class="flex items-center gap-2 mb-2">
+    <span class="text-xs text-gray-500">{{ t('reviews.filter.source') }}</span>
+    <span class="text-xs text-gray-400" id="source-filter-status">{{ t('common.all') }}</span>
+    <button type="button" id="source-filter-clear"
+            class="ml-auto text-xs text-blue-600 hover:underline hidden">
+      {{ t('common.cancel') }}
+    </button>
+  </div>
+  <div id="source-filter-chips" class="flex flex-wrap gap-1.5 text-xs">
+    <div class="text-gray-400">{{ t('common.loading') }}</div>
+  </div>
+</div>
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
   <div class="bg-white p-4 rounded shadow-sm">
@@ -113,8 +127,74 @@ const SOURCE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#
 
 let charts = {};
 
+// Source filter state. Empty set = no filter = show all.
+const selectedSources = new Set();
+let currentTrend = { mode: 'distribution', period: 'week' };
+
 function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); charts[id] = null; }
+}
+
+function sourceQuery() {
+  const params = new URLSearchParams();
+  selectedSources.forEach(id => params.append('source_ids', id));
+  return params.toString();
+}
+
+function renderSourceFilterChips(allSources) {
+  const wrap = document.getElementById('source-filter-chips');
+  if (!allSources || allSources.length === 0) {
+    wrap.innerHTML = `<div class="text-gray-400">{{ t('sources.no_sources') }}</div>`;
+    document.getElementById('source-filter-status').textContent = '—';
+    document.getElementById('source-filter-clear').classList.add('hidden');
+    return;
+  }
+  wrap.innerHTML = allSources.map(s => {
+    const active = selectedSources.has(s.id);
+    const typeLbl = SOURCE_TYPE_LABELS[s.type] || s.type;
+    return `<button type="button" data-source-id="${s.id}"
+      class="source-chip px-2 py-1 rounded border transition flex items-center gap-1
+             ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}">
+      ${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" class="w-3.5 h-3.5 rounded" alt="">` : ''}
+      <span class="truncate max-w-[10rem]" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
+      <span class="opacity-75 text-[10px]">· ${escapeHtml(typeLbl)}</span>
+    </button>`;
+  }).join('');
+
+  wrap.querySelectorAll('.source-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.sourceId, 10);
+      if (selectedSources.has(id)) selectedSources.delete(id);
+      else selectedSources.add(id);
+      updateFilterStatus(allSources);
+      renderSourceFilterChips(allSources);
+      reload();
+    });
+  });
+
+  updateFilterStatus(allSources);
+}
+
+function updateFilterStatus(allSources) {
+  const status = document.getElementById('source-filter-status');
+  const clearBtn = document.getElementById('source-filter-clear');
+  if (selectedSources.size === 0) {
+    status.textContent = `{{ t('common.all') }} (${allSources.length})`;
+    clearBtn.classList.add('hidden');
+  } else {
+    status.textContent = `${selectedSources.size} / ${allSources.length}`;
+    clearBtn.classList.remove('hidden');
+  }
+}
+
+document.getElementById('source-filter-clear').addEventListener('click', () => {
+  selectedSources.clear();
+  reload();
+});
+
+async function reload() {
+  await loadStats();
+  await renderTrend(currentTrend.mode, currentTrend.period);
 }
 
 function escapeHtml(s) {
@@ -135,13 +215,15 @@ function formatAnalyzed(analyzed, total) {
 }
 
 async function loadStats() {
-  const res = await fetch('/api/stats');
+  const qs = sourceQuery();
+  const res = await fetch('/api/stats' + (qs ? '?' + qs : ''));
   const data = await res.json();
   document.getElementById('card-total').textContent = data.total.toLocaleString();
   document.getElementById('card-avg-sent').textContent = data.avg_sentiment != null ? data.avg_sentiment.toFixed(2) : '—';
   document.getElementById('card-avg-rating').textContent = data.avg_rating != null ? data.avg_rating.toFixed(2) + ' ★' : '—';
   document.getElementById('card-last').textContent = data.last_collected ? data.last_collected.slice(0,16).replace('T',' ') : '—';
 
+  renderSourceFilterChips(data.all_sources || []);
   renderSentiment(data);
   renderSource(data);
   renderCategory(data);
@@ -385,7 +467,9 @@ function renderRecent(items) {
 }
 
 async function renderTrend(mode, period) {
-  const res = await fetch(`/api/stats/trend?mode=${mode}&period=${period}`);
+  currentTrend = { mode, period };
+  const qs = sourceQuery();
+  const res = await fetch(`/api/stats/trend?mode=${mode}&period=${period}` + (qs ? '&' + qs : ''));
   const data = await res.json();
   destroyChart('trend');
   let datasets;
