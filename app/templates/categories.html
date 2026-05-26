@@ -5,7 +5,7 @@
 {% macro render_node(node) %}
   <li class="ml-4 mt-2">
     <div class="bg-white border rounded p-3 flex items-start gap-3"
-         x-data="{ editing: false, name: '{{ node.name|e }}', desc: {{ node.description|tojson }} }">
+         x-data='{ editing: false, name: {{ node.name|tojson }}, desc: {{ node.description|tojson }} }'>
       <div class="flex-1 min-w-0">
         <template x-if="!editing">
           <div>
