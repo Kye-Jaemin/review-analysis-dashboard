@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from datetime import datetime
 from typing import AsyncIterator
@@ -8,6 +7,27 @@ from typing import AsyncIterator
 import httpx
 
 from app.services.collectors.base import CollectedItem, CollectorBase, json_safe
+
+# Apple's RSS endpoint returns up to 50 reviews per page, pages 1–10.
+_RSS_URL = "https://itunes.apple.com/{country}/rss/customerreviews/id={app_id}/sortBy=mostRecent/page={page}/json"
+_MAX_PAGE = 10
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    try:
+        # Apple returns e.g. "2026-05-25T10:23:45-07:00"
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
+def _label(node, key: str = "label") -> str:
+    if isinstance(node, dict):
+        v = node.get(key)
+        return v if isinstance(v, str) else ""
+    return ""
 
 
 class AppStoreCollector(CollectorBase):
@@ -27,9 +47,6 @@ class AppStoreCollector(CollectorBase):
             rating = r.get("averageUserRating")
             # Apple's official URL slug lives in trackViewUrl, e.g.
             #   https://apps.apple.com/us/app/cal-ai-calorie-tracker/id6480417616?uo=4
-            # Extract the slug between '/app/' and '/id'. Deriving it from the
-            # trackName is unreliable because Apple's slug rules don't always
-            # match a naive lowercase-+-hyphenate of the display name.
             slug = ""
             track_url = r.get("trackViewUrl") or ""
             if "/app/" in track_url:
@@ -52,43 +69,77 @@ class AppStoreCollector(CollectorBase):
         return out
 
     async def collect(self) -> AsyncIterator[CollectedItem]:
-        from app_store_scraper import AppStore
-
-        country = self.config.get("country", "us")
-        app_name = self.config.get("app_name") or ""
+        country = (self.config.get("country") or "us").lower()
         app_id = self.config.get("app_id")
-        if not app_id or not app_name:
+        if not app_id:
             raise RuntimeError(
-                "App Store source config is missing app_id or app_name (URL slug). "
-                "Delete and re-add the source so the slug is rebuilt from trackViewUrl."
+                "App Store source config is missing app_id. "
+                "Delete and re-add the source."
             )
         max_count = int(self.config.get("max_count", 100))
 
-        def _run():
-            app = AppStore(country=country, app_name=app_name, app_id=app_id)
-            app.review(how_many=max_count)
-            return app.reviews or []
-
-        items = await asyncio.to_thread(_run)
-        for item in items:
-            user = str(item.get("userName") or "")
-            date = item.get("date")
-            title = str(item.get("title") or "")
-            ext = hashlib.sha1(f"{user}|{date}|{title}".encode("utf-8")).hexdigest()
-            posted = None
-            if isinstance(date, datetime):
-                posted = date
-            elif isinstance(date, str):
+        emitted = 0
+        async with httpx.AsyncClient(
+            timeout=20,
+            follow_redirects=True,
+            headers={"User-Agent": "review-collector/0.1"},
+        ) as client:
+            for page in range(1, _MAX_PAGE + 1):
+                if emitted >= max_count:
+                    break
+                url = _RSS_URL.format(country=country, app_id=app_id, page=page)
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    # Apple sometimes returns 403 / 503 mid-pagination; treat as end.
+                    break
                 try:
-                    posted = datetime.fromisoformat(date.replace("Z", "+00:00"))
+                    data = resp.json()
                 except Exception:
-                    pass
-            yield CollectedItem(
-                external_id=ext,
-                text=(item.get("review") or "").strip(),
-                author=user or None,
-                posted_at=posted,
-                rating=float(item["rating"]) if item.get("rating") is not None else None,
-                url=None,
-                raw=json_safe(item),
-            )
+                    break
+
+                entries = (data.get("feed") or {}).get("entry") or []
+                # Apple's RSS wraps a single entry in a dict instead of a list when only one exists.
+                if isinstance(entries, dict):
+                    entries = [entries]
+                if not entries:
+                    break
+
+                # The first entry on page 1 is the app metadata, not a review.
+                # Reviews always carry an "author" + "content" + "im:rating".
+                page_reviews = [e for e in entries if "im:rating" in e and "content" in e]
+                if not page_reviews:
+                    break
+
+                for e in page_reviews:
+                    if emitted >= max_count:
+                        break
+                    ext_id_raw = _label(e.get("id"))
+                    if not ext_id_raw:
+                        # Build a stable fallback hash if Apple didn't send an id.
+                        ext_id_raw = hashlib.sha1(
+                            (_label(e.get("title")) + "|" +
+                             _label(e.get("content")) + "|" +
+                             _label((e.get("author") or {}).get("name"))).encode("utf-8")
+                        ).hexdigest()
+
+                    title = _label(e.get("title"))
+                    content = _label(e.get("content"))
+                    text = (title + "\n\n" + content).strip() if title else content
+                    author = _label((e.get("author") or {}).get("name"))
+                    rating_str = _label(e.get("im:rating"))
+                    try:
+                        rating = float(rating_str) if rating_str else None
+                    except ValueError:
+                        rating = None
+                    posted_at = _parse_dt(_label(e.get("updated")))
+
+                    yield CollectedItem(
+                        external_id=str(ext_id_raw),
+                        text=text,
+                        author=author or None,
+                        posted_at=posted_at,
+                        rating=rating,
+                        url=_label((e.get("author") or {}).get("uri")) or None,
+                        raw=json_safe(e),
+                    )
+                    emitted += 1

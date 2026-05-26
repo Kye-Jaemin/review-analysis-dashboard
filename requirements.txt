@@ -12,7 +12,8 @@ alembic==1.14.0
 anthropic==0.40.0
 httpx==0.28.0
 google-play-scraper==1.2.7
-app-store-scraper==0.3.5
+# app-store-scraper was unmaintained and silently returned 0 reviews;
+# AppStoreCollector now calls Apple's customer-reviews RSS endpoint directly.
 praw==7.8.1
 beautifulsoup4==4.12.3
 readability-lxml==0.8.1
