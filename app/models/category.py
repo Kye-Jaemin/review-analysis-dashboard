@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+from typing import List, Optional
+
+from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db import Base
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("categories.id", ondelete="CASCADE"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    path: Mapped[str] = mapped_column(String(800), nullable=False, default="", index=True)
+
+    parent: Mapped[Optional["Category"]] = relationship(
+        "Category", remote_side="Category.id", back_populates="children"
+    )
+    children: Mapped[List["Category"]] = relationship(
+        "Category", back_populates="parent", cascade="all, delete-orphan"
+    )
+
+    def is_leaf(self) -> bool:
+        return not self.children

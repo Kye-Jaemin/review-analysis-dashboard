@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('dashboard.title') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">{{ t('dashboard.title') }}</h1>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+  <div class="bg-white p-4 rounded shadow-sm">
+    <div class="text-xs text-gray-500">{{ t('dashboard.total_reviews') }}</div>
+    <div class="text-2xl font-semibold mt-1" id="card-total">—</div>
+  </div>
+  <div class="bg-white p-4 rounded shadow-sm">
+    <div class="text-xs text-gray-500">{{ t('dashboard.avg_sentiment_score') }}</div>
+    <div class="text-2xl font-semibold mt-1" id="card-avg-sent">—</div>
+  </div>
+  <div class="bg-white p-4 rounded shadow-sm">
+    <div class="text-xs text-gray-500">{{ t('dashboard.avg_rating') }}</div>
+    <div class="text-2xl font-semibold mt-1" id="card-avg-rating">—</div>
+  </div>
+  <div class="bg-white p-4 rounded shadow-sm">
+    <div class="text-xs text-gray-500">{{ t('dashboard.last_collected') }}</div>
+    <div class="text-base font-medium mt-1" id="card-last">—</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <div class="bg-white p-4 rounded shadow-sm">
+    <div class="text-sm font-medium mb-3">{{ t('dashboard.sentiment_distribution') }}</div>
+    <canvas id="chart-sentiment" height="180"></canvas>
+  </div>
+  <div class="bg-white p-4 rounded shadow-sm">
+    <div class="text-sm font-medium mb-3">{{ t('dashboard.by_source') }}</div>
+    <canvas id="chart-source" height="180"></canvas>
+  </div>
+</div>
+
+<div class="bg-white p-4 rounded shadow-sm mb-6">
+  <div class="text-sm font-medium mb-3">{{ t('dashboard.by_category') }}</div>
+  <canvas id="chart-category" height="120"></canvas>
+</div>
+
+<div class="bg-white p-4 rounded shadow-sm mb-6"
+     x-data="{ mode: 'distribution', period: 'week' }">
+  <div class="flex items-center justify-between mb-3">
+    <div class="text-sm font-medium">{{ t('dashboard.trend') }}</div>
+    <div class="flex gap-2 text-xs">
+      <button @click="mode = 'distribution'; renderTrend(mode, period)"
+              :class="mode === 'distribution' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.mode_distribution') }}</button>
+      <button @click="mode = 'avg'; renderTrend(mode, period)"
+              :class="mode === 'avg' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.mode_avg') }}</button>
+      <span class="mx-2 text-gray-300">|</span>
+      <button @click="period = 'week'; renderTrend(mode, period)"
+              :class="period === 'week' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.weekly') }}</button>
+      <button @click="period = 'month'; renderTrend(mode, period)"
+              :class="period === 'month' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.monthly') }}</button>
+    </div>
+  </div>
+  <canvas id="chart-trend" height="140"></canvas>
+</div>
+
+<div class="bg-white p-4 rounded shadow-sm">
+  <div class="flex items-center justify-between mb-3">
+    <div class="text-sm font-medium">{{ t('dashboard.recent_reviews') }}</div>
+    <a href="/reviews" class="text-xs text-blue-600 hover:underline">{{ t('dashboard.view_all') }}</a>
+  </div>
+  <div id="recent-reviews" class="space-y-2 text-sm">
+    <div class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SENTIMENT_COLORS = {
+  very_positive: '#15803d',
+  positive: '#86efac',
+  neutral: '#9ca3af',
+  negative: '#fdba74',
+  very_negative: '#b91c1c',
+};
+const SENTIMENT_LABELS = {
+  very_positive: {{ t('sentiment.very_positive') | tojson }},
+  positive: {{ t('sentiment.positive') | tojson }},
+  neutral: {{ t('sentiment.neutral') | tojson }},
+  negative: {{ t('sentiment.negative') | tojson }},
+  very_negative: {{ t('sentiment.very_negative') | tojson }},
+};
+const SENTIMENT_ORDER = ['very_negative', 'negative', 'neutral', 'positive', 'very_positive'];
+
+let charts = {};
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); charts[id] = null; }
+}
+
+async function loadStats() {
+  const res = await fetch('/api/stats');
+  const data = await res.json();
+  document.getElementById('card-total').textContent = data.total.toLocaleString();
+  document.getElementById('card-avg-sent').textContent = data.avg_sentiment != null ? data.avg_sentiment.toFixed(2) : '—';
+  document.getElementById('card-avg-rating').textContent = data.avg_rating != null ? data.avg_rating.toFixed(2) : '—';
+  document.getElementById('card-last').textContent = data.last_collected || '—';
+
+  // Sentiment distribution doughnut
+  destroyChart('sentiment');
+  charts.sentiment = new Chart(document.getElementById('chart-sentiment'), {
+    type: 'doughnut',
+    data: {
+      labels: SENTIMENT_ORDER.map(s => SENTIMENT_LABELS[s]),
+      datasets: [{
+        data: SENTIMENT_ORDER.map(s => data.sentiment_distribution[s] || 0),
+        backgroundColor: SENTIMENT_ORDER.map(s => SENTIMENT_COLORS[s]),
+      }],
+    },
+    options: { plugins: { legend: { position: 'right' } } },
+  });
+
+  // By source doughnut
+  destroyChart('source');
+  charts.source = new Chart(document.getElementById('chart-source'), {
+    type: 'doughnut',
+    data: {
+      labels: data.by_source.map(s => s.label),
+      datasets: [{
+        data: data.by_source.map(s => s.count),
+        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'],
+      }],
+    },
+    options: { plugins: { legend: { position: 'right' } } },
+  });
+
+  // By category stacked bar
+  destroyChart('category');
+  charts.category = new Chart(document.getElementById('chart-category'), {
+    type: 'bar',
+    data: {
+      labels: data.by_category.map(c => c.path || '—'),
+      datasets: SENTIMENT_ORDER.map(s => ({
+        label: SENTIMENT_LABELS[s],
+        data: data.by_category.map(c => c.sentiments[s] || 0),
+        backgroundColor: SENTIMENT_COLORS[s],
+      })),
+    },
+    options: {
+      responsive: true,
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+    },
+  });
+
+  renderRecent(data.recent);
+}
+
+function renderRecent(items) {
+  const el = document.getElementById('recent-reviews');
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div class="text-gray-400">{{ t("common.no_data") }}</div>';
+    return;
+  }
+  el.innerHTML = items.map(r => `
+    <div class="border-b border-gray-100 pb-2">
+      <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
+        <span class="font-medium text-gray-700">${escapeHtml(r.source_label)}</span>
+        ${r.author ? '· ' + escapeHtml(r.author) : ''}
+        ${r.posted_at ? '· ' + r.posted_at : ''}
+        ${r.sentiment ? `<span class="ml-auto px-1.5 py-0.5 rounded text-xs sentiment-${r.sentiment}">${SENTIMENT_LABELS[r.sentiment]}</span>` : ''}
+      </div>
+      <div class="text-gray-800 line-clamp-2">${escapeHtml(r.text)}</div>
+    </div>
+  `).join('');
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function renderTrend(mode, period) {
+  const res = await fetch(`/api/stats/trend?mode=${mode}&period=${period}`);
+  const data = await res.json();
+  destroyChart('trend');
+  let datasets;
+  if (mode === 'avg') {
+    datasets = [{
+      label: '{{ t("dashboard.avg_sentiment_score") }}',
+      data: data.points.map(p => p.avg),
+      borderColor: '#3b82f6',
+      backgroundColor: 'rgba(59,130,246,0.1)',
+      tension: 0.3,
+      fill: true,
+    }];
+  } else {
+    datasets = SENTIMENT_ORDER.map(s => ({
+      label: SENTIMENT_LABELS[s],
+      data: data.points.map(p => p[s] || 0),
+      borderColor: SENTIMENT_COLORS[s],
+      backgroundColor: SENTIMENT_COLORS[s],
+      tension: 0.3,
+    }));
+  }
+  charts.trend = new Chart(document.getElementById('chart-trend'), {
+    type: 'line',
+    data: { labels: data.points.map(p => p.bucket), datasets },
+    options: {
+      responsive: true,
+      scales: mode === 'avg' ? { y: { min: 1, max: 5 } } : { y: { beginAtZero: true } },
+    },
+  });
+}
+
+loadStats();
+renderTrend('distribution', 'week');
+</script>
+{% endblock %}

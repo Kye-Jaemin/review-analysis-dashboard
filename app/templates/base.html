@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{{ t('app.name') }}{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .sentiment-very_positive { background-color: #15803d; color: white; }
+    .sentiment-positive { background-color: #86efac; color: #064e3b; }
+    .sentiment-neutral { background-color: #d1d5db; color: #1f2937; }
+    .sentiment-negative { background-color: #fdba74; color: #7c2d12; }
+    .sentiment-very_negative { background-color: #b91c1c; color: white; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+  <div class="flex min-h-screen">
+    <aside class="w-56 bg-white border-r border-gray-200 flex flex-col">
+      <div class="px-4 py-5 border-b border-gray-100">
+        <a href="/" class="block">
+          <div class="text-lg font-semibold">{{ t('app.name') }}</div>
+          <div class="text-xs text-gray-500 mt-1 leading-tight">{{ t('app.tagline') }}</div>
+        </a>
+      </div>
+      <nav class="flex-1 px-2 py-3 space-y-1 text-sm">
+        {% set nav = [
+          ('/', 'nav.dashboard', '📊'),
+          ('/sources', 'nav.sources', '🔗'),
+          ('/categories', 'nav.categories', '🗂'),
+          ('/analyze', 'nav.analyze', '✨'),
+          ('/reviews', 'nav.reviews', '💬'),
+        ] %}
+        {% for path, key, icon in nav %}
+          {% set active = request.url.path == path or (path != '/' and request.url.path.startswith(path)) %}
+          <a href="{{ path }}" class="flex items-center gap-2 px-3 py-2 rounded {{ 'bg-blue-50 text-blue-700 font-medium' if active else 'text-gray-700 hover:bg-gray-100' }}">
+            <span>{{ icon }}</span><span>{{ t(key) }}</span>
+          </a>
+        {% endfor %}
+      </nav>
+      <div class="px-3 py-3 border-t border-gray-100 text-xs">
+        <div class="text-gray-500 mb-1">{{ t('common.language') }}</div>
+        <div class="flex gap-1">
+          {% for code in supported_langs %}
+            <a href="/set-language/{{ code }}"
+               class="px-2 py-1 rounded {{ 'bg-blue-600 text-white' if lang == code else 'bg-gray-100 hover:bg-gray-200' }}">
+              {{ 'EN' if code == 'en' else '한국어' }}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    </aside>
+
+    <main class="flex-1 overflow-x-hidden">
+      <div class="px-8 py-6 max-w-7xl mx-auto">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,28 @@
+<div id="job-{{ job.id }}"
+     {% if job.status in ('pending', 'running') %}hx-get="/jobs/{{ job.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}
+     class="border border-gray-200 rounded p-3 bg-white text-sm">
+  <div class="flex items-center justify-between mb-2">
+    <div class="font-medium">
+      {% if job.kind == 'collection' %}{{ t('sources.collecting') }}{% else %}{{ t('analyze.running') }}{% endif %}
+    </div>
+    <span class="px-2 py-0.5 text-xs rounded
+      {% if job.status == 'succeeded' %}bg-green-100 text-green-700
+      {% elif job.status == 'failed' %}bg-red-100 text-red-700
+      {% elif job.status == 'running' %}bg-blue-100 text-blue-700
+      {% else %}bg-gray-100 text-gray-700{% endif %}">
+      {{ t('jobs.' + job.status) }}
+    </span>
+  </div>
+  <div class="w-full bg-gray-200 rounded h-2 overflow-hidden">
+    <div class="bg-blue-500 h-2 transition-all" style="width: {{ job.progress }}%"></div>
+  </div>
+  <div class="mt-2 text-xs text-gray-600">
+    {% if job.total > 0 %}
+      {{ t('jobs.progress', processed=job.processed, total=job.total) }}
+    {% endif %}
+    {% if job.message %} — {{ job.message }}{% endif %}
+  </div>
+  {% if job.error %}
+    <div class="mt-2 text-xs text-red-600">{{ job.error }}</div>
+  {% endif %}
+</div>

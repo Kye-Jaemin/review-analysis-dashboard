@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('reviews.title') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-semibold">{{ t('reviews.title') }}</h1>
+  <div class="flex gap-2 text-sm">
+    <span class="text-gray-500 mr-1">{{ t('reviews.export') }}:</span>
+    <a href="/export?format=csv&{{ qs }}" class="px-3 py-1 border rounded hover:bg-gray-50">{{ t('reviews.export_csv') }}</a>
+    <a href="/export?format=json&{{ qs }}" class="px-3 py-1 border rounded hover:bg-gray-50">{{ t('reviews.export_json') }}</a>
+    <a href="/export?format=xlsx&{{ qs }}" class="px-3 py-1 border rounded hover:bg-gray-50">{{ t('reviews.export_xlsx') }}</a>
+  </div>
+</div>
+
+<div class="flex gap-6">
+  <aside class="w-64 bg-white p-4 rounded shadow-sm">
+    <form method="get" action="/reviews" class="space-y-3 text-sm">
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">{{ t('reviews.filter.source') }}</label>
+        <select name="source_id" class="w-full border rounded px-2 py-1">
+          <option value="">{{ t('common.all') }}</option>
+          {% for s in sources %}
+            <option value="{{ s.id }}" {% if filters.source_id == s.id %}selected{% endif %}>{{ s.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">{{ t('reviews.filter.category') }}</label>
+        <select name="category_id" class="w-full border rounded px-2 py-1">
+          <option value="">{{ t('common.all') }}</option>
+          {% for c in categories %}
+            <option value="{{ c.id }}" {% if filters.category_id == c.id %}selected{% endif %}>{{ c.path }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">{{ t('reviews.filter.sentiment') }}</label>
+        <div class="space-y-1">
+          {% for s in ['very_positive','positive','neutral','negative','very_negative'] %}
+            <label class="flex items-center gap-2 text-xs">
+              <input type="checkbox" name="sentiment" value="{{ s }}" {% if s in filters.sentiment %}checked{% endif %} />
+              <span class="px-1.5 py-0.5 rounded sentiment-{{ s }}">{{ t('sentiment.' + s) }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">{{ t('reviews.filter.from') }}</label>
+        <input type="date" name="from_date" value="{{ filters.from_date or '' }}" class="w-full border rounded px-2 py-1" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">{{ t('reviews.filter.to') }}</label>
+        <input type="date" name="to_date" value="{{ filters.to_date or '' }}" class="w-full border rounded px-2 py-1" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">{{ t('reviews.filter.keyword') }}</label>
+        <input type="text" name="q" value="{{ filters.q or '' }}" class="w-full border rounded px-2 py-1" />
+      </div>
+      <button type="submit" class="w-full bg-blue-600 text-white py-1.5 rounded">{{ t('common.submit') }}</button>
+    </form>
+  </aside>
+
+  <div class="flex-1 min-w-0">
+    <div class="bg-white rounded shadow-sm overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-xs text-gray-600">
+          <tr>
+            <th class="px-3 py-2 text-left">{{ t('reviews.table.source') }}</th>
+            <th class="px-3 py-2 text-left">{{ t('reviews.table.author') }}</th>
+            <th class="px-3 py-2 text-left">{{ t('reviews.table.posted_at') }}</th>
+            <th class="px-3 py-2 text-left">{{ t('reviews.table.rating') }}</th>
+            <th class="px-3 py-2 text-left">{{ t('reviews.table.text') }}</th>
+            <th class="px-3 py-2 text-left">{{ t('reviews.table.category') }}</th>
+            <th class="px-3 py-2 text-left">{{ t('reviews.table.sentiment') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in reviews %}
+            <tr class="border-t border-gray-100">
+              <td class="px-3 py-2 whitespace-nowrap">{{ r.source.label }}</td>
+              <td class="px-3 py-2 whitespace-nowrap">{{ r.author or '—' }}</td>
+              <td class="px-3 py-2 whitespace-nowrap text-xs text-gray-600">{{ r.posted_at.strftime('%Y-%m-%d') if r.posted_at else '—' }}</td>
+              <td class="px-3 py-2 whitespace-nowrap">{{ '%.1f' % r.rating if r.rating else '—' }}</td>
+              <td class="px-3 py-2 max-w-md">
+                <div class="line-clamp-2">{{ r.text }}</div>
+              </td>
+              <td class="px-3 py-2 text-xs">{{ r.analysis.category.path if r.analysis and r.analysis.category else '—' }}</td>
+              <td class="px-3 py-2">
+                {% if r.analysis and r.analysis.sentiment %}
+                  <span class="text-xs px-1.5 py-0.5 rounded sentiment-{{ r.analysis.sentiment.value }}">
+                    {{ t('sentiment.' + r.analysis.sentiment.value) }}
+                  </span>
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not reviews %}
+            <tr><td colspan="7" class="text-center text-gray-400 py-8">{{ t('common.no_data') }}</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if total_pages > 1 %}
+      <div class="flex justify-center gap-1 mt-4 text-sm">
+        {% for p in range(1, total_pages + 1) %}
+          <a href="?{{ pagination_qs(p) }}"
+             class="px-3 py-1 rounded {{ 'bg-blue-600 text-white' if p == page else 'bg-white border hover:bg-gray-50' }}">
+            {{ p }}
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

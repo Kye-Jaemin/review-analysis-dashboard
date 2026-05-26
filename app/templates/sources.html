@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('sources.title') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-semibold">{{ t('sources.title') }}</h1>
+</div>
+
+<!-- Add source form -->
+<div class="bg-white p-5 rounded shadow-sm mb-6" x-data="addSource()">
+  <h2 class="text-lg font-medium mb-4">{{ t('sources.add_title') }}</h2>
+
+  <div class="flex gap-3 mb-4">
+    <label class="text-sm">{{ t('sources.type') }}</label>
+    <select x-model="type" @change="reset()" class="border rounded px-2 py-1 text-sm">
+      <option value="google_play">{{ t('sources.type_google_play') }}</option>
+      <option value="app_store">{{ t('sources.type_app_store') }}</option>
+      <option value="reddit">{{ t('sources.type_reddit') }}</option>
+      <option value="web">{{ t('sources.type_web') }}</option>
+    </select>
+  </div>
+
+  <!-- Name-search flow for google_play / app_store / reddit -->
+  <template x-if="type !== 'web'">
+    <div>
+      <div class="flex gap-2 mb-3">
+        <input type="text" x-model="query" @input.debounce.300ms="search()"
+               :placeholder="$root.dataset.searchPlaceholder"
+               class="flex-1 border rounded px-3 py-2 text-sm" />
+        <select x-show="type !== 'reddit'" x-model="country" class="border rounded px-2 py-1 text-sm">
+          <option value="us">US</option><option value="kr">KR</option>
+          <option value="jp">JP</option><option value="gb">GB</option>
+        </select>
+      </div>
+
+      <div x-show="searching" class="text-xs text-gray-500 mb-2">{{ t('common.loading') }}</div>
+
+      <div x-show="candidates.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+        <template x-for="c in candidates" :key="c.id">
+          <button type="button" @click="select(c)"
+                  :class="selected && selected.id === c.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'"
+                  class="border rounded p-3 text-left flex items-center gap-3">
+            <img x-show="c.icon_url" :src="c.icon_url" class="w-10 h-10 rounded" />
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-sm truncate" x-text="c.title"></div>
+              <div class="text-xs text-gray-500 truncate" x-text="c.subtitle"></div>
+            </div>
+          </button>
+        </template>
+      </div>
+
+      <template x-if="selected">
+        <form @submit.prevent="save()" class="space-y-3 border-t pt-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-gray-500">{{ t('sources.label') }}</label>
+              <input type="text" x-model="label" class="w-full border rounded px-2 py-1 text-sm" />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">{{ t('sources.max_count') }}</label>
+              <input type="number" x-model.number="maxCount" min="1" max="1000" class="w-full border rounded px-2 py-1 text-sm" />
+            </div>
+          </div>
+
+          <template x-if="type === 'reddit'">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs text-gray-500">{{ t('sources.search_query') }}</label>
+                <input type="text" x-model="redditQuery" class="w-full border rounded px-2 py-1 text-sm" />
+              </div>
+              <div>
+                <label class="text-xs text-gray-500">{{ t('sources.sort') }}</label>
+                <select x-model="redditSort" class="w-full border rounded px-2 py-1 text-sm">
+                  <option value="new">new</option><option value="top">top</option>
+                  <option value="hot">hot</option><option value="relevance">relevance</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs text-gray-500">{{ t('sources.time_filter') }}</label>
+                <select x-model="redditTime" class="w-full border rounded px-2 py-1 text-sm">
+                  <option value="day">day</option><option value="week">week</option>
+                  <option value="month">month</option><option value="year">year</option>
+                  <option value="all">all</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-2">
+                <input type="checkbox" x-model="includeComments" id="rc" />
+                <label for="rc" class="text-xs">{{ t('sources.include_comments') }}</label>
+              </div>
+            </div>
+          </template>
+
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+            {{ t('common.add') }}
+          </button>
+        </form>
+      </template>
+    </div>
+  </template>
+
+  <!-- Web URL form -->
+  <template x-if="type === 'web'">
+    <form @submit.prevent="saveWeb()" class="space-y-3">
+      <div>
+        <label class="text-xs text-gray-500">{{ t('sources.label') }}</label>
+        <input type="text" x-model="label" class="w-full border rounded px-2 py-1 text-sm" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">{{ t('sources.url_list') }}</label>
+        <textarea x-model="urls" rows="3" class="w-full border rounded px-2 py-1 text-sm font-mono"></textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" x-model="dynamic" /> {{ t('sources.dynamic') }}
+        </label>
+        <div>
+          <label class="text-xs text-gray-500">{{ t('sources.wait_for') }}</label>
+          <input type="text" x-model="waitFor" placeholder=".review-item" class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">{{ t('sources.scroll') }}</label>
+          <input type="number" x-model.number="scroll" min="0" max="50" class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">{{ t('sources.selector_item') }}</label>
+          <input type="text" x-model="selItem" class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">{{ t('sources.selector_text') }}</label>
+          <input type="text" x-model="selText" class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">{{ t('sources.selector_author') }}</label>
+          <input type="text" x-model="selAuthor" class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">{{ t('sources.selector_date') }}</label>
+          <input type="text" x-model="selDate" class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">{{ t('sources.selector_rating') }}</label>
+          <input type="text" x-model="selRating" class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+      </div>
+      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+        {{ t('common.add') }}
+      </button>
+    </form>
+  </template>
+</div>
+
+<!-- Source list -->
+<div data-search-placeholder="{{ t('sources.search_placeholder') }}" class="space-y-3">
+  {% if not sources %}
+    <div class="bg-white p-6 rounded text-center text-gray-500 text-sm">{{ t('sources.no_sources') }}</div>
+  {% endif %}
+  {% for src in sources %}
+    <div class="bg-white p-4 rounded shadow-sm flex items-center gap-4">
+      {% if src.icon_url %}
+        <img src="{{ src.icon_url }}" class="w-12 h-12 rounded" alt="" />
+      {% else %}
+        <div class="w-12 h-12 rounded bg-gray-200 flex items-center justify-center text-xs text-gray-500">{{ src.type.value[:2].upper() }}</div>
+      {% endif %}
+      <div class="flex-1 min-w-0">
+        <div class="font-medium">{{ src.label }}</div>
+        <div class="text-xs text-gray-500 truncate">
+          {{ src.type.value }} · {{ src.display_name or '' }}
+        </div>
+        <div class="text-xs text-gray-400 mt-1">
+          {% set last = last_runs.get(src.id) %}
+          {{ t('sources.last_run') }}:
+          {% if last %}{{ last.finished_at or last.started_at }} · {{ last.new_count }} new{% else %}{{ t('sources.never') }}{% endif %}
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <form method="post" action="/sources/{{ src.id }}/collect"
+              hx-post="/sources/{{ src.id }}/collect"
+              hx-target="#job-area-{{ src.id }}"
+              hx-swap="innerHTML">
+          <button type="submit" class="bg-blue-600 text-white text-sm px-3 py-1.5 rounded hover:bg-blue-700">{{ t('sources.collect') }}</button>
+        </form>
+        <form method="post" action="/sources/{{ src.id }}/delete"
+              onsubmit="return confirm('{{ t('common.confirm_delete') }}');">
+          <button type="submit" class="text-red-600 text-sm px-3 py-1.5 hover:bg-red-50 rounded">{{ t('common.delete') }}</button>
+        </form>
+      </div>
+    </div>
+    <div id="job-area-{{ src.id }}"></div>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function addSource() {
+  return {
+    type: 'google_play',
+    query: '', country: 'us',
+    candidates: [], searching: false, selected: null,
+    label: '', maxCount: 100,
+    redditQuery: '', redditSort: 'new', redditTime: 'month', includeComments: false,
+    urls: '', dynamic: false, waitFor: '', scroll: 0,
+    selItem: '', selText: '', selAuthor: '', selDate: '', selRating: '',
+    reset() {
+      this.query=''; this.candidates=[]; this.selected=null; this.label='';
+    },
+    async search() {
+      if (!this.query.trim()) { this.candidates = []; return; }
+      this.searching = true;
+      try {
+        const params = new URLSearchParams({ type: this.type, query: this.query, country: this.country });
+        const res = await fetch('/sources/search?' + params);
+        const data = await res.json();
+        this.candidates = data.results || [];
+      } finally { this.searching = false; }
+    },
+    select(c) {
+      this.selected = c;
+      this.label = c.title;
+    },
+    async save() {
+      const body = {
+        type: this.type,
+        label: this.label,
+        display_name: this.selected.title,
+        icon_url: this.selected.icon_url,
+        config: { ...this.selected.config, max_count: this.maxCount },
+      };
+      if (this.type === 'reddit') {
+        body.config.search_query = this.redditQuery;
+        body.config.sort = this.redditSort;
+        body.config.time_filter = this.redditTime;
+        body.config.include_comments = this.includeComments;
+        body.config.max_submissions = this.maxCount;
+      }
+      const res = await fetch('/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) location.reload();
+      else alert('Failed to add source');
+    },
+    async saveWeb() {
+      const urls = this.urls.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (urls.length === 0) { alert('Provide at least one URL'); return; }
+      const body = {
+        type: 'web',
+        label: this.label || urls[0],
+        config: {
+          urls,
+          dynamic: this.dynamic,
+          wait_for: this.waitFor,
+          scroll: this.scroll,
+          item_selector: this.selItem,
+          text_selector: this.selText,
+          author_selector: this.selAuthor,
+          date_selector: this.selDate,
+          rating_selector: this.selRating,
+        },
+      };
+      const res = await fetch('/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) location.reload();
+      else alert('Failed to add source');
+    },
+  };
+}
+</script>
+{% endblock %}

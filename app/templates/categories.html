@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('categories.title') }} — {{ t('app.name') }}{% endblock %}
+
+{% macro render_node(node) %}
+  <li class="ml-4 mt-2">
+    <div class="bg-white border rounded p-3 flex items-start gap-3"
+         x-data="{ editing: false, name: '{{ node.name|e }}', desc: {{ node.description|tojson }} }">
+      <div class="flex-1 min-w-0">
+        <template x-if="!editing">
+          <div>
+            <div class="font-medium text-sm">{{ node.path }}</div>
+            <div class="text-xs text-gray-500 mt-1">{{ node.description }}</div>
+          </div>
+        </template>
+        <template x-if="editing">
+          <form @submit.prevent="
+            fetch('/categories/{{ node.id }}', {
+              method: 'PATCH',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({name, description: desc})
+            }).then(r => r.ok ? location.reload() : alert('error'))" class="space-y-2">
+            <input x-model="name" class="w-full border rounded px-2 py-1 text-sm" placeholder="{{ t('categories.name') }}" />
+            <textarea x-model="desc" rows="2" class="w-full border rounded px-2 py-1 text-xs" placeholder="{{ t('categories.description') }}"></textarea>
+            <div class="flex gap-2">
+              <button type="submit" class="bg-blue-600 text-white text-xs px-3 py-1 rounded">{{ t('common.save') }}</button>
+              <button type="button" @click="editing=false" class="text-xs px-3 py-1 rounded bg-gray-100">{{ t('common.cancel') }}</button>
+            </div>
+          </form>
+        </template>
+      </div>
+      <div class="flex gap-1 text-xs">
+        <button @click="editing = !editing" class="px-2 py-1 hover:bg-gray-100 rounded">{{ t('common.edit') }}</button>
+        <button @click="addChild({{ node.id }})" class="px-2 py-1 hover:bg-gray-100 rounded">{{ t('categories.add_child') }}</button>
+        <button onclick="if(confirm('{{ t('common.confirm_delete') }}'))
+          fetch('/categories/{{ node.id }}', {method:'DELETE'}).then(r => location.reload())"
+          class="px-2 py-1 hover:bg-red-50 text-red-600 rounded">{{ t('common.delete') }}</button>
+      </div>
+    </div>
+    {% if node.children %}
+      <ul>
+        {% for child in node.children %}
+          {{ render_node(child) }}
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </li>
+{% endmacro %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-semibold">{{ t('categories.title') }}</h1>
+  <button onclick="addChild(null)" class="bg-blue-600 text-white text-sm px-4 py-2 rounded hover:bg-blue-700">
+    {{ t('categories.add_root') }}
+  </button>
+</div>
+
+{% if not tree %}
+  <div class="bg-white p-6 rounded text-center text-gray-500 text-sm">{{ t('categories.no_categories') }}</div>
+{% else %}
+  <ul>
+    {% for root in tree %}
+      {{ render_node(root) }}
+    {% endfor %}
+  </ul>
+{% endif %}
+
+<!-- Add modal -->
+<div id="add-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+  <div class="bg-white rounded p-5 w-96">
+    <h3 class="text-lg font-medium mb-3">{{ t('common.add') }}</h3>
+    <form onsubmit="submitNew(event)" class="space-y-3">
+      <input id="new-name" type="text" placeholder="{{ t('categories.name') }}" class="w-full border rounded px-2 py-1 text-sm" required />
+      <textarea id="new-desc" rows="3" placeholder="{{ t('categories.description') }}" class="w-full border rounded px-2 py-1 text-xs"></textarea>
+      <input type="hidden" id="new-parent" />
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeModal()" class="text-sm px-3 py-1 rounded bg-gray-100">{{ t('common.cancel') }}</button>
+        <button type="submit" class="text-sm px-3 py-1 rounded bg-blue-600 text-white">{{ t('common.add') }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function addChild(parentId) {
+  document.getElementById('new-parent').value = parentId || '';
+  document.getElementById('new-name').value = '';
+  document.getElementById('new-desc').value = '';
+  document.getElementById('add-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('new-name').focus(), 50);
+}
+function closeModal() {
+  document.getElementById('add-modal').classList.add('hidden');
+}
+async function submitNew(e) {
+  e.preventDefault();
+  const body = {
+    name: document.getElementById('new-name').value,
+    description: document.getElementById('new-desc').value,
+    parent_id: document.getElementById('new-parent').value || null,
+  };
+  if (body.parent_id) body.parent_id = parseInt(body.parent_id);
+  const res = await fetch('/categories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) location.reload();
+  else alert('Failed');
+}
+</script>
+{% endblock %}

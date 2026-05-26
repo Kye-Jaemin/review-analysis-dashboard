@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: review-dashboard
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && playwright install chromium --with-deps && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: review-db
+          property: connectionString
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-4-5-20251001
+      - key: ANTHROPIC_ALLOWED_MODELS
+        value: claude-haiku-4-5-20251001,claude-sonnet-4-6,claude-opus-4-7
+      - key: REDDIT_CLIENT_ID
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_USER_AGENT
+        sync: false
+      - key: SCRAPER_USER_AGENT
+        value: review-collector-bot/0.1
+      - key: PLAYWRIGHT_ENABLED
+        value: "true"
+      - key: DEFAULT_LANGUAGE
+        value: en
+      - key: APP_ENV
+        value: production
+
+databases:
+  - name: review-db
+    plan: free
+    databaseName: reviews
+    user: reviews

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('analyze.title') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">{{ t('analyze.title') }}</h1>
+
+<div class="bg-white p-5 rounded shadow-sm mb-6 max-w-2xl">
+  <div class="grid grid-cols-3 gap-3 text-center mb-5">
+    <div class="border rounded p-3">
+      <div class="text-xs text-gray-500">{{ t('analyze.unanalyzed', count='') }}</div>
+      <div class="text-2xl font-semibold mt-1">{{ counts.unanalyzed }}</div>
+    </div>
+    <div class="border rounded p-3">
+      <div class="text-xs text-gray-500">{{ t('analyze.failed', count='') }}</div>
+      <div class="text-2xl font-semibold mt-1">{{ counts.failed }}</div>
+    </div>
+    <div class="border rounded p-3">
+      <div class="text-xs text-gray-500">{{ t('analyze.total', count='') }}</div>
+      <div class="text-2xl font-semibold mt-1">{{ counts.total }}</div>
+    </div>
+  </div>
+
+  <form method="post" action="/analyze"
+        hx-post="/analyze" hx-target="#analyze-job-area" hx-swap="innerHTML"
+        class="space-y-4">
+    <div>
+      <label class="text-sm font-medium block mb-1">{{ t('analyze.mode') }}</label>
+      <select name="mode" class="border rounded px-3 py-2 text-sm w-full">
+        <option value="unanalyzed">{{ t('analyze.mode_unanalyzed') }}</option>
+        <option value="failed">{{ t('analyze.mode_failed') }}</option>
+        <option value="all">{{ t('analyze.mode_all') }}</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-sm font-medium block mb-1">{{ t('analyze.model') }}</label>
+      <select name="model" class="border rounded px-3 py-2 text-sm w-full">
+        {% for m in allowed_models %}
+          <option value="{{ m }}" {% if m == last_model %}selected{% endif %}>
+            {{ m }}{% if 'haiku' in m %} — fast / low cost{% elif 'sonnet' in m %} — balanced{% elif 'opus' in m %} — best accuracy{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="text-sm font-medium block mb-1">{{ t('analyze.summary_language') }}</label>
+      <select name="summary_lang" class="border rounded px-3 py-2 text-sm w-full">
+        <option value="en">English</option>
+        <option value="ko">한국어</option>
+        <option value="auto">{{ t('analyze.auto') }}</option>
+      </select>
+    </div>
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+      {{ t('analyze.run') }}
+    </button>
+  </form>
+
+  {% if not settings.ANTHROPIC_API_KEY %}
+    <div class="mt-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+      ⚠️ ANTHROPIC_API_KEY is not set. Analysis will fail until you configure it in .env.
+    </div>
+  {% endif %}
+</div>
+
+<div id="analyze-job-area"></div>
+{% endblock %}
