@@ -26,18 +26,39 @@
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
   <div class="bg-white p-4 rounded shadow-sm">
-    <div class="text-sm font-medium mb-3">{{ t('dashboard.sentiment_distribution') }}</div>
+    <div class="flex items-baseline justify-between mb-3">
+      <div class="text-sm font-medium">{{ t('dashboard.sentiment_distribution') }}</div>
+      <div class="text-xs text-gray-500" id="sentiment-total">—</div>
+    </div>
     <canvas id="chart-sentiment" height="180"></canvas>
+    <table class="w-full text-xs mt-3" id="sentiment-table">
+      <thead class="text-gray-500">
+        <tr>
+          <th class="text-left py-1">{{ t('sentiment.very_positive') }}</th>
+          <th class="text-right py-1">{{ t('dashboard.count_label') }}</th>
+          <th class="text-right py-1">{{ t('dashboard.percent_label') }}</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </div>
   <div class="bg-white p-4 rounded shadow-sm">
-    <div class="text-sm font-medium mb-3">{{ t('dashboard.by_source') }}</div>
+    <div class="flex items-baseline justify-between mb-3">
+      <div class="text-sm font-medium">{{ t('dashboard.by_source') }}</div>
+      <div class="text-xs text-gray-500" id="source-total">—</div>
+    </div>
     <canvas id="chart-source" height="180"></canvas>
+    <div class="mt-3" id="source-table"></div>
   </div>
 </div>
 
 <div class="bg-white p-4 rounded shadow-sm mb-6">
-  <div class="text-sm font-medium mb-3">{{ t('dashboard.by_category') }}</div>
+  <div class="flex items-baseline justify-between mb-3">
+    <div class="text-sm font-medium">{{ t('dashboard.by_category') }}</div>
+    <div class="text-xs text-gray-500" id="category-total">—</div>
+  </div>
   <canvas id="chart-category" height="120"></canvas>
+  <div class="mt-3" id="category-table"></div>
 </div>
 
 <div class="bg-white p-4 rounded shadow-sm mb-6"
@@ -90,7 +111,14 @@ const SENTIMENT_LABELS = {
   negative: {{ t('sentiment.negative') | tojson }},
   very_negative: {{ t('sentiment.very_negative') | tojson }},
 };
-const SENTIMENT_ORDER = ['very_negative', 'negative', 'neutral', 'positive', 'very_positive'];
+const SOURCE_TYPE_LABELS = {
+  google_play: {{ t('source_type.google_play') | tojson }},
+  app_store: {{ t('source_type.app_store') | tojson }},
+  reddit: {{ t('source_type.reddit') | tojson }},
+  web: {{ t('source_type.web') | tojson }},
+};
+const SENTIMENT_ORDER = ['very_positive', 'positive', 'neutral', 'negative', 'very_negative'];
+const SOURCE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#0ea5e9', '#a855f7'];
 
 let charts = {};
 
@@ -98,15 +126,42 @@ function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); charts[id] = null; }
 }
 
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function pct(n, total) {
+  if (!total) return '0.0%';
+  return ((n / total) * 100).toFixed(1) + '%';
+}
+
+const ANALYZED_OF_TOTAL = {{ t('dashboard.analyzed_of_total', analyzed='__A__', total='__T__') | tojson }};
+function formatAnalyzed(analyzed, total) {
+  return ANALYZED_OF_TOTAL
+    .replace('__A__', analyzed.toLocaleString())
+    .replace('__T__', total.toLocaleString());
+}
+
 async function loadStats() {
   const res = await fetch('/api/stats');
   const data = await res.json();
   document.getElementById('card-total').textContent = data.total.toLocaleString();
   document.getElementById('card-avg-sent').textContent = data.avg_sentiment != null ? data.avg_sentiment.toFixed(2) : '—';
-  document.getElementById('card-avg-rating').textContent = data.avg_rating != null ? data.avg_rating.toFixed(2) : '—';
-  document.getElementById('card-last').textContent = data.last_collected || '—';
+  document.getElementById('card-avg-rating').textContent = data.avg_rating != null ? data.avg_rating.toFixed(2) + ' ★' : '—';
+  document.getElementById('card-last').textContent = data.last_collected ? data.last_collected.slice(0,16).replace('T',' ') : '—';
 
-  // Sentiment distribution doughnut
+  renderSentiment(data);
+  renderSource(data);
+  renderCategory(data);
+  renderRecent(data.recent);
+}
+
+function renderSentiment(data) {
+  const analyzed = data.analyzed_total || 0;
+  document.getElementById('sentiment-total').textContent =
+    formatAnalyzed(analyzed, data.total || 0);
+
   destroyChart('sentiment');
   charts.sentiment = new Chart(document.getElementById('chart-sentiment'), {
     type: 'doughnut',
@@ -117,24 +172,107 @@ async function loadStats() {
         backgroundColor: SENTIMENT_ORDER.map(s => SENTIMENT_COLORS[s]),
       }],
     },
-    options: { plugins: { legend: { position: 'right' } } },
+    options: {
+      plugins: {
+        legend: { position: 'right' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const v = ctx.parsed;
+              return `${ctx.label}: ${v.toLocaleString()} (${pct(v, analyzed)})`;
+            }
+          }
+        }
+      },
+    },
   });
 
-  // By source doughnut
+  const tbody = document.querySelector('#sentiment-table tbody');
+  const headRow = document.querySelector('#sentiment-table thead tr');
+  // Restore header (since we reused first cell label trick was unnecessary — fix it):
+  headRow.innerHTML =
+    `<th class="text-left py-1 text-gray-500">{{ t('reviews.table.sentiment') }}</th>` +
+    `<th class="text-right py-1 text-gray-500">{{ t('dashboard.count_label') }}</th>` +
+    `<th class="text-right py-1 text-gray-500">{{ t('dashboard.percent_label') }}</th>`;
+  tbody.innerHTML = SENTIMENT_ORDER.map(s => {
+    const c = data.sentiment_distribution[s] || 0;
+    return `<tr class="border-t border-gray-100">
+      <td class="py-1"><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:${SENTIMENT_COLORS[s]}"></span>${escapeHtml(SENTIMENT_LABELS[s])}</td>
+      <td class="text-right">${c.toLocaleString()}</td>
+      <td class="text-right">${pct(c, analyzed)}</td>
+    </tr>`;
+  }).join('') + `<tr class="border-t border-gray-200 font-medium">
+    <td class="py-1">{{ t('dashboard.total_label') }}</td>
+    <td class="text-right">${analyzed.toLocaleString()}</td>
+    <td class="text-right">100.0%</td>
+  </tr>`;
+}
+
+function renderSource(data) {
+  const totalAcross = data.by_source.reduce((sum, s) => sum + (s.count || 0), 0);
+  document.getElementById('source-total').textContent =
+    `{{ t('dashboard.total_label') }}: ${totalAcross.toLocaleString()}`;
+
   destroyChart('source');
   charts.source = new Chart(document.getElementById('chart-source'), {
     type: 'doughnut',
     data: {
-      labels: data.by_source.map(s => s.label),
+      labels: data.by_source.map(s => `${s.label} · ${SOURCE_TYPE_LABELS[s.type] || s.type}`),
       datasets: [{
         data: data.by_source.map(s => s.count),
-        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'],
+        backgroundColor: data.by_source.map((_, i) => SOURCE_COLORS[i % SOURCE_COLORS.length]),
       }],
     },
-    options: { plugins: { legend: { position: 'right' } } },
+    options: {
+      plugins: {
+        legend: { position: 'right' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const v = ctx.parsed;
+              return `${ctx.label}: ${v.toLocaleString()} (${pct(v, totalAcross)})`;
+            }
+          }
+        }
+      },
+    },
   });
 
-  // By category stacked bar
+  document.getElementById('source-table').innerHTML = `
+    <table class="w-full text-xs">
+      <thead class="text-gray-500">
+        <tr>
+          <th class="text-left py-1">${escapeHtml('{{ t('reviews.table.source') }}')}</th>
+          <th class="text-left py-1">${escapeHtml('{{ t('common.type') }}')}</th>
+          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.count_label') }}')}</th>
+          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.percent_label') }}')}</th>
+          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.app_rating') }}')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.by_source.map((s, i) => `
+          <tr class="border-t border-gray-100">
+            <td class="py-1 flex items-center gap-1.5">
+              <span class="inline-block w-2.5 h-2.5 rounded-full" style="background:${SOURCE_COLORS[i % SOURCE_COLORS.length]}"></span>
+              ${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" class="w-4 h-4 rounded">` : ''}
+              <span class="truncate max-w-[12rem]" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
+            </td>
+            <td class="py-1">${escapeHtml(SOURCE_TYPE_LABELS[s.type] || s.type)}</td>
+            <td class="text-right">${(s.count || 0).toLocaleString()}</td>
+            <td class="text-right">${pct(s.count || 0, totalAcross)}</td>
+            <td class="text-right">${(s.type === 'google_play' || s.type === 'app_store') && s.avg_rating != null ? s.avg_rating.toFixed(2) + ' ★' : '—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderCategory(data) {
+  const categoryTotal = data.by_category.reduce((sum, c) => sum + (c.total || 0), 0);
+  document.getElementById('category-total').textContent =
+    `{{ t('dashboard.total_label') }}: ${categoryTotal.toLocaleString()}`;
+
   destroyChart('category');
   charts.category = new Chart(document.getElementById('chart-category'), {
     type: 'bar',
@@ -149,10 +287,46 @@ async function loadStats() {
     options: {
       responsive: true,
       scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            footer: (items) => {
+              if (!items.length) return '';
+              const idx = items[0].dataIndex;
+              const total = data.by_category[idx]?.total || 0;
+              return `{{ t('dashboard.total_label') }}: ${total.toLocaleString()} (${pct(total, categoryTotal)})`;
+            }
+          }
+        }
+      }
     },
   });
 
-  renderRecent(data.recent);
+  document.getElementById('category-table').innerHTML = `
+    <table class="w-full text-xs">
+      <thead class="text-gray-500">
+        <tr>
+          <th class="text-left py-1">${escapeHtml('{{ t('reviews.table.category') }}')}</th>
+          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.count_label') }}')}</th>
+          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.percent_label') }}')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.by_category.map(c => `
+          <tr class="border-t border-gray-100">
+            <td class="py-1">${escapeHtml(c.path || '—')}</td>
+            <td class="text-right">${(c.total || 0).toLocaleString()}</td>
+            <td class="text-right">${pct(c.total || 0, categoryTotal)}</td>
+          </tr>
+        `).join('')}
+        <tr class="border-t border-gray-200 font-medium">
+          <td class="py-1">{{ t('dashboard.total_label') }}</td>
+          <td class="text-right">${categoryTotal.toLocaleString()}</td>
+          <td class="text-right">100.0%</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
 }
 
 function renderRecent(items) {
@@ -165,18 +339,15 @@ function renderRecent(items) {
     <div class="border-b border-gray-100 pb-2">
       <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
         <span class="font-medium text-gray-700">${escapeHtml(r.source_label)}</span>
+        ${r.source_type ? `<span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">${escapeHtml(SOURCE_TYPE_LABELS[r.source_type] || r.source_type)}</span>` : ''}
         ${r.author ? '· ' + escapeHtml(r.author) : ''}
-        ${r.posted_at ? '· ' + r.posted_at : ''}
+        ${r.posted_at ? '· ' + r.posted_at.slice(0,10) : ''}
+        ${r.rating != null ? `· ${r.rating.toFixed(1)}★` : ''}
         ${r.sentiment ? `<span class="ml-auto px-1.5 py-0.5 rounded text-xs sentiment-${r.sentiment}">${SENTIMENT_LABELS[r.sentiment]}</span>` : ''}
       </div>
       <div class="text-gray-800 line-clamp-2">${escapeHtml(r.text)}</div>
     </div>
   `).join('');
-}
-
-function escapeHtml(s) {
-  if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 async function renderTrend(mode, period) {

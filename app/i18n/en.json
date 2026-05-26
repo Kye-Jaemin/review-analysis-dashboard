@@ -56,7 +56,18 @@
     "mode_distribution": "5-band distribution",
     "mode_avg": "Average score",
     "weekly": "Weekly",
-    "monthly": "Monthly"
+    "monthly": "Monthly",
+    "analyzed_of_total": "Analyzed: {analyzed} / {total}",
+    "app_rating": "App rating",
+    "count_label": "Count",
+    "percent_label": "%",
+    "total_label": "Total"
+  },
+  "source_type": {
+    "google_play": "Google Play",
+    "app_store": "Apple App Store",
+    "reddit": "Reddit",
+    "web": "Web"
   },
   "sentiment": {
     "very_positive": "Very positive",

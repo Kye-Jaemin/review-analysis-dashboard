@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Analysis, Category, Review, Sentiment, Source
+from app.models import Analysis, Category, Review, Source
 
 SENTIMENT_ORDER = ["very_negative", "negative", "neutral", "positive", "very_positive"]
+
+
+def _enum_str(v) -> str:
+    return v.value if hasattr(v, "value") else str(v)
 
 
 async def summary(session: AsyncSession) -> dict:
@@ -17,6 +20,13 @@ async def summary(session: AsyncSession) -> dict:
     avg_rating = (await session.execute(select(func.avg(Review.rating)))).scalar()
     avg_sentiment = (await session.execute(select(func.avg(Analysis.sentiment_score)))).scalar()
     last_collected = (await session.execute(select(func.max(Review.collected_at)))).scalar()
+
+    # Total reviews that have a successful sentiment label.
+    analyzed_total = (
+        await session.execute(
+            select(func.count(Analysis.id)).where(Analysis.sentiment.is_not(None))
+        )
+    ).scalar() or 0
 
     sent_dist: dict[str, int] = {s: 0 for s in SENTIMENT_ORDER}
     rows = (
@@ -27,21 +37,39 @@ async def summary(session: AsyncSession) -> dict:
     for sent, c in rows:
         if sent is None:
             continue
-        key = sent.value if hasattr(sent, "value") else str(sent)
-        sent_dist[key] = c
+        sent_dist[_enum_str(sent)] = c
 
-    # by source
+    # by source — include type, display_name, icon_url, avg_rating
     by_source_rows = (
         await session.execute(
-            select(Source.id, Source.label, func.count(Review.id))
+            select(
+                Source.id,
+                Source.label,
+                Source.type,
+                Source.display_name,
+                Source.icon_url,
+                func.count(Review.id),
+                func.avg(Review.rating),
+            )
             .join(Review, Review.source_id == Source.id)
-            .group_by(Source.id, Source.label)
+            .group_by(Source.id, Source.label, Source.type, Source.display_name, Source.icon_url)
             .order_by(func.count(Review.id).desc())
         )
     ).all()
-    by_source = [{"id": sid, "label": label, "count": c} for sid, label, c in by_source_rows]
+    by_source = [
+        {
+            "id": sid,
+            "label": label,
+            "type": _enum_str(stype),
+            "display_name": dname,
+            "icon_url": icon,
+            "count": int(c or 0),
+            "avg_rating": float(ar) if ar is not None else None,
+        }
+        for sid, label, stype, dname, icon, c, ar in by_source_rows
+    ]
 
-    # by category
+    # by category — include total per category and percent within all analyzed
     by_cat_q = (
         await session.execute(
             select(Category.id, Category.path, Analysis.sentiment, func.count(Analysis.id))
@@ -52,10 +80,13 @@ async def summary(session: AsyncSession) -> dict:
     ).all()
     cat_map: dict[int, dict] = {}
     for cid, path, sent, c in by_cat_q:
-        node = cat_map.setdefault(cid, {"id": cid, "path": path, "sentiments": {s: 0 for s in SENTIMENT_ORDER}})
+        node = cat_map.setdefault(
+            cid,
+            {"id": cid, "path": path, "sentiments": {s: 0 for s in SENTIMENT_ORDER}, "total": 0},
+        )
         if sent is not None:
-            key = sent.value if hasattr(sent, "value") else str(sent)
-            node["sentiments"][key] = c
+            node["sentiments"][_enum_str(sent)] = c
+            node["total"] += c
     by_category = sorted(cat_map.values(), key=lambda x: x["path"])
 
     # recent
@@ -72,8 +103,10 @@ async def summary(session: AsyncSession) -> dict:
         recent.append({
             "id": r.id,
             "source_label": r.source.label if r.source else "—",
+            "source_type": _enum_str(r.source.type) if r.source else None,
             "author": r.author,
             "posted_at": r.posted_at.isoformat() if r.posted_at else None,
+            "rating": float(r.rating) if r.rating is not None else None,
             "text": (r.text or "")[:300],
             "sentiment": (
                 r.analysis.sentiment.value
@@ -84,6 +117,7 @@ async def summary(session: AsyncSession) -> dict:
 
     return {
         "total": total,
+        "analyzed_total": int(analyzed_total),
         "avg_rating": float(avg_rating) if avg_rating is not None else None,
         "avg_sentiment": float(avg_sentiment) if avg_sentiment is not None else None,
         "last_collected": last_collected.isoformat() if last_collected else None,
@@ -116,8 +150,7 @@ async def trend(session: AsyncSession, mode: str = "distribution", period: str =
             continue
         key = _bucket_key(posted_at, period)
         b = buckets.setdefault(key, {s: 0 for s in SENTIMENT_ORDER} | {"sum_score": 0, "count": 0})
-        ks = sent.value if hasattr(sent, "value") else str(sent)
-        b[ks] += 1
+        b[_enum_str(sent)] += 1
         if score is not None:
             b["sum_score"] += score
             b["count"] += 1

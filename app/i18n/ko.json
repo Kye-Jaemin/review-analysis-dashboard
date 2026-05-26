@@ -56,7 +56,18 @@
     "mode_distribution": "5단계 분포",
     "mode_avg": "평균 점수",
     "weekly": "주간",
-    "monthly": "월간"
+    "monthly": "월간",
+    "analyzed_of_total": "분석 대상: {analyzed} / {total}",
+    "app_rating": "앱 평점",
+    "count_label": "건수",
+    "percent_label": "%",
+    "total_label": "합계"
+  },
+  "source_type": {
+    "google_play": "Google Play",
+    "app_store": "Apple App Store",
+    "reddit": "Reddit",
+    "web": "웹사이트"
   },
   "sentiment": {
     "very_positive": "매우 긍정",
