@@ -1,0 +1,11 @@
+# Optional: dynamic URL scraping with headless Chromium.
+#
+# Local dev:
+#   pip install -r requirements-playwright.txt
+#   playwright install chromium
+#
+# On Render: keep this OFF unless you're on a paid plan with enough memory.
+# The free plan (512MB) will OOM Chromium. If you do enable it, run
+# `playwright install chromium --with-deps` manually via Render Shell (root
+# is granted there), since the build container is read-only for system pkgs.
+playwright==1.49.0

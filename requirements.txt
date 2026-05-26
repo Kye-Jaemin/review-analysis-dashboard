@@ -18,7 +18,9 @@ beautifulsoup4==4.12.3
 readability-lxml==0.8.1
 lxml==5.3.0
 lxml_html_clean==0.4.1
-playwright==1.49.0
+# playwright is opt-in (see requirements-playwright.txt) — including it in
+# the main requirements triggers Render's auto-browser-install which needs
+# root and fails on managed hosts.
 openpyxl==3.1.5
 structlog==24.4.0
 python-dotenv==1.0.1

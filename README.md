@@ -25,7 +25,10 @@ python -m venv .venv
 # source .venv/bin/activate      # macOS/Linux
 
 pip install -r requirements.txt
-playwright install chromium       # only if you want dynamic web scraping
+
+# Optional: dynamic URL scraping (headless Chromium, ~300MB)
+pip install -r requirements-playwright.txt
+playwright install chromium
 
 cp .env.example .env              # fill in keys you want to use
 alembic upgrade head
