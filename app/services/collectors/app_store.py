@@ -25,6 +25,19 @@ class AppStoreCollector(CollectorBase):
             if not track_id:
                 continue
             rating = r.get("averageUserRating")
+            # Apple's official URL slug lives in trackViewUrl, e.g.
+            #   https://apps.apple.com/us/app/cal-ai-calorie-tracker/id6480417616?uo=4
+            # Extract the slug between '/app/' and '/id'. Deriving it from the
+            # trackName is unreliable because Apple's slug rules don't always
+            # match a naive lowercase-+-hyphenate of the display name.
+            slug = ""
+            track_url = r.get("trackViewUrl") or ""
+            if "/app/" in track_url:
+                tail = track_url.split("/app/", 1)[1]
+                if "/id" in tail:
+                    slug = tail.split("/id", 1)[0]
+            if not slug:
+                slug = (r.get("trackName") or "").strip().lower().replace(" ", "-")
             out.append({
                 "id": str(track_id),
                 "title": r.get("trackName") or "",
@@ -32,7 +45,7 @@ class AppStoreCollector(CollectorBase):
                 "icon_url": r.get("artworkUrl100"),
                 "config": {
                     "app_id": int(track_id),
-                    "app_name": (r.get("trackName") or "").split(":")[0].strip().lower().replace(" ", "-"),
+                    "app_name": slug,
                     "country": country,
                 },
             })
@@ -42,8 +55,13 @@ class AppStoreCollector(CollectorBase):
         from app_store_scraper import AppStore
 
         country = self.config.get("country", "us")
-        app_name = self.config.get("app_name") or "app"
-        app_id = self.config["app_id"]
+        app_name = self.config.get("app_name") or ""
+        app_id = self.config.get("app_id")
+        if not app_id or not app_name:
+            raise RuntimeError(
+                "App Store source config is missing app_id or app_name (URL slug). "
+                "Delete and re-add the source so the slug is rebuilt from trackViewUrl."
+            )
         max_count = int(self.config.get("max_count", 100))
 
         def _run():

@@ -18,13 +18,18 @@ class GooglePlayCollector(CollectorBase):
         results = await asyncio.to_thread(_run)
         out = []
         for r in results or []:
+            app_id = r.get("appId")
+            if not app_id:
+                # google-play-scraper occasionally returns promoted entries with no appId.
+                # Skip them — they can't be collected from.
+                continue
             out.append({
-                "id": r.get("appId"),
-                "title": r.get("title") or r.get("appId"),
+                "id": app_id,
+                "title": r.get("title") or app_id,
                 "subtitle": (r.get("developer") or "") + (f" · {r.get('score'):.1f}★" if r.get("score") else ""),
                 "icon_url": r.get("icon"),
                 "config": {
-                    "app_id": r.get("appId"),
+                    "app_id": app_id,
                     "country": country,
                     "lang": lang,
                 },
@@ -34,7 +39,12 @@ class GooglePlayCollector(CollectorBase):
     async def collect(self) -> AsyncIterator[CollectedItem]:
         from google_play_scraper import Sort, reviews as gp_reviews
 
-        app_id = self.config["app_id"]
+        app_id = self.config.get("app_id")
+        if not app_id:
+            raise RuntimeError(
+                "Google Play app_id is missing from source config. "
+                "Delete and re-add the source — the search result you picked had no appId."
+            )
         country = self.config.get("country", "us")
         lang = self.config.get("lang", "en")
         max_count = int(self.config.get("max_count", 100))
