@@ -3,7 +3,7 @@ services:
     name: review-dashboard
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt && playwright install chromium --with-deps && alembic upgrade head
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
@@ -24,8 +24,12 @@ services:
         sync: false
       - key: SCRAPER_USER_AGENT
         value: review-collector-bot/0.1
+      # Playwright is OFF on free plan (512MB OOM risk).
+      # To enable dynamic URL scraping:
+      #   1) flip PLAYWRIGHT_ENABLED to "true"
+      #   2) prepend the build command with: playwright install chromium --with-deps &&
       - key: PLAYWRIGHT_ENABLED
-        value: "true"
+        value: "false"
       - key: DEFAULT_LANGUAGE
         value: en
       - key: APP_ENV

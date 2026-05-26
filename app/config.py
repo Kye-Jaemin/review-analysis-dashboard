@@ -1,8 +1,19 @@
 from functools import lru_cache
 from typing import List
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_db_url(url: str) -> str:
+    """Render's managed Postgres returns 'postgres://...' or 'postgresql://...'.
+    SQLAlchemy 2.0 async needs the explicit driver prefix 'postgresql+asyncpg://'.
+    Convert if necessary; leave sqlite/other URLs untouched.
+    """
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+    return url
 
 
 class Settings(BaseSettings):
@@ -29,6 +40,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ANALYSIS_BATCH_SIZE: int = 8
     ANALYSIS_CONCURRENCY: int = 4
+
+    @property
+    def database_url(self) -> str:
+        return _normalize_db_url(self.DATABASE_URL)
 
     @property
     def allowed_models(self) -> List[str]:
