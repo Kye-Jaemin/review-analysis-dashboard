@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -117,11 +117,16 @@ async def _run_collection(job_id: str, source_id: int, db_job_id: int) -> None:
                 if exists:
                     job.processed = fetched
                     continue
+                # Normalize to naive UTC — DB column is TIMESTAMP WITHOUT TIME ZONE.
+                # Apple RSS / Google Play occasionally hand back tz-aware values.
+                posted_at = item.posted_at
+                if posted_at is not None and posted_at.tzinfo is not None:
+                    posted_at = posted_at.astimezone(timezone.utc).replace(tzinfo=None)
                 review = Review(
                     source_id=src.id,
                     external_id=item.external_id,
                     author=item.author,
-                    posted_at=item.posted_at,
+                    posted_at=posted_at,
                     rating=item.rating,
                     text=item.text,
                     url=item.url,
