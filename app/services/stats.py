@@ -69,6 +69,18 @@ async def summary(session: AsyncSession) -> dict:
         for sid, label, stype, dname, icon, c, ar in by_source_rows
     ]
 
+    # Load all categories so we can roll leaves up to their root.
+    all_cats = (await session.execute(select(Category))).scalars().all()
+    parent_by_id = {c.id: c.parent_id for c in all_cats}
+    name_by_id = {c.id: c.name for c in all_cats}
+
+    def find_root(cid: int) -> int:
+        seen: set[int] = set()
+        while parent_by_id.get(cid) is not None and cid not in seen:
+            seen.add(cid)
+            cid = parent_by_id[cid]
+        return cid
+
     # by category — include total per category and percent within all analyzed
     by_cat_q = (
         await session.execute(
@@ -88,6 +100,31 @@ async def summary(session: AsyncSession) -> dict:
             node["sentiments"][_enum_str(sent)] = c
             node["total"] += c
     by_category = sorted(cat_map.values(), key=lambda x: x["path"])
+
+    # By root category — roll every analyzed review up to its top-level ancestor.
+    root_sent: dict[int, dict] = {}
+    by_root_q = (
+        await session.execute(
+            select(Analysis.category_id, Analysis.sentiment, func.count(Analysis.id))
+            .where(Analysis.category_id.is_not(None))
+            .where(Analysis.sentiment.is_not(None))
+            .group_by(Analysis.category_id, Analysis.sentiment)
+        )
+    ).all()
+    for cat_id, sent, c in by_root_q:
+        root_id = find_root(cat_id)
+        node = root_sent.setdefault(
+            root_id,
+            {
+                "id": root_id,
+                "name": name_by_id.get(root_id, "—"),
+                "sentiments": {s: 0 for s in SENTIMENT_ORDER},
+                "total": 0,
+            },
+        )
+        node["sentiments"][_enum_str(sent)] = node["sentiments"].get(_enum_str(sent), 0) + c
+        node["total"] += c
+    by_root_sentiment = sorted(root_sent.values(), key=lambda x: x["name"])
 
     # recent
     recent_rows = (
@@ -122,6 +159,7 @@ async def summary(session: AsyncSession) -> dict:
         "avg_sentiment": float(avg_sentiment) if avg_sentiment is not None else None,
         "last_collected": last_collected.isoformat() if last_collected else None,
         "sentiment_distribution": sent_dist,
+        "by_root_sentiment": by_root_sentiment,
         "by_source": by_source,
         "by_category": by_category,
         "recent": recent,

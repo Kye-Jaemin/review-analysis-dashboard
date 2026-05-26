@@ -48,6 +48,8 @@
     "avg_rating": "평균 별점",
     "last_collected": "최근 수집",
     "sentiment_distribution": "감성 분포",
+    "sentiment_by_root": "루트 카테고리별 감성 분포",
+    "uncategorized": "미분류",
     "by_category": "카테고리별",
     "trend": "시간 추이",
     "by_source": "소스별",

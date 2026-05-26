@@ -48,6 +48,8 @@
     "avg_rating": "Avg rating",
     "last_collected": "Last collected",
     "sentiment_distribution": "Sentiment distribution",
+    "sentiment_by_root": "Sentiment by root category",
+    "uncategorized": "Uncategorized",
     "by_category": "By category",
     "trend": "Trend over time",
     "by_source": "By source",
