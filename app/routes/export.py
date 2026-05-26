@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_session
 from app.models import Analysis, Review
-from app.routes.reviews import _build_filter_query
+from app.routes.reviews import _build_filter_query, _parse_int
 from app.services import exporter
 
 router = APIRouter()
@@ -17,16 +17,17 @@ router = APIRouter()
 @router.get("/export")
 async def export_reviews(
     format: str = Query("csv", pattern="^(csv|json|xlsx)$"),
-    source_id: Optional[int] = None,
-    category_id: Optional[int] = None,
+    source_id: Optional[str] = None,
+    category_id: Optional[str] = None,
     sentiment: List[str] = Query(default_factory=list),
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     q: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
+    sentiment = [s for s in sentiment if s]
     stmt = _build_filter_query(
-        source_id=source_id, category_id=category_id, sentiment=sentiment,
+        source_id=_parse_int(source_id), category_id=_parse_int(category_id), sentiment=sentiment,
         from_date=from_date, to_date=to_date, q=q,
     ).options(
         selectinload(Review.source),

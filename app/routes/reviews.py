@@ -27,6 +27,17 @@ def _parse_date(s: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _parse_int(s: Optional[str]) -> Optional[int]:
+    """HTML <select> with an empty 'All' option sends ?source_id= which fails
+    FastAPI's int parser. Accept empty/None as 'no filter'."""
+    if s is None or s == "":
+        return None
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_filter_query(
     *,
     source_id: Optional[int],
@@ -68,16 +79,20 @@ def _build_filter_query(
 async def list_reviews(
     request: Request,
     page: int = Query(1, ge=1),
-    source_id: Optional[int] = None,
-    category_id: Optional[int] = None,
+    source_id: Optional[str] = None,
+    category_id: Optional[str] = None,
     sentiment: List[str] = Query(default_factory=list),
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     q: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
+    source_id_i = _parse_int(source_id)
+    category_id_i = _parse_int(category_id)
+    # Drop empty multi-checkbox values that some browsers append.
+    sentiment = [s for s in sentiment if s]
     base_stmt = _build_filter_query(
-        source_id=source_id, category_id=category_id, sentiment=sentiment,
+        source_id=source_id_i, category_id=category_id_i, sentiment=sentiment,
         from_date=from_date, to_date=to_date, q=q,
     )
 
@@ -103,13 +118,13 @@ async def list_reviews(
     categories = (await session.execute(select(Category).order_by(Category.path))).scalars().all()
 
     filters = {
-        "source_id": source_id, "category_id": category_id, "sentiment": sentiment,
+        "source_id": source_id_i, "category_id": category_id_i, "sentiment": sentiment,
         "from_date": from_date, "to_date": to_date, "q": q,
     }
 
     qs_pairs = []
-    if source_id: qs_pairs.append(("source_id", source_id))
-    if category_id: qs_pairs.append(("category_id", category_id))
+    if source_id_i is not None: qs_pairs.append(("source_id", source_id_i))
+    if category_id_i is not None: qs_pairs.append(("category_id", category_id_i))
     for s in sentiment or []:
         qs_pairs.append(("sentiment", s))
     if from_date: qs_pairs.append(("from_date", from_date))
