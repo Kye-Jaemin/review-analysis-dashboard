@@ -7,7 +7,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.services.collectors.base import CollectedItem, CollectorBase
+from app.services.collectors.base import CollectedItem, CollectorBase, json_safe
 
 
 class AppStoreCollector(CollectorBase):
@@ -90,5 +90,5 @@ class AppStoreCollector(CollectorBase):
                 posted_at=posted,
                 rating=float(item["rating"]) if item.get("rating") is not None else None,
                 url=None,
-                raw={k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in item.items()},
+                raw=json_safe(item),
             )

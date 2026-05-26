@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import AsyncIterator
 
-from app.services.collectors.base import CollectedItem, CollectorBase
+from app.services.collectors.base import CollectedItem, CollectorBase, json_safe
 
 
 class GooglePlayCollector(CollectorBase):
@@ -70,5 +70,5 @@ class GooglePlayCollector(CollectorBase):
                 posted_at=posted,
                 rating=float(item["score"]) if item.get("score") is not None else None,
                 url=None,
-                raw={k: v for k, v in item.items() if k != "userImage"},
+                raw=json_safe({k: v for k, v in item.items() if k != "userImage"}),
             )

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import AsyncIterator
 
 from app.config import settings
-from app.services.collectors.base import CollectedItem, CollectorBase
+from app.services.collectors.base import CollectedItem, CollectorBase, json_safe
 
 
 def _make_reddit():
@@ -128,5 +128,5 @@ class RedditCollector(CollectorBase):
                 posted_at=item["posted_at"],
                 rating=None,
                 url=item["url"],
-                raw=item["raw"],
+                raw=json_safe(item["raw"]),
             )

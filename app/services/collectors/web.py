@@ -12,7 +12,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import settings
-from app.services.collectors.base import CollectedItem, CollectorBase
+from app.services.collectors.base import CollectedItem, CollectorBase, json_safe
 
 _last_request_by_domain: dict[str, float] = {}
 _DOMAIN_SLEEP = 1.0
@@ -158,5 +158,5 @@ class WebCollector(CollectorBase):
                     posted_at=None,
                     rating=_parse_rating(item.get("rating_str")),
                     url=url,
-                    raw={"source_url": url, "index": idx, "raw_date": item.get("date_str")},
+                    raw=json_safe({"source_url": url, "index": idx, "raw_date": item.get("date_str")}),
                 )
