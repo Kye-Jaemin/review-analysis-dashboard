@@ -231,12 +231,33 @@ async def _select_review_ids(session: AsyncSession, mode: str) -> list[int]:
     return [row[0] for row in result.all()]
 
 
+def _restrict_to_roots(cat_rows: list[Category], root_ids: list[int]) -> list[Category]:
+    """Return only categories whose ancestor chain reaches one of root_ids
+    (the roots themselves are included). Cycle-safe."""
+    parent_by_id = {c.id: c.parent_id for c in cat_rows}
+    children: dict[int | None, list[int]] = {}
+    for cid, pid in parent_by_id.items():
+        children.setdefault(pid, []).append(cid)
+    allowed: set[int] = set()
+    stack = list(root_ids)
+    while stack:
+        cid = stack.pop()
+        if cid in allowed:
+            continue
+        if cid not in parent_by_id:
+            continue
+        allowed.add(cid)
+        stack.extend(children.get(cid, []))
+    return [c for c in cat_rows if c.id in allowed]
+
+
 async def run_analysis_job(
     job_id: str,
     db_job_id: int,
     mode: str,
     model: str,
     summary_lang: str,
+    root_ids: list[int] | None = None,
 ) -> None:
     job = registry.get(job_id)
     if not job:
@@ -246,6 +267,8 @@ async def run_analysis_job(
     try:
         async with AsyncSessionLocal() as session:
             cat_rows = (await session.execute(select(Category))).scalars().all()
+            if root_ids:
+                cat_rows = _restrict_to_roots(cat_rows, root_ids)
             ids = await _select_review_ids(session, mode)
             job.total = len(ids)
             if not ids:

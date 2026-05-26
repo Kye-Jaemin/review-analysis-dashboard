@@ -144,7 +144,10 @@
     "summary_language": "Summary language",
     "auto": "Auto (match review)",
     "run": "Run analysis",
-    "running": "Running analysis…"
+    "running": "Running analysis…",
+    "root_scope": "Category scope",
+    "root_scope_hint": "Pick one or more root categories. The LLM will see only those subtrees and classify within them. Leave all unchecked to use the full category tree.",
+    "no_roots": "No root categories defined yet. The LLM will classify against an empty tree."
   },
   "reviews": {
     "title": "Reviews",

@@ -32,6 +32,24 @@
         <option value="all">{{ t('analyze.mode_all') }}</option>
       </select>
     </div>
+    <div x-data="{ allOff: true }" x-init="$watch('$el', () => {})">
+      <label class="text-sm font-medium block mb-1">{{ t('analyze.root_scope') }}</label>
+      <div class="text-xs text-gray-500 mb-2">{{ t('analyze.root_scope_hint') }}</div>
+      {% if roots %}
+        <div class="flex flex-wrap gap-2">
+          {% for root in roots %}
+            <label class="flex items-center gap-1.5 px-2.5 py-1.5 border rounded cursor-pointer text-sm hover:bg-gray-50">
+              <input type="checkbox" name="root_ids" value="{{ root.id }}" class="accent-blue-600">
+              <span>{{ root.name }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+          {{ t('analyze.no_roots') }}
+        </div>
+      {% endif %}
+    </div>
     <div>
       <label class="text-sm font-medium block mb-1">{{ t('analyze.model') }}</label>
       <select name="model" class="border rounded px-3 py-2 text-sm w-full">
