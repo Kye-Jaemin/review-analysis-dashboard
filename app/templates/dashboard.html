@@ -5,17 +5,32 @@
 {% block content %}
 <h1 class="text-2xl font-semibold mb-4">{{ t('dashboard.title') }}</h1>
 
-<div class="bg-white rounded shadow-sm px-4 py-3 mb-5">
-  <div class="flex items-center gap-2 mb-2">
-    <span class="text-xs text-gray-500">{{ t('reviews.filter.source') }}</span>
-    <span class="text-xs text-gray-400" id="source-filter-status">{{ t('common.all') }}</span>
-    <button type="button" id="source-filter-clear"
-            class="ml-auto text-xs text-blue-600 hover:underline hidden">
-      {{ t('common.cancel') }}
-    </button>
+<div class="bg-white rounded shadow-sm px-4 py-3 mb-5 space-y-3">
+  <div>
+    <div class="flex items-center gap-2 mb-2">
+      <span class="text-xs text-gray-500 w-20 shrink-0">{{ t('reviews.filter.source') }}</span>
+      <span class="text-xs text-gray-400" id="source-filter-status">{{ t('common.all') }}</span>
+      <button type="button" id="source-filter-clear"
+              class="ml-auto text-xs text-blue-600 hover:underline hidden">
+        {{ t('common.cancel') }}
+      </button>
+    </div>
+    <div id="source-filter-chips" class="flex flex-wrap gap-1.5 text-xs">
+      <div class="text-gray-400">{{ t('common.loading') }}</div>
+    </div>
   </div>
-  <div id="source-filter-chips" class="flex flex-wrap gap-1.5 text-xs">
-    <div class="text-gray-400">{{ t('common.loading') }}</div>
+  <div class="border-t border-gray-100 pt-3">
+    <div class="flex items-center gap-2 mb-2">
+      <span class="text-xs text-gray-500 w-20 shrink-0">{{ t('categories.title') }}</span>
+      <span class="text-xs text-gray-400" id="root-filter-status">{{ t('common.all') }}</span>
+      <button type="button" id="root-filter-clear"
+              class="ml-auto text-xs text-blue-600 hover:underline hidden">
+        {{ t('common.cancel') }}
+      </button>
+    </div>
+    <div id="root-filter-chips" class="flex flex-wrap gap-1.5 text-xs">
+      <div class="text-gray-400">{{ t('common.loading') }}</div>
+    </div>
   </div>
 </div>
 
@@ -127,29 +142,34 @@ const SOURCE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#
 
 let charts = {};
 
-// Source filter state. Empty set = no filter = show all.
+// Filter state. Empty set = no filter = show all.
 const selectedSources = new Set();
+const selectedRoots = new Set();
 let currentTrend = { mode: 'distribution', period: 'week' };
+let lastAllSources = [];
+let lastAllRoots = [];
 
 function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); charts[id] = null; }
 }
 
-function sourceQuery() {
+function filterQuery() {
   const params = new URLSearchParams();
   selectedSources.forEach(id => params.append('source_ids', id));
+  selectedRoots.forEach(id => params.append('root_ids', id));
   return params.toString();
 }
 
 function renderSourceFilterChips(allSources) {
+  lastAllSources = allSources || [];
   const wrap = document.getElementById('source-filter-chips');
-  if (!allSources || allSources.length === 0) {
+  if (lastAllSources.length === 0) {
     wrap.innerHTML = `<div class="text-gray-400">{{ t('sources.no_sources') }}</div>`;
     document.getElementById('source-filter-status').textContent = '—';
     document.getElementById('source-filter-clear').classList.add('hidden');
     return;
   }
-  wrap.innerHTML = allSources.map(s => {
+  wrap.innerHTML = lastAllSources.map(s => {
     const active = selectedSources.has(s.id);
     const typeLbl = SOURCE_TYPE_LABELS[s.type] || s.type;
     return `<button type="button" data-source-id="${s.id}"
@@ -166,29 +186,73 @@ function renderSourceFilterChips(allSources) {
       const id = parseInt(btn.dataset.sourceId, 10);
       if (selectedSources.has(id)) selectedSources.delete(id);
       else selectedSources.add(id);
-      updateFilterStatus(allSources);
-      renderSourceFilterChips(allSources);
       reload();
     });
   });
 
-  updateFilterStatus(allSources);
+  updateSourceFilterStatus();
 }
 
-function updateFilterStatus(allSources) {
+function renderRootFilterChips(allRoots) {
+  lastAllRoots = allRoots || [];
+  const wrap = document.getElementById('root-filter-chips');
+  if (lastAllRoots.length === 0) {
+    wrap.innerHTML = `<div class="text-gray-400">{{ t('categories.no_categories') }}</div>`;
+    document.getElementById('root-filter-status').textContent = '—';
+    document.getElementById('root-filter-clear').classList.add('hidden');
+    return;
+  }
+  wrap.innerHTML = lastAllRoots.map(c => {
+    const active = selectedRoots.has(c.id);
+    return `<button type="button" data-root-id="${c.id}"
+      class="root-chip px-2 py-1 rounded border transition
+             ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}">
+      <span class="truncate max-w-[12rem]" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>
+    </button>`;
+  }).join('');
+
+  wrap.querySelectorAll('.root-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.rootId, 10);
+      if (selectedRoots.has(id)) selectedRoots.delete(id);
+      else selectedRoots.add(id);
+      reload();
+    });
+  });
+
+  updateRootFilterStatus();
+}
+
+function updateSourceFilterStatus() {
   const status = document.getElementById('source-filter-status');
   const clearBtn = document.getElementById('source-filter-clear');
   if (selectedSources.size === 0) {
-    status.textContent = `{{ t('common.all') }} (${allSources.length})`;
+    status.textContent = `{{ t('common.all') }} (${lastAllSources.length})`;
     clearBtn.classList.add('hidden');
   } else {
-    status.textContent = `${selectedSources.size} / ${allSources.length}`;
+    status.textContent = `${selectedSources.size} / ${lastAllSources.length}`;
+    clearBtn.classList.remove('hidden');
+  }
+}
+
+function updateRootFilterStatus() {
+  const status = document.getElementById('root-filter-status');
+  const clearBtn = document.getElementById('root-filter-clear');
+  if (selectedRoots.size === 0) {
+    status.textContent = `{{ t('common.all') }} (${lastAllRoots.length})`;
+    clearBtn.classList.add('hidden');
+  } else {
+    status.textContent = `${selectedRoots.size} / ${lastAllRoots.length}`;
     clearBtn.classList.remove('hidden');
   }
 }
 
 document.getElementById('source-filter-clear').addEventListener('click', () => {
   selectedSources.clear();
+  reload();
+});
+document.getElementById('root-filter-clear').addEventListener('click', () => {
+  selectedRoots.clear();
   reload();
 });
 
@@ -215,7 +279,7 @@ function formatAnalyzed(analyzed, total) {
 }
 
 async function loadStats() {
-  const qs = sourceQuery();
+  const qs = filterQuery();
   const res = await fetch('/api/stats' + (qs ? '?' + qs : ''));
   const data = await res.json();
   document.getElementById('card-total').textContent = data.total.toLocaleString();
@@ -224,6 +288,7 @@ async function loadStats() {
   document.getElementById('card-last').textContent = data.last_collected ? data.last_collected.slice(0,16).replace('T',' ') : '—';
 
   renderSourceFilterChips(data.all_sources || []);
+  renderRootFilterChips(data.all_roots || []);
   renderSentiment(data);
   renderSource(data);
   renderCategory(data);
@@ -468,7 +533,7 @@ function renderRecent(items) {
 
 async function renderTrend(mode, period) {
   currentTrend = { mode, period };
-  const qs = sourceQuery();
+  const qs = filterQuery();
   const res = await fetch(`/api/stats/trend?mode=${mode}&period=${period}` + (qs ? '&' + qs : ''));
   const data = await res.json();
   destroyChart('trend');

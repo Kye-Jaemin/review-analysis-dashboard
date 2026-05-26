@@ -16,35 +16,87 @@ def _enum_str(v) -> str:
     return v.value if hasattr(v, "value") else str(v)
 
 
-def _normalize_source_ids(source_ids: Optional[Sequence[int]]) -> Optional[list[int]]:
-    if not source_ids:
+def _normalize_ids(ids: Optional[Sequence[int]]) -> Optional[list[int]]:
+    if not ids:
         return None
-    cleaned = [int(s) for s in source_ids if s is not None]
+    cleaned = [int(s) for s in ids if s is not None]
     return cleaned or None
 
 
-def _apply_review_source_filter(stmt: Select, source_ids: Optional[list[int]]) -> Select:
+def _descendants_of(parent_by_id: dict[int, Optional[int]], root_ids: Sequence[int]) -> set[int]:
+    """All category IDs in the subtree rooted at any of the given root_ids,
+    inclusive of the roots themselves."""
+    children: dict[Optional[int], list[int]] = {}
+    for cid, pid in parent_by_id.items():
+        children.setdefault(pid, []).append(cid)
+    result: set[int] = set()
+    stack = list(root_ids)
+    while stack:
+        cid = stack.pop()
+        if cid in result:
+            continue
+        result.add(cid)
+        stack.extend(children.get(cid, []))
+    return result
+
+
+def _join_analysis_to_review(stmt: Select) -> Select:
+    return stmt.join(Analysis, Analysis.review_id == Review.id)
+
+
+def _apply_review_filter(
+    stmt: Select,
+    source_ids: Optional[list[int]],
+    category_ids: Optional[set[int]],
+) -> Select:
+    """For Review-rooted queries. When a category filter is present, restrict
+    to reviews whose Analysis falls in the selected subtree (join on Analysis)."""
+    if category_ids is not None:
+        stmt = _join_analysis_to_review(stmt).where(Analysis.category_id.in_(category_ids))
     if source_ids:
-        return stmt.where(Review.source_id.in_(source_ids))
+        stmt = stmt.where(Review.source_id.in_(source_ids))
     return stmt
 
 
-def _apply_analysis_source_filter(stmt: Select, source_ids: Optional[list[int]]) -> Select:
-    """Analysis rows don't carry source_id directly. Join Review to filter."""
+def _apply_analysis_filter(
+    stmt: Select,
+    source_ids: Optional[list[int]],
+    category_ids: Optional[set[int]],
+) -> Select:
+    """For Analysis-rooted queries. Joins Review only when needed (source filter)."""
     if source_ids:
-        return stmt.join(Review, Review.id == Analysis.review_id).where(
+        stmt = stmt.join(Review, Review.id == Analysis.review_id).where(
             Review.source_id.in_(source_ids)
         )
+    if category_ids is not None:
+        stmt = stmt.where(Analysis.category_id.in_(category_ids))
     return stmt
 
 
 async def summary(
-    session: AsyncSession, source_ids: Optional[Sequence[int]] = None
+    session: AsyncSession,
+    source_ids: Optional[Sequence[int]] = None,
+    root_ids: Optional[Sequence[int]] = None,
 ) -> dict:
-    src_ids = _normalize_source_ids(source_ids)
+    src_ids = _normalize_ids(source_ids)
+    selected_roots = _normalize_ids(root_ids)
 
-    # Always return the full source list so the filter UI can render every
-    # known source even when the user has filtered down to one.
+    # Load all categories — needed for tree rollup and to build descendant sets.
+    all_cats = (await session.execute(select(Category))).scalars().all()
+    parent_by_id: dict[int, Optional[int]] = {c.id: c.parent_id for c in all_cats}
+    name_by_id: dict[int, str] = {c.id: c.name for c in all_cats}
+    roots = [c for c in all_cats if c.parent_id is None]
+    all_roots = [{"id": c.id, "name": c.name} for c in sorted(roots, key=lambda x: x.name)]
+
+    # If root filter is active, build the descendant set to filter analyses by.
+    cat_filter: Optional[set[int]] = None
+    if selected_roots:
+        cat_filter = _descendants_of(parent_by_id, selected_roots)
+        if not cat_filter:
+            # Shouldn't happen, but bail safe
+            cat_filter = set()
+
+    # Full source list for chip UI (always unfiltered).
     all_sources_rows = (
         await session.execute(
             select(Source.id, Source.label, Source.type, Source.icon_url).order_by(Source.label)
@@ -56,41 +108,42 @@ async def summary(
     ]
 
     total = (
-        await session.execute(_apply_review_source_filter(select(func.count(Review.id)), src_ids))
+        await session.execute(_apply_review_filter(select(func.count(Review.id)), src_ids, cat_filter))
     ).scalar() or 0
     avg_rating = (
-        await session.execute(_apply_review_source_filter(select(func.avg(Review.rating)), src_ids))
+        await session.execute(_apply_review_filter(select(func.avg(Review.rating)), src_ids, cat_filter))
     ).scalar()
     last_collected = (
         await session.execute(
-            _apply_review_source_filter(select(func.max(Review.collected_at)), src_ids)
+            _apply_review_filter(select(func.max(Review.collected_at)), src_ids, cat_filter)
         )
     ).scalar()
 
     avg_sentiment = (
         await session.execute(
-            _apply_analysis_source_filter(select(func.avg(Analysis.sentiment_score)), src_ids)
+            _apply_analysis_filter(select(func.avg(Analysis.sentiment_score)), src_ids, cat_filter)
         )
     ).scalar()
     analyzed_total = (
         await session.execute(
-            _apply_analysis_source_filter(
+            _apply_analysis_filter(
                 select(func.count(Analysis.id)).where(Analysis.sentiment.is_not(None)),
                 src_ids,
+                cat_filter,
             )
         )
     ).scalar() or 0
 
     sent_dist: dict[str, int] = {s: 0 for s in SENTIMENT_ORDER}
     sent_stmt = select(Analysis.sentiment, func.count(Analysis.id)).group_by(Analysis.sentiment)
-    sent_stmt = _apply_analysis_source_filter(sent_stmt, src_ids)
-    rows = (await session.execute(sent_stmt)).all()
-    for sent, c in rows:
+    sent_stmt = _apply_analysis_filter(sent_stmt, src_ids, cat_filter)
+    for sent, c in (await session.execute(sent_stmt)).all():
         if sent is None:
             continue
         sent_dist[_enum_str(sent)] = c
 
-    # by source — group by Source, optionally restricted to the selected ids.
+    # by source — Source grouped, optionally constrained by source ids,
+    # optionally also constrained to reviews with a matching Analysis.
     by_source_stmt = (
         select(
             Source.id,
@@ -107,7 +160,10 @@ async def summary(
     )
     if src_ids:
         by_source_stmt = by_source_stmt.where(Source.id.in_(src_ids))
-    by_source_rows = (await session.execute(by_source_stmt)).all()
+    if cat_filter is not None:
+        by_source_stmt = by_source_stmt.join(Analysis, Analysis.review_id == Review.id).where(
+            Analysis.category_id.in_(cat_filter)
+        )
     by_source = [
         {
             "id": sid,
@@ -118,13 +174,8 @@ async def summary(
             "count": int(c or 0),
             "avg_rating": float(ar) if ar is not None else None,
         }
-        for sid, label, stype, dname, icon, c, ar in by_source_rows
+        for sid, label, stype, dname, icon, c, ar in (await session.execute(by_source_stmt)).all()
     ]
-
-    # Load all categories so we can roll leaves up to their root.
-    all_cats = (await session.execute(select(Category))).scalars().all()
-    parent_by_id = {c.id: c.parent_id for c in all_cats}
-    name_by_id = {c.id: c.name for c in all_cats}
 
     def find_root(cid: int) -> int:
         seen: set[int] = set()
@@ -139,10 +190,9 @@ async def summary(
         .group_by(Category.id, Category.path, Analysis.sentiment)
         .order_by(Category.path)
     )
-    by_cat_stmt = _apply_analysis_source_filter(by_cat_stmt, src_ids)
-    by_cat_q = (await session.execute(by_cat_stmt)).all()
+    by_cat_stmt = _apply_analysis_filter(by_cat_stmt, src_ids, cat_filter)
     cat_map: dict[int, dict] = {}
-    for cid, path, sent, c in by_cat_q:
+    for cid, path, sent, c in (await session.execute(by_cat_stmt)).all():
         node = cat_map.setdefault(
             cid,
             {"id": cid, "path": path, "sentiments": {s: 0 for s in SENTIMENT_ORDER}, "total": 0},
@@ -158,7 +208,7 @@ async def summary(
         .where(Analysis.sentiment.is_not(None))
         .group_by(Analysis.category_id, Analysis.sentiment)
     )
-    by_root_stmt = _apply_analysis_source_filter(by_root_stmt, src_ids)
+    by_root_stmt = _apply_analysis_filter(by_root_stmt, src_ids, cat_filter)
     root_sent: dict[int, dict] = {}
     for cat_id, sent, c in (await session.execute(by_root_stmt)).all():
         root_id = find_root(cat_id)
@@ -181,7 +231,7 @@ async def summary(
         .order_by(Review.collected_at.desc())
         .limit(10)
     )
-    recent_stmt = _apply_review_source_filter(recent_stmt, src_ids)
+    recent_stmt = _apply_review_filter(recent_stmt, src_ids, cat_filter)
     recent_rows = (await session.execute(recent_stmt)).scalars().all()
     recent = []
     for r in recent_rows:
@@ -214,7 +264,9 @@ async def summary(
         "by_category": by_category,
         "recent": recent,
         "all_sources": all_sources,
+        "all_roots": all_roots,
         "selected_sources": src_ids or [],
+        "selected_roots": selected_roots or [],
     }
 
 
@@ -230,8 +282,16 @@ async def trend(
     mode: str = "distribution",
     period: str = "week",
     source_ids: Optional[Sequence[int]] = None,
+    root_ids: Optional[Sequence[int]] = None,
 ) -> dict:
-    src_ids = _normalize_source_ids(source_ids)
+    src_ids = _normalize_ids(source_ids)
+    selected_roots = _normalize_ids(root_ids)
+
+    cat_filter: Optional[set[int]] = None
+    if selected_roots:
+        all_cats = (await session.execute(select(Category))).scalars().all()
+        parent_by_id = {c.id: c.parent_id for c in all_cats}
+        cat_filter = _descendants_of(parent_by_id, selected_roots)
 
     stmt = (
         select(Review.posted_at, Analysis.sentiment, Analysis.sentiment_score)
@@ -240,6 +300,8 @@ async def trend(
     )
     if src_ids:
         stmt = stmt.where(Review.source_id.in_(src_ids))
+    if cat_filter is not None:
+        stmt = stmt.where(Analysis.category_id.in_(cat_filter))
     rows = (await session.execute(stmt)).all()
 
     buckets: dict[str, dict] = {}
