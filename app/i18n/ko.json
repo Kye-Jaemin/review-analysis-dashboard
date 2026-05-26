@@ -71,6 +71,14 @@
     "reddit": "Reddit",
     "web": "웹사이트"
   },
+  "workspace": {
+    "title": "워크스페이스",
+    "import": "파일 불러오기",
+    "export": "파일로 내보내기",
+    "reset": "새로 시작 (전체 삭제)",
+    "confirm_reset": "모든 소스, 카테고리, 리뷰, 분석 결과가 영구 삭제됩니다. 계속할까요?",
+    "hint": "현재 작업을 .json 파일로 저장하거나 이전 파일을 불러올 수 있습니다. DB가 모든 방문자와 공유되므로 본인 조사를 따로 보관할 때 사용하세요."
+  },
   "sentiment": {
     "very_positive": "매우 긍정",
     "positive": "긍정",

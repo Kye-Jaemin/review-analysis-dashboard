@@ -71,6 +71,14 @@
     "reddit": "Reddit",
     "web": "Web"
   },
+  "workspace": {
+    "title": "Workspace",
+    "import": "Import file",
+    "export": "Export to file",
+    "reset": "Start fresh (delete all)",
+    "confirm_reset": "This will permanently delete every source, category, review, and analysis. Continue?",
+    "hint": "Save your work as a .json file or load a previous one. Useful since the database is shared between visitors."
+  },
   "sentiment": {
     "very_positive": "Very positive",
     "positive": "Positive",

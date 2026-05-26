@@ -42,6 +42,31 @@
         {% endfor %}
       </nav>
       <div class="px-3 py-3 border-t border-gray-100 text-xs">
+        <div class="text-gray-500 mb-2">{{ t('workspace.title') }}</div>
+        <div class="space-y-1">
+          <form action="/workspace/import" method="post" enctype="multipart/form-data" id="ws-import-form">
+            <label class="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
+              <span>📥</span><span>{{ t('workspace.import') }}</span>
+              <input type="file" name="file" accept="application/json,.json"
+                     class="hidden"
+                     onchange="if (this.files.length && confirm('{{ t('workspace.confirm_reset') }}')) { document.getElementById('ws-import-form').submit(); } else { this.value=''; }">
+            </label>
+          </form>
+          <a href="/workspace/export"
+             class="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-gray-100">
+            <span>📤</span><span>{{ t('workspace.export') }}</span>
+          </a>
+          <form action="/workspace/reset" method="post"
+                onsubmit="return confirm('{{ t('workspace.confirm_reset') }}')">
+            <button type="submit"
+                    class="flex items-center gap-1.5 w-full text-left px-2 py-1 rounded hover:bg-red-50 text-red-600">
+              <span>🗑</span><span>{{ t('workspace.reset') }}</span>
+            </button>
+          </form>
+        </div>
+        <div class="text-[10px] text-gray-400 mt-2 leading-tight">{{ t('workspace.hint') }}</div>
+      </div>
+      <div class="px-3 py-3 border-t border-gray-100 text-xs">
         <div class="text-gray-500 mb-1">{{ t('common.language') }}</div>
         <div class="flex gap-1">
           {% for code in supported_langs %}
