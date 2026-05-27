@@ -33,6 +33,7 @@
           ('/categories', 'nav.categories', '🗂'),
           ('/analyze', 'nav.analyze', '✨'),
           ('/reviews', 'nav.reviews', '💬'),
+          ('/howto', 'nav.howto', '📖'),
         ] %}
         {% for path, key, icon in nav %}
           {% set active = request.url.path == path or (path != '/' and request.url.path.startswith(path)) %}

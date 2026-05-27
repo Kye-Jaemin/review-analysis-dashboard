@@ -8,7 +8,8 @@
     "sources": "Sources",
     "categories": "Categories",
     "analyze": "Analyze",
-    "reviews": "Reviews"
+    "reviews": "Reviews",
+    "howto": "How to use"
   },
   "common": {
     "save": "Save",

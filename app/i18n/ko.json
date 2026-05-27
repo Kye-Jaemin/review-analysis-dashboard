@@ -8,7 +8,8 @@
     "sources": "소스",
     "categories": "카테고리",
     "analyze": "분석",
-    "reviews": "리뷰"
+    "reviews": "리뷰",
+    "howto": "사용법"
   },
   "common": {
     "save": "저장",
