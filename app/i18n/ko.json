@@ -91,7 +91,8 @@
     "active_filter_none": "전체 데이터 (조사 카드 미선택)",
     "active_filter_sources": "소스",
     "active_filter_categories": "카테고리",
-    "themes_pick_card_to_save": "조사 카드를 선택해야 마인드맵을 저장·불러올 수 있습니다."
+    "themes_pick_card_to_save": "조사 카드를 선택해야 마인드맵을 저장·불러올 수 있습니다.",
+    "empty_state": "위에서 조사 카드를 선택하면 그 결과가 표시됩니다. 카드가 없다면 분석 페이지에서 실행 시 이름을 입력해 카드를 만들어주세요."
   },
   "source_type": {
     "google_play": "Google Play",
@@ -180,7 +181,9 @@
     "source_scope_hint": "분석할 리뷰의 소스를 하나 이상 선택하세요. 아무것도 선택하지 않으면 모든 소스의 리뷰가 대상이 됩니다.",
     "investigation_label": "조사 카드로 저장 (선택)",
     "investigation_label_hint": "이름을 적으면 (소스, 카테고리) 조합이 대시보드에 카드로 추가됩니다. 다음에 그 카드를 클릭해 같은 필터로 한 번에 화면을 좁힐 수 있습니다.",
-    "investigation_label_placeholder": "예: Cal AI · UX 피드백"
+    "investigation_label_placeholder": "예: Cal AI · UX 피드백",
+    "live_count_label": "현재 조건에 해당하는 리뷰:",
+    "live_count_unit": "건"
   },
   "reviews": {
     "title": "리뷰",

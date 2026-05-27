@@ -25,6 +25,12 @@
   </div>
 </div>
 
+<div id="dashboard-empty" class="hidden bg-white rounded shadow-sm p-10 text-center text-sm text-gray-500">
+  {{ t('dashboard.empty_state') }}
+</div>
+
+<div id="dashboard-content">
+
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
   <div class="bg-white p-4 rounded shadow-sm">
     <div class="text-xs text-gray-500">{{ t('dashboard.total_reviews') }}</div>
@@ -160,6 +166,8 @@
     <div class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
   </div>
 </div>
+
+</div><!-- /#dashboard-content -->
 {% endblock %}
 
 {% block scripts %}
@@ -214,7 +222,7 @@ async function clearActiveInvestigation() {
   updateActiveFilterStrip();
   updateThemesPanelForActive();
   await refreshSavedSnapshots();
-  await reload();
+  setDashboardVisibility(false);
 }
 
 async function reload() {
@@ -270,6 +278,11 @@ function arraysEq(a, b) {
   return true;
 }
 
+function setDashboardVisibility(visible) {
+  document.getElementById('dashboard-content').classList.toggle('hidden', !visible);
+  document.getElementById('dashboard-empty').classList.toggle('hidden', visible);
+}
+
 async function loadInvestigations() {
   try {
     const res = await fetch('/api/investigations');
@@ -277,9 +290,9 @@ async function loadInvestigations() {
     _lastInvestigations = data.investigations || [];
     renderInvestigations(_lastInvestigations);
     updateActiveFilterStrip();
-    // Themes panel UI depends on whether a card is active.
     updateThemesPanelForActive();
     refreshSavedSnapshots();
+    setDashboardVisibility(!!activeInvestigationId);
   } catch (e) {
     document.getElementById('investigations-grid').innerHTML =
       '<div class="text-xs text-red-600">' + escapeHtml(String(e)) + '</div>';
@@ -349,6 +362,7 @@ async function applyInvestigation(id) {
   renderInvestigations(_lastInvestigations);
   updateActiveFilterStrip();
   updateThemesPanelForActive();
+  setDashboardVisibility(true);
   await refreshSavedSnapshots();
   await reload();
 }
@@ -357,13 +371,20 @@ async function deleteInvestigation(id) {
   if (!confirm('{{ t("common.confirm_delete") }}')) return;
   const res = await fetch(`/api/investigations/${id}`, { method: 'DELETE' });
   if (!res.ok) { alert('delete failed'); return; }
+  // Refresh list, then either activate the next card or fall back to empty state.
+  const r = await fetch('/api/investigations');
+  const d = await r.json();
+  _lastInvestigations = d.investigations || [];
   if (activeInvestigationId === id) {
-    selectedSources.clear();
-    selectedRoots.clear();
-    activeInvestigationId = null;
-    await reload();
+    if (_lastInvestigations.length > 0) {
+      await applyInvestigation(_lastInvestigations[0].id);
+    } else {
+      await clearActiveInvestigation();
+    }
+  } else {
+    renderInvestigations(_lastInvestigations);
+    updateActiveFilterStrip();
   }
-  await loadInvestigations();
 }
 
 function escapeHtml(s) {
@@ -669,9 +690,35 @@ async function renderTrend(mode, period) {
   });
 }
 
-loadInvestigations();
-loadStats();
-renderTrend('distribution', 'week');
+// Bootstrap: fetch cards first, auto-activate the first one if there is any.
+(async () => {
+  try {
+    const res = await fetch('/api/investigations');
+    const data = await res.json();
+    _lastInvestigations = data.investigations || [];
+    if (_lastInvestigations.length > 0) {
+      const first = _lastInvestigations[0];
+      selectedSources.clear();
+      (first.source_ids || []).forEach(s => selectedSources.add(s));
+      selectedRoots.clear();
+      (first.root_ids || []).forEach(r => selectedRoots.add(r));
+      activeInvestigationId = first.id;
+      renderInvestigations(_lastInvestigations);
+      updateActiveFilterStrip();
+      updateThemesPanelForActive();
+      await refreshSavedSnapshots();
+      setDashboardVisibility(true);
+      await Promise.all([loadStats(), renderTrend('distribution', 'week')]);
+    } else {
+      renderInvestigations([]);
+      setDashboardVisibility(false);
+    }
+  } catch (e) {
+    document.getElementById('investigations-grid').innerHTML =
+      '<div class="text-xs text-red-600">' + escapeHtml(String(e)) + '</div>';
+    setDashboardVisibility(false);
+  }
+})();
 
 // ---- Sentiment themes (mind map) ----
 // We use markmap (https://markmap.js.org) instead of Mermaid so each node

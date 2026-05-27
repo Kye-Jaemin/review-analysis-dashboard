@@ -91,7 +91,8 @@
     "active_filter_none": "All data (no investigation selected)",
     "active_filter_sources": "Sources",
     "active_filter_categories": "Categories",
-    "themes_pick_card_to_save": "Select an investigation card to enable saving / loading mind maps."
+    "themes_pick_card_to_save": "Select an investigation card to enable saving / loading mind maps.",
+    "empty_state": "Select an investigation card above to see its analytics. If you don't have one yet, head to the Analyze page and give your next run a name to save it as a card."
   },
   "source_type": {
     "google_play": "Google Play",
@@ -180,7 +181,9 @@
     "source_scope_hint": "Pick one or more sources whose reviews you want to analyze. Leave all unchecked to include every source.",
     "investigation_label": "Save as investigation card (optional)",
     "investigation_label_hint": "If you give this run a name, the (sources, categories) pair will appear as a card on the dashboard so you can click it to refilter everything later.",
-    "investigation_label_placeholder": "e.g. Cal AI · UX feedback"
+    "investigation_label_placeholder": "e.g. Cal AI · UX feedback",
+    "live_count_label": "Reviews matching the current selection:",
+    "live_count_unit": "reviews"
   },
   "reviews": {
     "title": "Reviews",

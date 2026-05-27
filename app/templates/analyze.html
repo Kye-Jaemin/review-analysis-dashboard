@@ -21,7 +21,7 @@
     </div>
   </div>
 
-  <form method="post" action="/analyze"
+  <form id="analyze-form" method="post" action="/analyze"
         hx-post="/analyze" hx-target="#analyze-job-area" hx-swap="innerHTML"
         class="space-y-4">
     <div>
@@ -95,6 +95,10 @@
              placeholder="{{ t('analyze.investigation_label_placeholder') }}"
              class="w-full border rounded px-3 py-2 text-sm" />
     </div>
+    <div class="border-t pt-3 flex items-center gap-2 text-sm">
+      <span class="text-gray-500">{{ t('analyze.live_count_label') }}</span>
+      <span id="analyze-count" class="font-semibold text-blue-700">—</span>
+    </div>
     <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
       {{ t('analyze.run') }}
     </button>
@@ -108,4 +112,39 @@
 </div>
 
 <div id="analyze-job-area"></div>
+
+<script>
+(function () {
+  const form = document.getElementById('analyze-form');
+  const countEl = document.getElementById('analyze-count');
+  let debounce;
+
+  function updateCount() {
+    clearTimeout(debounce);
+    debounce = setTimeout(async () => {
+      const params = new URLSearchParams();
+      const mode = form.querySelector('[name="mode"]')?.value || 'unanalyzed';
+      params.append('mode', mode);
+      form.querySelectorAll('input[name="source_ids"]:checked').forEach(cb => {
+        params.append('source_ids', cb.value);
+      });
+      countEl.textContent = '...';
+      try {
+        const res = await fetch('/api/analyze/count?' + params.toString());
+        const data = await res.json();
+        countEl.textContent = (data.count || 0).toLocaleString() + ' {{ t('analyze.live_count_unit') }}';
+      } catch (e) {
+        countEl.textContent = '?';
+      }
+    }, 200);
+  }
+
+  form.addEventListener('change', (e) => {
+    // Only react to inputs that affect the count.
+    if (e.target.name === 'mode' || e.target.name === 'source_ids') updateCount();
+  });
+
+  updateCount();
+})();
+</script>
 {% endblock %}

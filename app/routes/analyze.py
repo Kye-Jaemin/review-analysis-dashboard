@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from app.i18n import COOKIE_MAX_AGE
 from app.jobs import registry
 from app.models import Analysis, AnalysisJob, AnalysisStatus, Category, Investigation, Review, Source
 from app.routes.reviews import _parse_int
-from app.services.analyzer import run_analysis_job
+from app.services.analyzer import _select_review_ids, run_analysis_job
 from app.templating import render
 
 router = APIRouter()
@@ -65,6 +65,17 @@ async def analyze_page(request: Request, session: AsyncSession = Depends(get_ses
         roots=roots,
         sources=sources,
     )
+
+
+@router.get("/api/analyze/count")
+async def analyze_count(
+    mode: str = Query("unanalyzed"),
+    source_ids: List[str] = Query(default_factory=list),
+    session: AsyncSession = Depends(get_session),
+):
+    s_ids = [v for v in (_parse_int(s) for s in source_ids) if v is not None]
+    ids = await _select_review_ids(session, mode, source_ids=s_ids or None)
+    return {"count": len(ids), "mode": mode, "source_ids": s_ids}
 
 
 @router.post("/analyze")
