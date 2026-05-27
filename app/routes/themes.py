@@ -45,7 +45,8 @@ class SnapshotIn(BaseModel):
     summary_lang: str = "en"
     sample_size: int = 0
     model: Optional[str] = None
-    themes: list
+    themes: list = []
+    categories: list = []
 
 
 @router.post("/api/themes/snapshots")
@@ -53,8 +54,11 @@ async def save_snapshot(payload: SnapshotIn, session: AsyncSession = Depends(get
     label = (payload.label or "").strip()
     if not label:
         raise HTTPException(400, "label is required")
-    if not payload.themes:
-        raise HTTPException(400, "themes payload is empty")
+    if not payload.themes and not payload.categories:
+        raise HTTPException(400, "themes or categories payload is required")
+    # We persist whichever structure carries the richer data. New flow sends
+    # `categories`; if only `themes` is present (legacy / flat), keep that.
+    stored = payload.categories if payload.categories else payload.themes
     snap = ThemeSnapshot(
         label=label[:200],
         sentiment=payload.sentiment,
@@ -63,7 +67,7 @@ async def save_snapshot(payload: SnapshotIn, session: AsyncSession = Depends(get
         summary_lang=payload.summary_lang,
         sample_size=payload.sample_size,
         model=payload.model,
-        themes=payload.themes,
+        themes=stored,
     )
     session.add(snap)
     await session.commit()
@@ -97,6 +101,25 @@ async def get_snapshot(snap_id: int, session: AsyncSession = Depends(get_session
     snap = await session.get(ThemeSnapshot, snap_id)
     if not snap:
         raise HTTPException(404)
+    raw = snap.themes or []
+    # Detect storage format: list of {category, themes:[...]} → grouped (new).
+    # Otherwise treat as flat themes list (legacy).
+    is_grouped = (
+        isinstance(raw, list)
+        and raw
+        and isinstance(raw[0], dict)
+        and "category" in raw[0]
+        and isinstance(raw[0].get("themes"), list)
+    )
+    if is_grouped:
+        categories = raw
+        themes = [
+            {**t, "category": cat.get("category")}
+            for cat in raw for t in (cat.get("themes") or [])
+        ]
+    else:
+        categories = []
+        themes = raw if isinstance(raw, list) else []
     return {
         "id": snap.id,
         "label": snap.label,
@@ -106,7 +129,8 @@ async def get_snapshot(snap_id: int, session: AsyncSession = Depends(get_session
         "summary_lang": snap.summary_lang,
         "sample_size": snap.sample_size,
         "model": snap.model,
-        "themes": snap.themes or [],
+        "categories": categories,
+        "themes": themes,
         "created_at": snap.created_at.isoformat() if snap.created_at else None,
     }
 

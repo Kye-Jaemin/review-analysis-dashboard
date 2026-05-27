@@ -142,6 +142,18 @@
   <div class="text-xs text-gray-500 mb-2">{{ t('dashboard.themes_hint') }}</div>
   <div id="themes-status" class="text-xs text-gray-500 mb-2"></div>
   <div id="themes-mindmap" class="overflow-auto" style="min-height: 0;"></div>
+  <div id="themes-breakdown-wrap" class="hidden mt-4">
+    <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+      <div>{{ t('dashboard.themes_breakdown') }}</div>
+      <div class="flex gap-2">
+        <button type="button" onclick="toggleAllCategories(true)" class="hover:underline text-blue-600">{{ t('dashboard.themes_expand_all') }}</button>
+        <span class="text-gray-300">|</span>
+        <button type="button" onclick="toggleAllCategories(false)" class="hover:underline text-blue-600">{{ t('dashboard.themes_collapse_all') }}</button>
+      </div>
+    </div>
+    <div id="themes-breakdown" class="space-y-1.5"></div>
+    <div class="text-[11px] text-gray-400 mt-2">{{ t('dashboard.themes_count_caveat') }}</div>
+  </div>
 </div>
 
 <div class="bg-white p-4 rounded shadow-sm">
@@ -622,6 +634,27 @@ function sanitizeMermaidLabel(s) {
 function buildMindmap(data) {
   const sentLabel = sanitizeMermaidLabel(SENTIMENT_LABELS[data.sentiment] || data.sentiment) || data.sentiment;
   const lines = ['mindmap', `  root((${sentLabel}))`];
+
+  // New grouped structure: categories[].themes[].
+  if (data.categories && data.categories.length) {
+    for (const cat of data.categories) {
+      const catLabel = sanitizeMermaidLabel(cat.category || 'Uncategorized');
+      const catTotal = (typeof cat.total === 'number') ? ` (${cat.total})` : '';
+      lines.push(`    ${catLabel}${catTotal}`);
+      for (const t of cat.themes || []) {
+        const themeName = sanitizeMermaidLabel(t.theme);
+        const suffix = (typeof t.count === 'number') ? ` (${t.count})` : '';
+        lines.push(`      ${themeName}${suffix}`);
+        for (const ex of (t.examples || [])) {
+          const safeEx = sanitizeMermaidLabel(ex);
+          if (safeEx) lines.push(`        ${safeEx}`);
+        }
+      }
+    }
+    return lines.join('\n');
+  }
+
+  // Legacy flat structure.
   for (const t of data.themes || []) {
     const themeName = sanitizeMermaidLabel(t.theme);
     const suffix = (typeof t.count === 'number') ? ` (${t.count})` : '';
@@ -632,6 +665,77 @@ function buildMindmap(data) {
     }
   }
   return lines.join('\n');
+}
+
+const CATEGORY_TOTAL_LABEL = {{ t('dashboard.themes_category_total', n='__N__') | tojson }};
+
+function renderBreakdown(data) {
+  const wrap = document.getElementById('themes-breakdown-wrap');
+  const container = document.getElementById('themes-breakdown');
+
+  // Build a categories-shaped view even from legacy flat data.
+  let categories;
+  if (data.categories && data.categories.length) {
+    categories = data.categories;
+  } else if (data.themes && data.themes.length) {
+    // Group flat themes by their .category field (or "Uncategorized").
+    const byCat = new Map();
+    for (const t of data.themes) {
+      const k = t.category || 'Uncategorized';
+      if (!byCat.has(k)) byCat.set(k, { category: k, total: null, themes: [] });
+      byCat.get(k).themes.push(t);
+    }
+    categories = Array.from(byCat.values());
+  } else {
+    categories = [];
+  }
+
+  if (!categories.length) {
+    wrap.classList.add('hidden');
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = categories.map((cat, idx) => {
+    const totalLbl = (typeof cat.total === 'number')
+      ? `<span class="text-gray-500 ml-2">${CATEGORY_TOTAL_LABEL.replace('__N__', cat.total)}</span>`
+      : '';
+    const themeBlocks = (cat.themes || []).map(t => {
+      const countLbl = (typeof t.count === 'number')
+        ? `<span class="text-gray-500 ml-2">(${t.count})</span>`
+        : '';
+      const examples = (t.examples || []).map(ex =>
+        `<li class="text-gray-700">${escapeHtml(ex)}</li>`
+      ).join('');
+      return `
+        <details class="ml-2 mt-1.5" open>
+          <summary class="cursor-pointer text-sm font-medium text-gray-800 select-none">
+            ${escapeHtml(t.theme || '')}${countLbl}
+          </summary>
+          ${examples ? `<ul class="ml-5 mt-1 list-disc text-xs space-y-0.5">${examples}</ul>` : ''}
+        </details>`;
+    }).join('');
+    // First two categories open by default for instant visibility.
+    const openAttr = idx < 2 ? 'open' : '';
+    return `
+      <details class="border border-gray-200 rounded overflow-hidden" ${openAttr}>
+        <summary class="cursor-pointer px-3 py-2 bg-gray-50 hover:bg-gray-100 text-sm font-medium select-none flex items-center">
+          <span>${escapeHtml(cat.category || 'Uncategorized')}</span>
+          ${totalLbl}
+        </summary>
+        <div class="px-3 pb-3 pt-1 bg-white">
+          ${themeBlocks}
+        </div>
+      </details>`;
+  }).join('');
+
+  wrap.classList.remove('hidden');
+}
+
+function toggleAllCategories(open) {
+  document
+    .querySelectorAll('#themes-breakdown > details')
+    .forEach(d => { d.open = !!open; });
 }
 
 const THEMES_SAMPLE_LABEL = {{ t('dashboard.themes_sample', n='__N__') | tojson }};
@@ -669,6 +773,8 @@ async function loadSnapshot(idStr) {
   const container = document.getElementById('themes-mindmap');
   statusEl.textContent = '{{ t("common.loading") }}';
   container.innerHTML = '';
+  document.getElementById('themes-breakdown-wrap').classList.add('hidden');
+  document.getElementById('themes-breakdown').innerHTML = '';
   try {
     const res = await fetch(`/api/themes/snapshots/${id}`);
     if (!res.ok) { statusEl.textContent = 'load failed'; return; }
@@ -693,6 +799,8 @@ async function deleteCurrentSnapshot() {
   document.getElementById('themes-mindmap').innerHTML = '';
   document.getElementById('themes-status').textContent = '';
   document.getElementById('themes-saved-select').value = '';
+  document.getElementById('themes-breakdown-wrap').classList.add('hidden');
+  document.getElementById('themes-breakdown').innerHTML = '';
   refreshSavedSnapshots();
 }
 
@@ -709,6 +817,7 @@ async function saveCurrentThemes() {
     sample_size: currentThemesData.sample_size || 0,
     model: currentThemesData.model || null,
     themes: currentThemesData.themes || [],
+    categories: currentThemesData.categories || [],
   };
   const res = await fetch('/api/themes/snapshots', {
     method: 'POST',
@@ -767,6 +876,7 @@ async function renderThemesData(data, saved) {
   }
 
   currentThemesData = data;
+  renderBreakdown(data);
   // Save button shows for freshly-generated (not for already-saved loads).
   saveBtn.classList.toggle('hidden', !!saved);
   regenBtn.classList.toggle('hidden', !!saved);
@@ -788,6 +898,8 @@ async function generateThemes(force) {
   genBtn.disabled = true;
   statusEl.textContent = '{{ t("common.loading") }}';
   container.innerHTML = '';
+  document.getElementById('themes-breakdown-wrap').classList.add('hidden');
+  document.getElementById('themes-breakdown').innerHTML = '';
 
   const params = new URLSearchParams();
   params.append('sentiment', sentiment);
