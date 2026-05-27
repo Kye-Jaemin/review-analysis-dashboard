@@ -88,6 +88,7 @@ async def start_analysis(
     root_ids: List[str] = Form(default_factory=list),
     source_ids: List[str] = Form(default_factory=list),
     investigation_label: str = Form(""),
+    min_confidence: float = Form(0.0),
     session: AsyncSession = Depends(get_session),
 ):
     model = model or settings.ANTHROPIC_MODEL
@@ -118,6 +119,9 @@ async def start_analysis(
     job.db_id = aj.id
     job.status = "pending"
 
+    # Clamp confidence to [0, 1] just in case the form was tampered with.
+    clamped_conf = max(0.0, min(1.0, float(min_confidence or 0.0)))
+
     background_tasks.add_task(
         run_analysis_job,
         job.id,
@@ -127,6 +131,7 @@ async def start_analysis(
         summary_lang,
         parsed_roots or None,
         parsed_sources or None,
+        clamped_conf,
     )
     registry.prune()
 

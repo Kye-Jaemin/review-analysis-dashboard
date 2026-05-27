@@ -90,6 +90,19 @@
         <option value="auto">{{ t('analyze.auto') }}</option>
       </select>
     </div>
+    <div>
+      <label class="text-sm font-medium block mb-1">{{ t('analyze.min_confidence') }}</label>
+      <div class="text-xs text-gray-500 mb-2">{{ t('analyze.min_confidence_hint') }}</div>
+      <div class="flex items-center gap-3">
+        <input type="range" name="min_confidence" min="0" max="1" step="0.05"
+               value="0.5" id="min-confidence-slider" class="flex-1 accent-blue-600" />
+        <span id="min-confidence-display" class="text-sm font-mono text-blue-700 w-16 text-right">0.50</span>
+      </div>
+      <div class="flex justify-between text-[10px] text-gray-400 mt-1">
+        <span>{{ t('analyze.min_confidence_loose') }}</span>
+        <span>{{ t('analyze.min_confidence_strict') }}</span>
+      </div>
+    </div>
     <div class="border-t pt-3">
       <label class="text-sm font-medium block mb-1">{{ t('analyze.investigation_label') }}</label>
       <div class="text-xs text-gray-500 mb-2">{{ t('analyze.investigation_label_hint') }}</div>
@@ -183,6 +196,15 @@
   });
 
   refreshAutoLabel();
+
+  // -------- Confidence slider live display --------
+  const slider = document.getElementById('min-confidence-slider');
+  const display = document.getElementById('min-confidence-display');
+  if (slider && display) {
+    const update = () => { display.textContent = parseFloat(slider.value).toFixed(2); };
+    slider.addEventListener('input', update);
+    update();
+  }
 })();
 </script>
 {% endblock %}

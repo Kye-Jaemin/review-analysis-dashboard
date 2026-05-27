@@ -62,10 +62,16 @@ Each leaf category has a description used as the classification rubric.
 {tree_text}
 
 For each review, assign:
-- category_path: the leaf path joined with ' > '. If nothing fits, use '기타' or 'Other' if such a leaf exists; otherwise pick the closest leaf.
+- category_path: the leaf path joined with ' > '. If '기타' or 'Other' exists as
+  a leaf, you may use it for off-topic reviews. If NO leaf is a reasonable
+  fit at all (the review is clearly about a different domain than any leaf),
+  return null for category_path instead of forcing a wrong assignment.
 - sentiment: exactly one of [very_positive, positive, neutral, negative, very_negative]
 - sentiment_score: integer 1..5 (1=very_negative, 5=very_positive). Must be consistent with sentiment.
-- confidence: float in [0, 1]
+- confidence: float in [0, 1]. Reflect how well category_path fits the review:
+  ~0.9+ when an obvious match, ~0.6–0.8 reasonable fit, ~0.3–0.5 weak/forced,
+  ≤0.3 when you basically had to guess. The server may drop low-confidence
+  category assignments based on a threshold the user sets, so be honest.
 - summary: one short sentence summarizing the review's point.
 
 {lang_directive}
@@ -261,6 +267,7 @@ async def run_analysis_job(
     summary_lang: str,
     root_ids: list[int] | None = None,
     source_ids: list[int] | None = None,
+    min_confidence: float = 0.0,
 ) -> None:
     job = registry.get(job_id)
     if not job:
@@ -309,9 +316,21 @@ async def run_analysis_job(
                                 await s2.execute(select(Analysis).where(Analysis.review_id == out.review_id))
                             ).scalar_one_or_none()
                             cat = _find_leaf_by_path(cat_rows, out.category_path or "") if out.category_path else None
+                            # Apply the user's confidence threshold: when the
+                            # LLM's confidence falls under it, drop the
+                            # category assignment but keep the sentiment
+                            # (sentiment is generally far less ambiguous).
+                            cat_id_to_store = cat.id if cat else None
+                            if (
+                                cat_id_to_store is not None
+                                and min_confidence > 0
+                                and out.confidence is not None
+                                and out.confidence < min_confidence
+                            ):
+                                cat_id_to_store = None
                             success = out.error is None and out.sentiment is not None
                             if existing:
-                                existing.category_id = cat.id if cat else None
+                                existing.category_id = cat_id_to_store
                                 existing.sentiment = out.sentiment
                                 existing.sentiment_score = out.sentiment_score
                                 existing.confidence = out.confidence
@@ -323,7 +342,7 @@ async def run_analysis_job(
                             else:
                                 s2.add(Analysis(
                                     review_id=out.review_id,
-                                    category_id=cat.id if cat else None,
+                                    category_id=cat_id_to_store,
                                     sentiment=out.sentiment,
                                     sentiment_score=out.sentiment_score,
                                     confidence=out.confidence,
