@@ -7,7 +7,17 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db
 from app.i18n import COOKIE_MAX_AGE, COOKIE_NAME, SUPPORTED, detect_lang, make_t
-from app.routes import analyze, categories, export, pages, reviews, sources, themes, workspace
+from app.routes import (
+    analyze,
+    categories,
+    export,
+    investigations,
+    pages,
+    reviews,
+    sources,
+    themes,
+    workspace,
+)
 from app.templating import render, templates  # noqa: F401
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -59,4 +69,5 @@ app.include_router(reviews.router)
 app.include_router(analyze.router)
 app.include_router(export.router)
 app.include_router(themes.router)
+app.include_router(investigations.router)
 app.include_router(workspace.router)

@@ -215,9 +215,9 @@ async def analyze_batch(
     return outputs
 
 
-async def _select_review_ids(session: AsyncSession, mode: str) -> list[int]:
-    from sqlalchemy import and_, or_
-
+async def _select_review_ids(
+    session: AsyncSession, mode: str, source_ids: list[int] | None = None
+) -> list[int]:
     base = select(Review.id).outerjoin(Analysis, Analysis.review_id == Review.id)
     if mode == "unanalyzed":
         stmt = base.where(Analysis.id.is_(None))
@@ -227,6 +227,8 @@ async def _select_review_ids(session: AsyncSession, mode: str) -> list[int]:
         stmt = select(Review.id)
     else:
         stmt = base.where(Analysis.id.is_(None))
+    if source_ids:
+        stmt = stmt.where(Review.source_id.in_(source_ids))
     result = await session.execute(stmt.order_by(Review.id))
     return [row[0] for row in result.all()]
 
@@ -258,6 +260,7 @@ async def run_analysis_job(
     model: str,
     summary_lang: str,
     root_ids: list[int] | None = None,
+    source_ids: list[int] | None = None,
 ) -> None:
     job = registry.get(job_id)
     if not job:
@@ -269,7 +272,7 @@ async def run_analysis_job(
             cat_rows = (await session.execute(select(Category))).scalars().all()
             if root_ids:
                 cat_rows = _restrict_to_roots(cat_rows, root_ids)
-            ids = await _select_review_ids(session, mode)
+            ids = await _select_review_ids(session, mode, source_ids=source_ids)
             job.total = len(ids)
             if not ids:
                 job.status = "succeeded"

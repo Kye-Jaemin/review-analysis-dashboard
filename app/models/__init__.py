@@ -3,6 +3,7 @@ from app.models.review import Review
 from app.models.category import Category
 from app.models.analysis import Analysis, AnalysisJob, Sentiment, AnalysisStatus
 from app.models.theme_snapshot import ThemeSnapshot
+from app.models.investigation import Investigation
 
 __all__ = [
     "Source",
@@ -16,4 +17,5 @@ __all__ = [
     "Sentiment",
     "AnalysisStatus",
     "ThemeSnapshot",
+    "Investigation",
 ]

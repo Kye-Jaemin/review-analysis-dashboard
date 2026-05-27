@@ -81,7 +81,12 @@
     "themes_category_total": "{n}건",
     "themes_expand_all": "모두 펼치기",
     "themes_collapse_all": "모두 접기",
-    "themes_breakdown": "카테고리별 상세 (클릭해서 펼치기)"
+    "themes_breakdown": "카테고리별 상세 (클릭해서 펼치기)",
+    "investigations_title": "조사 카드",
+    "investigations_hint": "저장된 (소스 × 카테고리) 조합. 클릭하면 아래 모든 패널이 그 범위로 좁혀집니다.",
+    "investigations_empty": "저장된 조사가 없습니다. 분석 페이지에서 실행 시 이름을 입력하면 여기에 카드로 추가됩니다.",
+    "investigations_active": "활성",
+    "investigations_clear": "필터 해제"
   },
   "source_type": {
     "google_play": "Google Play",
@@ -165,7 +170,12 @@
     "running": "분석 진행 중…",
     "root_scope": "분류 범위 (루트 카테고리)",
     "root_scope_hint": "선택한 루트 카테고리의 하위 트리만 LLM에 노출되어 그 안에서 분류합니다. 아무것도 선택하지 않으면 전체 카테고리 트리를 사용합니다.",
-    "no_roots": "루트 카테고리가 없습니다. 빈 트리로 분류됩니다."
+    "no_roots": "루트 카테고리가 없습니다. 빈 트리로 분류됩니다.",
+    "source_scope": "분석 대상 소스",
+    "source_scope_hint": "분석할 리뷰의 소스를 하나 이상 선택하세요. 아무것도 선택하지 않으면 모든 소스의 리뷰가 대상이 됩니다.",
+    "investigation_label": "조사 카드로 저장 (선택)",
+    "investigation_label_hint": "이름을 적으면 (소스, 카테고리) 조합이 대시보드에 카드로 추가됩니다. 다음에 그 카드를 클릭해 같은 필터로 한 번에 화면을 좁힐 수 있습니다.",
+    "investigation_label_placeholder": "예: Cal AI · UX 피드백"
   },
   "reviews": {
     "title": "리뷰",

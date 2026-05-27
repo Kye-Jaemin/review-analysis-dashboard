@@ -5,6 +5,16 @@
 {% block content %}
 <h1 class="text-2xl font-semibold mb-4">{{ t('dashboard.title') }}</h1>
 
+<div class="bg-white rounded shadow-sm px-4 py-3 mb-4">
+  <div class="flex items-baseline justify-between mb-2">
+    <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
+    <div class="text-xs text-gray-500" id="investigations-hint">{{ t('dashboard.investigations_hint') }}</div>
+  </div>
+  <div id="investigations-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    <div class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
+  </div>
+</div>
+
 <div class="bg-white rounded shadow-sm px-4 py-3 mb-5 space-y-3">
   <div>
     <div class="flex items-center gap-2 mb-2">
@@ -313,8 +323,104 @@ document.getElementById('root-filter-clear').addEventListener('click', () => {
 });
 
 async function reload() {
-  await loadStats();
-  await renderTrend(currentTrend.mode, currentTrend.period);
+  await Promise.all([
+    loadStats(),
+    renderTrend(currentTrend.mode, currentTrend.period),
+    loadInvestigations(),  // refresh active-card highlight
+  ]);
+}
+
+// ---- Investigation cards (click to apply saved source+category filter) ----
+let activeInvestigationId = null;
+
+function arraysEq(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const sa = [...a].sort(); const sb = [...b].sort();
+  for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return false;
+  return true;
+}
+
+async function loadInvestigations() {
+  try {
+    const res = await fetch('/api/investigations');
+    const data = await res.json();
+    renderInvestigations(data.investigations || []);
+  } catch (e) {
+    document.getElementById('investigations-grid').innerHTML =
+      '<div class="text-xs text-red-600">' + escapeHtml(String(e)) + '</div>';
+  }
+}
+
+function renderInvestigations(items) {
+  const grid = document.getElementById('investigations-grid');
+  if (!items.length) {
+    grid.innerHTML = `<div class="col-span-full text-sm text-gray-400 py-4 text-center">{{ t('dashboard.investigations_empty') }}</div>`;
+    return;
+  }
+
+  const curSrc = [...selectedSources];
+  const curRoot = [...selectedRoots];
+
+  grid.innerHTML = items.map(inv => {
+    const isActive = arraysEq(curSrc, inv.source_ids) && arraysEq(curRoot, inv.root_ids) && curSrc.length + curRoot.length > 0;
+    if (isActive) activeInvestigationId = inv.id;
+    const srcChips = (inv.sources || []).map(s => {
+      const icon = s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" class="w-3.5 h-3.5 rounded" alt="">` : '';
+      return `<span class="inline-flex items-center gap-1 bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[11px]">${icon}<span class="truncate max-w-[8rem]">${escapeHtml(s.label)}</span></span>`;
+    }).join(' ');
+    const catChips = (inv.roots || []).map(c =>
+      `<span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[11px]">${escapeHtml(c.name)}</span>`
+    ).join(' ');
+    const date = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
+    return `
+      <div data-inv-id="${inv.id}"
+           class="investigation-card border rounded p-3 cursor-pointer transition
+                  ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-400 bg-white'}"
+           onclick="applyInvestigation(${inv.id})">
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="font-medium text-sm truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</div>
+          ${isActive ? `<span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded">{{ t('dashboard.investigations_active') }}</span>` : ''}
+        </div>
+        <div class="text-[11px] text-gray-500 mb-2">${date}</div>
+        <div class="flex flex-wrap gap-1 mb-1">${srcChips || '<span class="text-[11px] text-gray-400">— no sources —</span>'}</div>
+        <div class="flex flex-wrap gap-1 mb-2">${catChips || '<span class="text-[11px] text-gray-400">— no categories —</span>'}</div>
+        <div class="flex justify-end">
+          <button type="button"
+                  onclick="event.stopPropagation(); deleteInvestigation(${inv.id})"
+                  class="text-[11px] text-red-600 hover:underline">${escapeHtml('{{ t("common.delete") }}')}</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function applyInvestigation(id) {
+  const res = await fetch('/api/investigations');
+  const data = await res.json();
+  const inv = (data.investigations || []).find(x => x.id === id);
+  if (!inv) return;
+  // Replace selected sets atomically.
+  selectedSources.clear();
+  (inv.source_ids || []).forEach(s => selectedSources.add(s));
+  selectedRoots.clear();
+  (inv.root_ids || []).forEach(r => selectedRoots.add(r));
+  activeInvestigationId = id;
+  renderInvestigations(data.investigations || []);
+  await reload();
+  // Scroll the analytics into view so user sees the result.
+  document.getElementById('source-filter-chips')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+async function deleteInvestigation(id) {
+  if (!confirm('{{ t("common.confirm_delete") }}')) return;
+  const res = await fetch(`/api/investigations/${id}`, { method: 'DELETE' });
+  if (!res.ok) { alert('delete failed'); return; }
+  if (activeInvestigationId === id) {
+    selectedSources.clear();
+    selectedRoots.clear();
+    activeInvestigationId = null;
+    await reload();
+  }
+  await loadInvestigations();
 }
 
 function escapeHtml(s) {
@@ -622,6 +728,7 @@ async function renderTrend(mode, period) {
   });
 }
 
+loadInvestigations();
 loadStats();
 renderTrend('distribution', 'week');
 

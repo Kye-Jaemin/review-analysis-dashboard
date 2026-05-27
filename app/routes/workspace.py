@@ -26,6 +26,7 @@ from app.models import (
     AnalysisStatus,
     Category,
     CollectionJob,
+    Investigation,
     Review,
     Sentiment,
     Source,
@@ -50,6 +51,9 @@ ANALYSIS_COLS = [
 SNAPSHOT_COLS = [
     "id", "label", "sentiment", "source_ids", "root_ids", "summary_lang",
     "sample_size", "model", "themes", "created_at",
+]
+INVESTIGATION_COLS = [
+    "id", "label", "description", "source_ids", "root_ids", "created_at", "updated_at",
 ]
 
 
@@ -88,6 +92,7 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
     reviews = (await session.execute(select(Review))).scalars().all()
     analyses = (await session.execute(select(Analysis))).scalars().all()
     snapshots = (await session.execute(select(ThemeSnapshot))).scalars().all()
+    investigations = (await session.execute(select(Investigation))).scalars().all()
 
     payload = {
         "version": EXPORT_VERSION,
@@ -97,6 +102,7 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
         "reviews": [_dump(r, REVIEW_COLS) for r in reviews],
         "analyses": [_dump(a, ANALYSIS_COLS) for a in analyses],
         "theme_snapshots": [_dump(s, SNAPSHOT_COLS) for s in snapshots],
+        "investigations": [_dump(i, INVESTIGATION_COLS) for i in investigations],
     }
 
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -110,8 +116,9 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
 
 async def _wipe(session: AsyncSession) -> None:
     # FK order: analyses → analysis_jobs → reviews → collection_jobs → sources → categories.
-    # ThemeSnapshot has no FKs, can be wiped any time.
+    # ThemeSnapshot and Investigation have no FKs, can be wiped any time.
     await session.execute(delete(ThemeSnapshot))
+    await session.execute(delete(Investigation))
     await session.execute(delete(Analysis))
     await session.execute(delete(AnalysisJob))
     await session.execute(delete(Review))
@@ -128,7 +135,7 @@ async def _reset_pg_sequences(session: AsyncSession) -> None:
         return
     for table in [
         "analyses", "analysis_jobs", "reviews", "collection_jobs", "sources", "categories",
-        "theme_snapshots",
+        "theme_snapshots", "investigations",
     ]:
         await session.execute(
             text(
@@ -260,6 +267,21 @@ async def import_workspace(
                 model=row.get("model"),
                 themes=row.get("themes") or [],
                 created_at=_parse_dt(row.get("created_at")) or datetime.utcnow(),
+            )
+        )
+    await session.flush()
+
+    for row in data.get("investigations") or []:
+        now = datetime.utcnow()
+        session.add(
+            Investigation(
+                id=row["id"],
+                label=row.get("label") or "(unnamed)",
+                description=row.get("description"),
+                source_ids=row.get("source_ids") or [],
+                root_ids=row.get("root_ids") or [],
+                created_at=_parse_dt(row.get("created_at")) or now,
+                updated_at=_parse_dt(row.get("updated_at")) or now,
             )
         )
     await session.flush()

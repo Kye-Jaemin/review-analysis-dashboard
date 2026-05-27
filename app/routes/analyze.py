@@ -8,7 +8,7 @@ from app.config import settings
 from app.db import get_session
 from app.i18n import COOKIE_MAX_AGE
 from app.jobs import registry
-from app.models import Analysis, AnalysisJob, AnalysisStatus, Category, Review
+from app.models import Analysis, AnalysisJob, AnalysisStatus, Category, Investigation, Review, Source
 from app.routes.reviews import _parse_int
 from app.services.analyzer import run_analysis_job
 from app.templating import render
@@ -43,6 +43,19 @@ async def analyze_page(request: Request, session: AsyncSession = Depends(get_ses
     ).scalars().all()
     roots = [{"id": c.id, "name": c.name, "description": c.description} for c in root_rows]
 
+    source_rows = (
+        await session.execute(select(Source).order_by(Source.label))
+    ).scalars().all()
+    sources = [
+        {
+            "id": s.id,
+            "label": s.label,
+            "type": s.type.value if hasattr(s.type, "value") else str(s.type),
+            "icon_url": s.icon_url,
+        }
+        for s in source_rows
+    ]
+
     return render(
         request,
         "analyze.html",
@@ -50,6 +63,7 @@ async def analyze_page(request: Request, session: AsyncSession = Depends(get_ses
         allowed_models=settings.allowed_models,
         last_model=last_model,
         roots=roots,
+        sources=sources,
     )
 
 
@@ -61,6 +75,8 @@ async def start_analysis(
     model: str = Form(""),
     summary_lang: str = Form("en"),
     root_ids: List[str] = Form(default_factory=list),
+    source_ids: List[str] = Form(default_factory=list),
+    investigation_label: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
     model = model or settings.ANTHROPIC_MODEL
@@ -68,6 +84,19 @@ async def start_analysis(
         model = settings.ANTHROPIC_MODEL
 
     parsed_roots = [v for v in (_parse_int(s) for s in root_ids) if v is not None]
+    parsed_sources = [v for v in (_parse_int(s) for s in source_ids) if v is not None]
+
+    # If the user provided a label, persist (source_ids, root_ids) as a
+    # dashboard card. Empty label means "just run, no card".
+    label = (investigation_label or "").strip()
+    if label:
+        inv = Investigation(
+            label=label[:200],
+            source_ids=parsed_sources,
+            root_ids=parsed_roots,
+        )
+        session.add(inv)
+        await session.commit()
 
     aj = AnalysisJob(status="running", model=model)
     session.add(aj)
@@ -79,7 +108,14 @@ async def start_analysis(
     job.status = "pending"
 
     background_tasks.add_task(
-        run_analysis_job, job.id, aj.id, mode, model, summary_lang, parsed_roots or None
+        run_analysis_job,
+        job.id,
+        aj.id,
+        mode,
+        model,
+        summary_lang,
+        parsed_roots or None,
+        parsed_sources or None,
     )
     registry.prune()
 

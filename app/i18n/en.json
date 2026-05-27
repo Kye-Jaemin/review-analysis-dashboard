@@ -81,7 +81,12 @@
     "themes_category_total": "{n} reviews",
     "themes_expand_all": "Expand all",
     "themes_collapse_all": "Collapse all",
-    "themes_breakdown": "Breakdown (click a category to expand)"
+    "themes_breakdown": "Breakdown (click a category to expand)",
+    "investigations_title": "Investigations",
+    "investigations_hint": "Saved (sources × categories) cards. Click one to scope every panel below.",
+    "investigations_empty": "No investigations saved yet. On the Analyze page, give your run a name to save it here.",
+    "investigations_active": "Active",
+    "investigations_clear": "Clear filter"
   },
   "source_type": {
     "google_play": "Google Play",
@@ -165,7 +170,12 @@
     "running": "Running analysis…",
     "root_scope": "Category scope",
     "root_scope_hint": "Pick one or more root categories. The LLM will see only those subtrees and classify within them. Leave all unchecked to use the full category tree.",
-    "no_roots": "No root categories defined yet. The LLM will classify against an empty tree."
+    "no_roots": "No root categories defined yet. The LLM will classify against an empty tree.",
+    "source_scope": "Source scope",
+    "source_scope_hint": "Pick one or more sources whose reviews you want to analyze. Leave all unchecked to include every source.",
+    "investigation_label": "Save as investigation card (optional)",
+    "investigation_label_hint": "If you give this run a name, the (sources, categories) pair will appear as a card on the dashboard so you can click it to refilter everything later.",
+    "investigation_label_placeholder": "e.g. Cal AI · UX feedback"
   },
   "reviews": {
     "title": "Reviews",

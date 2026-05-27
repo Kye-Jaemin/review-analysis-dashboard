@@ -25,6 +25,26 @@
         hx-post="/analyze" hx-target="#analyze-job-area" hx-swap="innerHTML"
         class="space-y-4">
     <div>
+      <label class="text-sm font-medium block mb-1">{{ t('analyze.source_scope') }}</label>
+      <div class="text-xs text-gray-500 mb-2">{{ t('analyze.source_scope_hint') }}</div>
+      {% if sources %}
+        <div class="flex flex-wrap gap-2">
+          {% for src in sources %}
+            <label class="flex items-center gap-1.5 px-2.5 py-1.5 border rounded cursor-pointer text-sm hover:bg-gray-50">
+              <input type="checkbox" name="source_ids" value="{{ src.id }}" class="accent-blue-600">
+              {% if src.icon_url %}<img src="{{ src.icon_url }}" alt="" class="w-4 h-4 rounded">{% endif %}
+              <span>{{ src.label }}</span>
+              <span class="text-[10px] text-gray-500">· {{ src.type }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+          {{ t('sources.no_sources') }}
+        </div>
+      {% endif %}
+    </div>
+    <div>
       <label class="text-sm font-medium block mb-1">{{ t('analyze.mode') }}</label>
       <select name="mode" class="border rounded px-3 py-2 text-sm w-full">
         <option value="unanalyzed">{{ t('analyze.mode_unanalyzed') }}</option>
@@ -67,6 +87,13 @@
         <option value="ko">한국어</option>
         <option value="auto">{{ t('analyze.auto') }}</option>
       </select>
+    </div>
+    <div class="border-t pt-3">
+      <label class="text-sm font-medium block mb-1">{{ t('analyze.investigation_label') }}</label>
+      <div class="text-xs text-gray-500 mb-2">{{ t('analyze.investigation_label_hint') }}</div>
+      <input type="text" name="investigation_label" maxlength="200"
+             placeholder="{{ t('analyze.investigation_label_placeholder') }}"
+             class="w-full border rounded px-3 py-2 text-sm" />
     </div>
     <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
       {{ t('analyze.run') }}
