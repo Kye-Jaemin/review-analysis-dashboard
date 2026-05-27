@@ -6,41 +6,18 @@
 <h1 class="text-2xl font-semibold mb-4">{{ t('dashboard.title') }}</h1>
 
 <div class="bg-white rounded shadow-sm px-4 py-3 mb-4">
-  <div class="flex items-baseline justify-between mb-2">
+  <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
     <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
-    <div class="text-xs text-gray-500" id="investigations-hint">{{ t('dashboard.investigations_hint') }}</div>
+    <div class="flex items-center gap-3">
+      <button type="button" id="investigations-clear-btn" onclick="clearActiveInvestigation()"
+              class="text-xs text-blue-600 hover:underline hidden">
+        ✕ {{ t('dashboard.investigations_clear') }}
+      </button>
+      <div class="text-xs text-gray-500">{{ t('dashboard.investigations_hint') }}</div>
+    </div>
   </div>
   <div id="investigations-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
     <div class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
-  </div>
-</div>
-
-<div class="bg-white rounded shadow-sm px-4 py-3 mb-5 space-y-3">
-  <div>
-    <div class="flex items-center gap-2 mb-2">
-      <span class="text-xs text-gray-500 w-20 shrink-0">{{ t('reviews.filter.source') }}</span>
-      <span class="text-xs text-gray-400" id="source-filter-status">{{ t('common.all') }}</span>
-      <button type="button" id="source-filter-clear"
-              class="ml-auto text-xs text-blue-600 hover:underline hidden">
-        {{ t('common.cancel') }}
-      </button>
-    </div>
-    <div id="source-filter-chips" class="flex flex-wrap gap-1.5 text-xs">
-      <div class="text-gray-400">{{ t('common.loading') }}</div>
-    </div>
-  </div>
-  <div class="border-t border-gray-100 pt-3">
-    <div class="flex items-center gap-2 mb-2">
-      <span class="text-xs text-gray-500 w-20 shrink-0">{{ t('categories.title') }}</span>
-      <span class="text-xs text-gray-400" id="root-filter-status">{{ t('common.all') }}</span>
-      <button type="button" id="root-filter-clear"
-              class="ml-auto text-xs text-blue-600 hover:underline hidden">
-        {{ t('common.cancel') }}
-      </button>
-    </div>
-    <div id="root-filter-chips" class="flex flex-wrap gap-1.5 text-xs">
-      <div class="text-gray-400">{{ t('common.loading') }}</div>
-    </div>
   </div>
 </div>
 
@@ -208,12 +185,11 @@ const SOURCE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#
 
 let charts = {};
 
-// Filter state. Empty set = no filter = show all.
+// Filter state — only mutated by Investigation card clicks now.
+// Empty sets = no filter = show all data.
 const selectedSources = new Set();
 const selectedRoots = new Set();
 let currentTrend = { mode: 'distribution', period: 'week' };
-let lastAllSources = [];
-let lastAllRoots = [];
 
 function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); charts[id] = null; }
@@ -226,101 +202,12 @@ function filterQuery() {
   return params.toString();
 }
 
-function renderSourceFilterChips(allSources) {
-  lastAllSources = allSources || [];
-  const wrap = document.getElementById('source-filter-chips');
-  if (lastAllSources.length === 0) {
-    wrap.innerHTML = `<div class="text-gray-400">{{ t('sources.no_sources') }}</div>`;
-    document.getElementById('source-filter-status').textContent = '—';
-    document.getElementById('source-filter-clear').classList.add('hidden');
-    return;
-  }
-  wrap.innerHTML = lastAllSources.map(s => {
-    const active = selectedSources.has(s.id);
-    const typeLbl = SOURCE_TYPE_LABELS[s.type] || s.type;
-    return `<button type="button" data-source-id="${s.id}"
-      class="source-chip px-2 py-1 rounded border transition flex items-center gap-1
-             ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}">
-      ${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" class="w-3.5 h-3.5 rounded" alt="">` : ''}
-      <span class="truncate max-w-[10rem]" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
-      <span class="opacity-75 text-[10px]">· ${escapeHtml(typeLbl)}</span>
-    </button>`;
-  }).join('');
-
-  wrap.querySelectorAll('.source-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = parseInt(btn.dataset.sourceId, 10);
-      if (selectedSources.has(id)) selectedSources.delete(id);
-      else selectedSources.add(id);
-      reload();
-    });
-  });
-
-  updateSourceFilterStatus();
-}
-
-function renderRootFilterChips(allRoots) {
-  lastAllRoots = allRoots || [];
-  const wrap = document.getElementById('root-filter-chips');
-  if (lastAllRoots.length === 0) {
-    wrap.innerHTML = `<div class="text-gray-400">{{ t('categories.no_categories') }}</div>`;
-    document.getElementById('root-filter-status').textContent = '—';
-    document.getElementById('root-filter-clear').classList.add('hidden');
-    return;
-  }
-  wrap.innerHTML = lastAllRoots.map(c => {
-    const active = selectedRoots.has(c.id);
-    return `<button type="button" data-root-id="${c.id}"
-      class="root-chip px-2 py-1 rounded border transition
-             ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}">
-      <span class="truncate max-w-[12rem]" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>
-    </button>`;
-  }).join('');
-
-  wrap.querySelectorAll('.root-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = parseInt(btn.dataset.rootId, 10);
-      if (selectedRoots.has(id)) selectedRoots.delete(id);
-      else selectedRoots.add(id);
-      reload();
-    });
-  });
-
-  updateRootFilterStatus();
-}
-
-function updateSourceFilterStatus() {
-  const status = document.getElementById('source-filter-status');
-  const clearBtn = document.getElementById('source-filter-clear');
-  if (selectedSources.size === 0) {
-    status.textContent = `{{ t('common.all') }} (${lastAllSources.length})`;
-    clearBtn.classList.add('hidden');
-  } else {
-    status.textContent = `${selectedSources.size} / ${lastAllSources.length}`;
-    clearBtn.classList.remove('hidden');
-  }
-}
-
-function updateRootFilterStatus() {
-  const status = document.getElementById('root-filter-status');
-  const clearBtn = document.getElementById('root-filter-clear');
-  if (selectedRoots.size === 0) {
-    status.textContent = `{{ t('common.all') }} (${lastAllRoots.length})`;
-    clearBtn.classList.add('hidden');
-  } else {
-    status.textContent = `${selectedRoots.size} / ${lastAllRoots.length}`;
-    clearBtn.classList.remove('hidden');
-  }
-}
-
-document.getElementById('source-filter-clear').addEventListener('click', () => {
+async function clearActiveInvestigation() {
   selectedSources.clear();
-  reload();
-});
-document.getElementById('root-filter-clear').addEventListener('click', () => {
   selectedRoots.clear();
-  reload();
-});
+  activeInvestigationId = null;
+  await reload();
+}
 
 async function reload() {
   await Promise.all([
@@ -353,13 +240,18 @@ async function loadInvestigations() {
 
 function renderInvestigations(items) {
   const grid = document.getElementById('investigations-grid');
+  const clearBtn = document.getElementById('investigations-clear-btn');
   if (!items.length) {
     grid.innerHTML = `<div class="col-span-full text-sm text-gray-400 py-4 text-center">{{ t('dashboard.investigations_empty') }}</div>`;
+    if (clearBtn) clearBtn.classList.add('hidden');
     return;
   }
 
   const curSrc = [...selectedSources];
   const curRoot = [...selectedRoots];
+
+  // Reset active id; the loop below sets it if a card matches the current filter.
+  activeInvestigationId = null;
 
   grid.innerHTML = items.map(inv => {
     const isActive = arraysEq(curSrc, inv.source_ids) && arraysEq(curRoot, inv.root_ids) && curSrc.length + curRoot.length > 0;
@@ -391,6 +283,10 @@ function renderInvestigations(items) {
         </div>
       </div>`;
   }).join('');
+
+  if (clearBtn) {
+    clearBtn.classList.toggle('hidden', !(curSrc.length || curRoot.length));
+  }
 }
 
 async function applyInvestigation(id) {
@@ -406,8 +302,6 @@ async function applyInvestigation(id) {
   activeInvestigationId = id;
   renderInvestigations(data.investigations || []);
   await reload();
-  // Scroll the analytics into view so user sees the result.
-  document.getElementById('source-filter-chips')?.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 async function deleteInvestigation(id) {
@@ -449,8 +343,6 @@ async function loadStats() {
   document.getElementById('card-avg-rating').textContent = data.avg_rating != null ? data.avg_rating.toFixed(2) + ' ★' : '—';
   document.getElementById('card-last').textContent = data.last_collected ? data.last_collected.slice(0,16).replace('T',' ') : '—';
 
-  renderSourceFilterChips(data.all_sources || []);
-  renderRootFilterChips(data.all_roots || []);
   renderSentiment(data);
   renderSource(data);
   renderCategory(data);
