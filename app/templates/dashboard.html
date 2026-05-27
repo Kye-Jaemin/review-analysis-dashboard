@@ -133,6 +133,10 @@
               class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 hidden">
         💾 {{ t('dashboard.themes_save') }}
       </button>
+      <button id="themes-fit-btn" onclick="fitMindmap()"
+              class="text-gray-600 hover:underline hidden">
+        📐 Fit
+      </button>
       <button id="themes-download-btn" onclick="downloadMindmapSvg()"
               class="text-gray-600 hover:underline hidden">
         ⬇️ {{ t('dashboard.themes_download_svg') }}
@@ -141,7 +145,7 @@
   </div>
   <div class="text-xs text-gray-500 mb-2">{{ t('dashboard.themes_hint') }}</div>
   <div id="themes-status" class="text-xs text-gray-500 mb-2"></div>
-  <div id="themes-mindmap" class="overflow-auto" style="min-height: 0;"></div>
+  <div id="themes-mindmap" class="border border-gray-100 rounded" style="height: 0; overflow: hidden;"></div>
   <div id="themes-breakdown-wrap" class="hidden mt-4">
     <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
       <div>{{ t('dashboard.themes_breakdown') }}</div>
@@ -622,49 +626,106 @@ loadStats();
 renderTrend('distribution', 'week');
 
 // ---- Sentiment themes (mind map) ----
-function sanitizeMermaidLabel(s) {
-  if (!s) return '';
+// We use markmap (https://markmap.js.org) instead of Mermaid so each node
+// is clickable to collapse/expand its descendants — which the user asked for.
+
+function mdEscape(s) {
+  // Markmap consumes markdown. Strip backticks and pipes which would break
+  // table/code blocks, collapse newlines, trim, cap length.
+  if (s == null) return '';
   return String(s)
-    .replace(/[()\[\]"#:;{}|&<>]/g, ' ')
+    .replace(/[`|]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 60);
+    .slice(0, 90);
 }
 
-function buildMindmap(data) {
-  const sentLabel = sanitizeMermaidLabel(SENTIMENT_LABELS[data.sentiment] || data.sentiment) || data.sentiment;
-  const lines = ['mindmap', `  root((${sentLabel}))`];
+function buildMarkmapMarkdown(data) {
+  const sentLabel = mdEscape(SENTIMENT_LABELS[data.sentiment] || data.sentiment) || data.sentiment;
+  const lines = [`# ${sentLabel}`];
 
-  // New grouped structure: categories[].themes[].
+  const emit = (depth, text) => lines.push('  '.repeat(depth) + '- ' + text);
+
   if (data.categories && data.categories.length) {
     for (const cat of data.categories) {
-      const catLabel = sanitizeMermaidLabel(cat.category || 'Uncategorized');
+      const catName = mdEscape(cat.category || 'Uncategorized');
       const catTotal = (typeof cat.total === 'number') ? ` (${cat.total})` : '';
-      lines.push(`    ${catLabel}${catTotal}`);
+      emit(0, `**${catName}**${catTotal}`);
       for (const t of cat.themes || []) {
-        const themeName = sanitizeMermaidLabel(t.theme);
-        const suffix = (typeof t.count === 'number') ? ` (${t.count})` : '';
-        lines.push(`      ${themeName}${suffix}`);
+        const themeName = mdEscape(t.theme);
+        const cnt = (typeof t.count === 'number') ? ` (${t.count})` : '';
+        emit(1, `${themeName}${cnt}`);
         for (const ex of (t.examples || [])) {
-          const safeEx = sanitizeMermaidLabel(ex);
-          if (safeEx) lines.push(`        ${safeEx}`);
+          const safeEx = mdEscape(ex);
+          if (safeEx) emit(2, `"${safeEx}"`);
         }
       }
     }
-    return lines.join('\n');
-  }
-
-  // Legacy flat structure.
-  for (const t of data.themes || []) {
-    const themeName = sanitizeMermaidLabel(t.theme);
-    const suffix = (typeof t.count === 'number') ? ` (${t.count})` : '';
-    lines.push(`    ${themeName}${suffix}`);
-    for (const ex of (t.examples || [])) {
-      const safeEx = sanitizeMermaidLabel(ex);
-      if (safeEx) lines.push(`      ${safeEx}`);
+  } else {
+    for (const t of data.themes || []) {
+      const themeName = mdEscape(t.theme);
+      const cnt = (typeof t.count === 'number') ? ` (${t.count})` : '';
+      const fromCat = t.category ? ` _[${mdEscape(t.category)}]_` : '';
+      emit(0, `${themeName}${cnt}${fromCat}`);
+      for (const ex of (t.examples || [])) {
+        const safeEx = mdEscape(ex);
+        if (safeEx) emit(1, `"${safeEx}"`);
+      }
     }
   }
   return lines.join('\n');
+}
+
+let __currentMarkmap = null;
+
+async function renderMarkmap(data, container) {
+  // Wait briefly for esm.sh module to land.
+  for (let i = 0; i < 50 && !window.__markmap; i++) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (!window.__markmap) {
+    container.style.height = 'auto';
+    container.innerHTML = '<div class="text-xs text-red-600 p-3">Markmap library failed to load (network blocked?).</div>';
+    return;
+  }
+  const { Transformer, Markmap } = window.__markmap;
+  const transformer = new Transformer();
+  const markdown = buildMarkmapMarkdown(data);
+
+  let parsed;
+  try {
+    parsed = transformer.transform(markdown);
+  } catch (e) {
+    container.style.height = 'auto';
+    container.innerHTML = `<pre class="text-xs text-red-600 p-3 whitespace-pre-wrap">${escapeHtml(String(e))}\n\n${escapeHtml(markdown)}</pre>`;
+    return;
+  }
+
+  // Give the SVG real space (markmap renders into a fixed-size svg and supports
+  // panning/zooming inside it). 520px is a comfortable default.
+  container.style.height = '520px';
+  container.style.overflow = 'hidden';
+  container.innerHTML = '';
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('id', 'markmap-' + Date.now());
+  svg.style.width = '100%';
+  svg.style.height = '100%';
+  svg.style.display = 'block';
+  container.appendChild(svg);
+
+  try {
+    __currentMarkmap = Markmap.create(svg, null, parsed.root);
+    // Let the layout settle then auto-fit.
+    setTimeout(() => __currentMarkmap?.fit?.(), 80);
+  } catch (e) {
+    container.style.height = 'auto';
+    container.innerHTML = `<pre class="text-xs text-red-600 p-3 whitespace-pre-wrap">${escapeHtml(String(e))}\n\n${escapeHtml(markdown)}</pre>`;
+  }
+}
+
+function fitMindmap() {
+  if (__currentMarkmap && __currentMarkmap.fit) __currentMarkmap.fit();
 }
 
 const CATEGORY_TOTAL_LABEL = {{ t('dashboard.themes_category_total', n='__N__') | tojson }};
@@ -773,6 +834,8 @@ async function loadSnapshot(idStr) {
   const container = document.getElementById('themes-mindmap');
   statusEl.textContent = '{{ t("common.loading") }}';
   container.innerHTML = '';
+  container.style.height = '0';
+  document.getElementById('themes-fit-btn').classList.add('hidden');
   document.getElementById('themes-breakdown-wrap').classList.add('hidden');
   document.getElementById('themes-breakdown').innerHTML = '';
   try {
@@ -796,7 +859,10 @@ async function deleteCurrentSnapshot() {
   if (!res.ok) { alert('delete failed'); return; }
   currentLoadedSnapshotId = null;
   document.getElementById('themes-delete-btn').classList.add('hidden');
-  document.getElementById('themes-mindmap').innerHTML = '';
+  const mm = document.getElementById('themes-mindmap');
+  mm.innerHTML = '';
+  mm.style.height = '0';
+  document.getElementById('themes-fit-btn').classList.add('hidden');
   document.getElementById('themes-status').textContent = '';
   document.getElementById('themes-saved-select').value = '';
   document.getElementById('themes-breakdown-wrap').classList.add('hidden');
@@ -862,18 +928,7 @@ async function renderThemesData(data, saved) {
   const savedTag = saved ? ` · 💾 ${escapeHtml(data.label || '')}` : '';
   statusEl.innerHTML = escapeHtml(sampleLine + modelTag + cachedTag) + savedTag;
 
-  const mindmapText = buildMindmap(data);
-  if (window.__mermaid) {
-    try {
-      const id = 'mindmap-' + Date.now();
-      const { svg } = await window.__mermaid.render(id, mindmapText);
-      container.innerHTML = svg;
-    } catch (e) {
-      container.innerHTML = `<pre class="text-xs text-red-600 whitespace-pre-wrap">${escapeHtml(String(e))}\n\n${escapeHtml(mindmapText)}</pre>`;
-    }
-  } else {
-    container.innerHTML = `<pre class="text-xs">${escapeHtml(mindmapText)}</pre>`;
-  }
+  await renderMarkmap(data, container);
 
   currentThemesData = data;
   renderBreakdown(data);
@@ -881,6 +936,7 @@ async function renderThemesData(data, saved) {
   saveBtn.classList.toggle('hidden', !!saved);
   regenBtn.classList.toggle('hidden', !!saved);
   dlBtn.classList.remove('hidden');
+  document.getElementById('themes-fit-btn').classList.remove('hidden');
 }
 
 async function generateThemes(force) {
@@ -898,6 +954,8 @@ async function generateThemes(force) {
   genBtn.disabled = true;
   statusEl.textContent = '{{ t("common.loading") }}';
   container.innerHTML = '';
+  container.style.height = '0';
+  document.getElementById('themes-fit-btn').classList.add('hidden');
   document.getElementById('themes-breakdown-wrap').classList.add('hidden');
   document.getElementById('themes-breakdown').innerHTML = '';
 
@@ -930,8 +988,9 @@ async function generateThemes(force) {
 refreshSavedSnapshots();
 </script>
 <script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
-  window.__mermaid = mermaid;
+  // markmap.js — interactive mind map (click a node to collapse/expand).
+  import { Transformer } from 'https://esm.sh/markmap-lib@0.18';
+  import { Markmap } from 'https://esm.sh/markmap-view@0.18';
+  window.__markmap = { Transformer, Markmap };
 </script>
 {% endblock %}
