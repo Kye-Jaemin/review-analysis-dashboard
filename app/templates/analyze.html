@@ -31,7 +31,8 @@
         <div class="flex flex-wrap gap-2">
           {% for src in sources %}
             <label class="flex items-center gap-1.5 px-2.5 py-1.5 border rounded cursor-pointer text-sm hover:bg-gray-50">
-              <input type="checkbox" name="source_ids" value="{{ src.id }}" class="accent-blue-600">
+              <input type="checkbox" name="source_ids" value="{{ src.id }}"
+                     data-label="{{ src.label }}" class="accent-blue-600">
               {% if src.icon_url %}<img src="{{ src.icon_url }}" alt="" class="w-4 h-4 rounded">{% endif %}
               <span>{{ src.label }}</span>
               <span class="text-[10px] text-gray-500">· {{ src.type }}</span>
@@ -59,7 +60,8 @@
         <div class="flex flex-wrap gap-2">
           {% for root in roots %}
             <label class="flex items-center gap-1.5 px-2.5 py-1.5 border rounded cursor-pointer text-sm hover:bg-gray-50">
-              <input type="checkbox" name="root_ids" value="{{ root.id }}" class="accent-blue-600">
+              <input type="checkbox" name="root_ids" value="{{ root.id }}"
+                     data-label="{{ root.name }}" class="accent-blue-600">
               <span>{{ root.name }}</span>
             </label>
           {% endfor %}
@@ -91,7 +93,7 @@
     <div class="border-t pt-3">
       <label class="text-sm font-medium block mb-1">{{ t('analyze.investigation_label') }}</label>
       <div class="text-xs text-gray-500 mb-2">{{ t('analyze.investigation_label_hint') }}</div>
-      <input type="text" name="investigation_label" maxlength="200"
+      <input type="text" id="investigation-label-input" name="investigation_label" maxlength="200"
              placeholder="{{ t('analyze.investigation_label_placeholder') }}"
              class="w-full border rounded px-3 py-2 text-sm" />
     </div>
@@ -145,6 +147,42 @@
   });
 
   updateCount();
+
+  // -------- Auto-fill the investigation label as "<sources>_<categories>" --------
+  // The user can override at any time by typing; we stop auto-filling once they
+  // type something and resume if they clear the field back to empty.
+  const labelInput = document.getElementById('investigation-label-input');
+  let userEdited = false;
+
+  function readLabels(name) {
+    return Array.from(form.querySelectorAll(`input[name="${name}"]:checked`))
+      .map(cb => cb.dataset.label)
+      .filter(Boolean);
+  }
+
+  function autoLabel() {
+    const src = readLabels('source_ids').join(', ');
+    const cat = readLabels('root_ids').join(', ');
+    if (!src && !cat) return '';
+    if (!src) return cat;
+    if (!cat) return src;
+    return `${src}_${cat}`;
+  }
+
+  function refreshAutoLabel() {
+    if (userEdited) return;
+    labelInput.value = autoLabel();
+  }
+
+  labelInput.addEventListener('input', () => {
+    userEdited = labelInput.value.trim().length > 0;
+  });
+
+  form.addEventListener('change', (e) => {
+    if (e.target.name === 'source_ids' || e.target.name === 'root_ids') refreshAutoLabel();
+  });
+
+  refreshAutoLabel();
 })();
 </script>
 {% endblock %}
