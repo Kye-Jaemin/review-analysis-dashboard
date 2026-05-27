@@ -21,14 +21,14 @@
   .howto-prose .toc a:hover { text-decoration: underline; }
   .howto-prose .callout { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 4px; font-size: 0.875rem; }
   .howto-prose .callout.info { background: #eff6ff; border-left-color: #3b82f6; }
+  .howto-prose .callout.new { background: #ecfdf5; border-left-color: #10b981; }
 </style>
 
 <div class="bg-white rounded shadow-sm p-6 max-w-4xl howto-prose">
 
 {% if lang == 'ko' %}
 
-<p>여러 채널의 사용자 리뷰를 수집·분류·분석해 한 화면에서 비교하는 단일 사용자용 웹앱입니다.
-   아래 순서대로 진행하면 첫 분석까지 약 10분이면 됩니다.</p>
+<p>여러 채널의 사용자 리뷰를 수집·분류·분석한 뒤, <strong>조사 카드</strong>라는 단위로 (소스 × 카테고리) 조합을 저장하고 그 카드 하나를 클릭해 대시보드·리뷰·마인드맵 화면을 한 번에 그 범위로 좁힙니다.</p>
 
 <div class="toc">
   <strong>목차</strong>
@@ -37,26 +37,35 @@
     <li><a href="#quickstart">빠른 시작 (5단계)</a></li>
     <li><a href="#sources">소스 추가 — 4가지 채널</a></li>
     <li><a href="#categories">카테고리 트리 만들기</a></li>
-    <li><a href="#analyze">분석 실행</a></li>
-    <li><a href="#dashboard">대시보드 활용</a></li>
+    <li><a href="#analyze">분석 실행 + 조사 카드 생성</a></li>
+    <li><a href="#dashboard">대시보드 — 조사 카드 중심</a></li>
+    <li><a href="#mindmap">감성 원인 마인드맵</a></li>
+    <li><a href="#reviews">리뷰 탐색 + 내보내기</a></li>
     <li><a href="#workspace">워크스페이스 저장·불러오기</a></li>
     <li><a href="#troubleshoot">문제 해결</a></li>
   </ol>
 </div>
 
 <h2 id="overview">1. 이 앱이 하는 일</h2>
-<p>Google Play, Apple App Store, Reddit, 임의 웹사이트에서 사용자 리뷰를 모은 뒤,
+<p>Google Play · Apple App Store · Reddit · 임의 웹사이트에서 사용자 리뷰를 모은 뒤,
    본인이 정의한 <strong>계층형 카테고리</strong>로 자동 분류하고
-   각 리뷰의 <strong>5단계 감성</strong>(매우 부정 ~ 매우 긍정)을 평가합니다.
-   결과는 대시보드 차트와 리뷰 테이블에서 비교·필터링·내보내기 가능.</p>
+   <strong>5단계 감성</strong>(매우 부정 ~ 매우 긍정)을 평가합니다. 결과는
+   <strong>조사 카드</strong>를 클릭해서 대시보드·리뷰·마인드맵에서 비교·필터링·내보내기 가능.</p>
+
+<div class="callout new">
+  <strong>조사 카드(Investigation card)란?</strong>
+  분석을 실행할 때 "분석할 소스 + 분류 범위(루트 카테고리)"를 묶어 이름을 붙여 저장한 카드입니다.
+  대시보드와 리뷰 페이지 상단에 그리드 형태로 표시되며, 카드를 클릭하면 모든 패널이 그 카드의 범위로 즉시 좁혀집니다.
+  마인드맵도 카드별로 따로 저장됩니다.
+</div>
 
 <h2 id="quickstart">2. 빠른 시작 (5단계)</h2>
 <ol>
-  <li><strong>소스 추가</strong> — 좌측 메뉴 <a href="/sources" class="text-blue-600 hover:underline">Sources</a> 에서 분석할 앱·서브레딧·URL 등록</li>
-  <li><strong>카테고리 정의</strong> — <a href="/categories" class="text-blue-600 hover:underline">Categories</a> 에서 분류 기준 트리 생성</li>
-  <li><strong>수집 실행</strong> — Sources 페이지에서 각 소스의 <em>수집 시작</em> 버튼 클릭</li>
-  <li><strong>분석 실행</strong> — <a href="/analyze" class="text-blue-600 hover:underline">Analyze</a> 에서 모델 선택 후 실행</li>
-  <li><strong>결과 확인</strong> — <a href="/" class="text-blue-600 hover:underline">Dashboard</a> 차트와 <a href="/reviews" class="text-blue-600 hover:underline">Reviews</a> 테이블</li>
+  <li><strong>소스 추가</strong> — <a href="/sources" class="text-blue-600 hover:underline">Sources</a>에서 분석할 앱·서브레딧·URL 등록</li>
+  <li><strong>카테고리 정의</strong> — <a href="/categories" class="text-blue-600 hover:underline">Categories</a>에서 분류 기준 트리 생성</li>
+  <li><strong>수집 실행</strong> — Sources 페이지에서 각 소스의 <em>수집 시작</em> 클릭</li>
+  <li><strong>조사 카드 생성 + 분석</strong> — <a href="/analyze" class="text-blue-600 hover:underline">Analyze</a>에서 분석할 소스와 카테고리를 체크하고 이름을 입력 후 실행 (이름은 자동으로 <code>소스_카테고리</code> 형태로 채워짐)</li>
+  <li><strong>결과 확인</strong> — <a href="/" class="text-blue-600 hover:underline">Dashboard</a> 진입 시 첫 카드가 자동 활성. 다른 카드 클릭으로 즉시 전환</li>
 </ol>
 
 <h2 id="sources">3. 소스 추가 — 4가지 채널</h2>
@@ -71,14 +80,12 @@
 </ol>
 
 <h3>3.2 Apple App Store</h3>
-<p>절차는 Google Play와 동일. 단 <strong>country가 더 중요</strong> — Apple은 각 국가별로 별도 리뷰 풀입니다.
-   미국(<code>us</code>)이 기본, 한국 리뷰가 필요하면 <code>kr</code>.</p>
+<p>절차는 Google Play와 동일. <strong>country가 더 중요</strong> — Apple은 국가별 별도 리뷰 풀입니다. 미국(<code>us</code>)이 기본, 한국 리뷰가 필요하면 <code>kr</code>. 수집은 Apple 공식 RSS 엔드포인트(페이지당 50건, 최대 500건)를 사용합니다.</p>
 
 <h3>3.3 Reddit</h3>
-<p>사전 준비가 필요합니다:</p>
+<p>사전 준비:</p>
 <ol>
-  <li><a href="https://www.reddit.com/prefs/apps" target="_blank" class="text-blue-600 hover:underline">reddit.com/prefs/apps</a> 에서 <strong>script</strong> 타입 앱 생성
-      (이메일 인증 안 됐으면 먼저 인증)</li>
+  <li><a href="https://www.reddit.com/prefs/apps" target="_blank" class="text-blue-600 hover:underline">reddit.com/prefs/apps</a>에서 <strong>script</strong> 타입 앱 생성 (이메일 인증 안 됐으면 먼저 인증)</li>
   <li>발급된 <code>client_id</code> + <code>secret</code>을 Render Environment에 등록:
       <ul>
         <li><code>REDDIT_CLIENT_ID</code></li>
@@ -86,149 +93,166 @@
         <li><code>REDDIT_USER_AGENT=web:review-collector:v0.1 (by /u/your_id)</code></li>
       </ul>
   </li>
-  <li>Render가 자동 재시작된 후 Sources → Reddit 선택</li>
-  <li>서브레딧 이름 검색 (예: <code>spotify</code>) → 후보 클릭</li>
-  <li>옵션 조정:
-      <ul>
-        <li><strong>검색어</strong>: 비워두면 서브레딧 전체</li>
-        <li><strong>정렬</strong>: <code>new</code>(최신) / <code>top</code>(인기) / <code>hot</code> / <code>relevance</code></li>
-        <li><strong>기간</strong>: top/relevance일 때 적용</li>
-        <li><strong>댓글 포함</strong>: 게시글의 상위 N개 댓글도 수집</li>
-      </ul>
-  </li>
-  <li><em>추가</em> 클릭</li>
+  <li>Render 재시작 후 Sources → Reddit 선택 → 서브레딧 검색 → 선택 → 추가</li>
 </ol>
 
 <h3>3.4 사용자 지정 URL</h3>
 <ol>
   <li>Sources → 소스 유형 = <strong>Custom URL</strong></li>
   <li>URL 목록 입력 (한 줄에 하나)</li>
-  <li>CSS selector 입력 (선택):
-      <ul>
-        <li><code>item_selector</code>: 반복되는 리뷰 블록 (예: <code>.review-item</code>)</li>
-        <li><code>text_selector</code>, <code>author_selector</code>, <code>date_selector</code>, <code>rating_selector</code>: 각 블록 안에서 추출할 요소</li>
-        <li>비워두면 readability로 본문 자동 추출</li>
-      </ul>
-  </li>
-  <li>JavaScript 렌더가 필요한 페이지면 <strong>Playwright 사용</strong> 체크
-      (현재 Render 무료 플랜에선 메모리 제약으로 비활성화 권장)</li>
+  <li>CSS selector 옵션 (비워두면 readability로 자동 본문 추출)</li>
+  <li>JS 렌더 필요 시 Playwright 옵션 (Render 무료 플랜에선 메모리 제약으로 비활성화 권장)</li>
 </ol>
 
 <h2 id="categories">4. 카테고리 트리 만들기</h2>
 <ol>
-  <li>Categories 페이지 → 우상단 <em>루트 카테고리 추가</em></li>
-  <li>이름과 <strong>설명</strong> 입력 — 설명이 LLM의 분류 기준이 됩니다</li>
+  <li>Categories → <em>루트 카테고리 추가</em></li>
+  <li>이름과 <strong>설명</strong> 입력 — 설명이 LLM 분류 기준</li>
   <li>각 노드의 <em>하위 추가</em>로 자식 생성</li>
 </ol>
 
 <div class="callout info">
-  <strong>설명 작성 팁</strong>: "결제 관련 (구독, 환불, 가격)" 같이 1~2줄로 키워드를 적어두면
-  LLM이 훨씬 정확하게 분류합니다. 빈 설명은 분류 품질 저하의 가장 큰 원인.
+  <strong>설명 작성 팁:</strong> "결제 관련 (구독, 환불, 가격)" 같이 1~2줄로 키워드를 적어두면
+  LLM 분류 정확도가 크게 올라갑니다. 빈 설명은 분류 품질 저하의 가장 큰 원인.
 </div>
 
-<p>깊이 제한은 없지만 실용상 3단계 이내 권장. 예시:</p>
-<pre class="bg-gray-50 border border-gray-200 rounded p-3 text-xs">사용성 UX/UI
-├─ 온보딩          (가입·튜토리얼·첫 사용 경험)
-├─ 핵심 UX         (메인 화면·네비게이션)
-└─ 결제·구독        (구독 가입·해지·환불·가격)
-성능
-├─ 속도            (로딩·반응 속도)
-└─ 크래시·버그     (앱 종료·오류 메시지)
-기타                (위에 해당하지 않는 모든 리뷰)</pre>
-
-<h2 id="analyze">5. 분석 실행</h2>
+<h2 id="analyze">5. 분석 실행 + 조사 카드 생성</h2>
+<p>분석은 단순한 "한 번 돌리고 끝"이 아니라 <strong>조사 카드</strong>를 만드는 과정입니다.</p>
 <ol>
-  <li>Analyze 페이지 접속 — 상단에 미분석/실패/전체 건수 표시</li>
-  <li><strong>모드</strong> 선택:
-      <ul>
-        <li><em>미분석만</em>: 아직 분석 안 된 리뷰만 처리 (보통 사용)</li>
-        <li><em>실패만 재시도</em>: 이전에 실패한 분석만 다시</li>
-        <li><em>전체 재분석</em>: 모든 리뷰 재분석 (카테고리 트리 바꾼 후)</li>
-      </ul>
-  </li>
-  <li><strong>분류 범위 (루트 카테고리)</strong> 선택 (선택사항):
-      <ul>
-        <li>특정 root 체크 → LLM에 그 subtree만 노출되어 그 안에서 분류</li>
-        <li>아무것도 안 체크 → 전체 트리 사용</li>
-      </ul>
-  </li>
-  <li><strong>모델</strong> 선택:
+  <li>Analyze 페이지 상단에 미분석/실패/전체 건수가 보임</li>
+  <li><strong>모드</strong>: <em>미분석만</em> (보통) / <em>실패만 재시도</em> / <em>전체 재분석</em></li>
+  <li><strong>분석 대상 소스</strong>: 체크박스로 분석할 소스 멀티 선택. 미체크 시 전체</li>
+  <li><strong>분류 범위(루트 카테고리)</strong>: 멀티 선택한 root의 subtree만 LLM에 노출되어 그 안에서 분류. 미체크 시 전체 트리</li>
+  <li><strong>모델</strong>:
       <table>
-        <thead><tr><th>모델</th><th>속도·비용</th><th>정확도</th><th>추천 상황</th></tr></thead>
+        <thead><tr><th>모델</th><th>속도·비용</th><th>정확도</th><th>추천</th></tr></thead>
         <tbody>
           <tr><td>Haiku</td><td>매우 빠름·저렴</td><td>좋음</td><td>대량 분류, 초기 탐색</td></tr>
           <tr><td>Sonnet</td><td>균형</td><td>매우 좋음</td><td>일반 분석</td></tr>
-          <tr><td>Opus</td><td>느리고 비쌈</td><td>최고</td><td>중요한 인사이트 도출</td></tr>
+          <tr><td>Opus</td><td>느리고 비쌈</td><td>최고</td><td>중요한 인사이트</td></tr>
         </tbody>
       </table>
   </li>
-  <li><strong>요약 언어</strong>: 영어 / 한국어 / 자동(리뷰 언어 따라)</li>
-  <li><em>분석 실행</em> → 진행률 바 표시 (2초 간격 폴링)</li>
+  <li><strong>요약 언어</strong>: 영어 / 한국어 / 자동</li>
+  <li><strong>현재 조건에 해당하는 리뷰</strong>: 체크박스·모드 변경에 따라 분석 대상 건수가 실시간 표시됨</li>
+  <li><strong>조사 카드로 저장</strong>:
+      <ul>
+        <li>이름 칸이 자동으로 <code>&lt;선택한 소스들&gt;_&lt;선택한 카테고리들&gt;</code> 형태로 채워짐 (예: <code>Cal AI Google Play, Cal AI App Store_사용성 UX/UI</code>)</li>
+        <li>그대로 두거나 직접 수정 가능. 비우면 카드는 만들지 않고 분석만 실행</li>
+      </ul>
+  </li>
+  <li><em>분석 실행</em> → 진행률 표시 (2초 간격 폴링)</li>
 </ol>
 
 <div class="callout">
-  <strong>주의:</strong> 분석은 Anthropic API를 호출하므로 비용이 발생합니다.
-  본 사이트는 인증 없이 공개돼 있어 누구나 분석 버튼을 누를 수 있으니,
-  Render Dashboard에서 사용량 모니터링을 권장합니다.
+  <strong>Anthropic 비용 주의:</strong> 분석 버튼은 누구나 누를 수 있으니
+  공개 URL이라면 Anthropic 콘솔에서 API 사용량을 정기적으로 모니터링하세요.
 </div>
 
-<h2 id="dashboard">6. 대시보드 활용</h2>
+<h2 id="dashboard">6. 대시보드 — 조사 카드 중심</h2>
 
-<h3>6.1 상단 필터 카드</h3>
+<h3>6.1 첫 화면</h3>
+<p>대시보드 진입 시:</p>
 <ul>
-  <li><strong>소스 칩</strong>: 멀티 선택. 선택한 소스만 모든 차트에 반영. 미선택 = 전체</li>
-  <li><strong>카테고리 칩</strong>: 루트 카테고리 멀티 선택. 그 root의 모든 후손이 통계에 포함</li>
-  <li>둘 다 선택하면 AND로 결합 (예: "Cal AI App Store" + "UX" → 그 앱의 UX 분석만)</li>
+  <li><strong>저장된 카드가 1개 이상</strong>: 가장 최근 업데이트된 카드가 <strong>자동 활성</strong>되어 그 범위의 통계 표시</li>
+  <li><strong>카드가 0개</strong>: 빈 상태 메시지 표시 ("조사 카드가 없습니다. 분석 페이지에서 만드세요")</li>
 </ul>
 
-<h3>6.2 4개 카드</h3>
+<h3>6.2 카드 그리드</h3>
+<p>상단에 모든 카드가 그리드로 표시됩니다. 각 카드:</p>
 <ul>
-  <li><strong>총 리뷰</strong>: 필터 적용 후 리뷰 수</li>
-  <li><strong>평균 감성 점수</strong>: 1~5 평균 (1=매우 부정, 5=매우 긍정)</li>
-  <li><strong>평균 별점</strong>: Google Play / App Store만 별점 보유</li>
-  <li><strong>최근 수집</strong>: 가장 최근 수집된 리뷰 시각</li>
+  <li>카드 이름 + 업데이트 날짜</li>
+  <li>소스 chips (아이콘 포함) + 카테고리 chips</li>
+  <li>활성 카드는 <strong>파란 테두리 + "활성" 뱃지</strong></li>
+  <li>우측 하단 <strong>삭제</strong> 버튼 — 카드 삭제 시 연결된 마인드맵도 함께 삭제됨 (CASCADE)</li>
 </ul>
 
-<h3>6.3 차트</h3>
+<h3>6.3 현재 보기 strip</h3>
+<p>카드 그리드 바로 아래에 <strong>읽기 전용</strong>으로 현재 활성 카드의 소스·카테고리가 표시됩니다 (수동 토글 불가).</p>
+
+<h3>6.4 패널들 (활성 카드 범위로 자동 필터)</h3>
 <ul>
-  <li><strong>루트 카테고리별 감성 분포</strong>: 가로 누적 막대. 카테고리 1개 = 막대 1개</li>
-  <li><strong>출처별 분포</strong>: 도넛 + 표 (소스 타입·평점도 함께)</li>
-  <li><strong>카테고리별 누적 막대</strong>: 모든 leaf 카테고리의 5단계 감성</li>
-  <li><strong>시간 추이</strong>: 주간/월간 × 5단계 분포/평균 점수 4가지 모드 전환 가능</li>
+  <li>4개 요약 카드: 총 리뷰 / 평균 감성 / 평균 별점 / 최근 수집</li>
+  <li>루트 카테고리별 감성 분포 (가로 누적 막대)</li>
+  <li>소스별 분포 (도넛 + 표, 평균 별점 포함)</li>
+  <li>카테고리별 누적 막대</li>
+  <li>시간 추이 (주간/월간 × 5단계분포/평균점수)</li>
+  <li>감성 원인 마인드맵 (다음 섹션 참고)</li>
+  <li>최근 리뷰 미리보기</li>
 </ul>
 
-<h3>6.4 Reviews 탐색</h3>
-<p>좌측 필터(소스/카테고리/감성/기간/키워드) → 페이지네이션 → 우상단 <strong>내보내기 CSV/JSON/Excel</strong></p>
+<h2 id="mindmap">7. 감성 원인 마인드맵</h2>
+<p>활성 카드의 리뷰들을 LLM이 분석해서 "왜 이 감성이 나오는지" 테마를 추출합니다.</p>
 
-<h2 id="workspace">7. 워크스페이스 저장·불러오기</h2>
-<p>이 사이트의 DB는 모든 방문자와 공유됩니다. 본인 조사를 따로 보관하려면:</p>
+<h3>7.1 동작</h3>
+<ol>
+  <li>대시보드에서 활성 카드 확인</li>
+  <li>마인드맵 패널의 감성 dropdown (매우 긍정 / 긍정 / 부정 / 매우 부정)</li>
+  <li><em>생성</em> 클릭 → Claude가 최근 100건을 읽고 카테고리별로 그룹된 테마 5~8개 + 대표 인용구 반환</li>
+  <li>마인드맵에 3단계 트리: <strong>감성</strong> → <strong>카테고리</strong> → <strong>테마(카운트)</strong> → <strong>인용구</strong></li>
+  <li>아래에 카테고리별 아코디언 (클릭으로 펼치기/접기) + 카운트 caveat 문구</li>
+</ol>
+
+<h3>7.2 인터랙션 (markmap.js 기반)</h3>
 <ul>
-  <li><strong>📤 파일로 내보내기</strong>: 현재 상태(소스·카테고리·리뷰·분석 전부)를 JSON 파일로 다운로드</li>
+  <li><strong>노드 클릭</strong> → 그 하위 가지 접기/펼치기</li>
+  <li><strong>드래그</strong> → 전체 팬</li>
+  <li><strong>마우스 휠</strong> → 확대/축소</li>
+  <li><strong>📐 Fit</strong> → 화면에 맞춤 (리셋)</li>
+  <li><strong>⬇️ SVG 다운로드</strong> → 현재 화면 SVG로 저장</li>
+</ul>
+
+<h3>7.3 저장 (카드별)</h3>
+<ul>
+  <li><strong>💾 저장</strong> 클릭 → 이름 입력 → 그 카드 소속 마인드맵으로 DB 저장</li>
+  <li>저장된 마인드맵은 그 카드가 활성일 때만 dropdown에 표시 (다른 카드 활성 시엔 가려짐)</li>
+  <li>카드 삭제 시 마인드맵도 CASCADE로 같이 삭제</li>
+  <li><strong>📥 SVG / 워크스페이스 export</strong>에 모두 포함됨</li>
+</ul>
+
+<div class="callout info">
+  <strong>카운트 해석:</strong> 각 테마의 숫자는 <em>그 테마를 주요 주제로 다룬 리뷰 수</em>입니다.
+  한 리뷰는 한 번만 카운트되며, 카테고리 내 합산은 카테고리 총합 이하 (약간의 오차는 정상).
+</div>
+
+<h2 id="reviews">8. 리뷰 탐색 + 내보내기</h2>
+<ul>
+  <li>Reviews 페이지 상단에도 <strong>조사 카드 그리드</strong>가 표시됨 — 클릭하면 그 카드 범위의 리뷰만 표시</li>
+  <li>좌측 사이드바 필터(감성/기간/키워드)로 카드 범위 안에서 추가 필터링 가능</li>
+  <li>우상단 <strong>CSV / JSON / Excel 내보내기</strong> — 활성 카드 + 사이드바 필터가 그대로 반영된 결과만 다운로드</li>
+  <li>헤더의 <strong>✕ 필터 해제</strong> → 카드 선택 없는 상태로 (전체 리뷰)</li>
+</ul>
+
+<h2 id="workspace">9. 워크스페이스 저장·불러오기</h2>
+<p>DB는 모든 방문자와 공유됩니다. 본인 조사를 따로 보관하려면 사이드바 워크스페이스 섹션:</p>
+<ul>
+  <li><strong>📤 파일로 내보내기</strong>: 현재 상태(소스·카테고리·리뷰·분석·<strong>조사 카드·마인드맵</strong> 전부)를 JSON으로 다운로드</li>
   <li><strong>📥 파일 불러오기</strong>: 저장해뒀던 JSON 업로드 → 현재 DB를 그 시점 상태로 덮어씀</li>
   <li><strong>🗑 새로 시작</strong>: 모든 데이터 비우고 처음부터</li>
 </ul>
-<p>사이드바 하단의 워크스페이스 섹션에서 이용하세요.</p>
 
-<h2 id="troubleshoot">8. 문제 해결</h2>
+<h2 id="troubleshoot">10. 문제 해결</h2>
 <table>
   <thead><tr><th>증상</th><th>원인 / 해결</th></tr></thead>
   <tbody>
+    <tr><td>대시보드가 빈 상태 메시지만 표시</td><td>조사 카드가 0개. /analyze에서 이름을 적고 실행하여 카드 생성</td></tr>
+    <tr><td>활성 카드인데 차트가 비어있음</td><td>그 소스·카테고리 범위에 분석된 리뷰가 없음. /analyze에서 그 범위로 재분석</td></tr>
+    <tr><td>마인드맵 저장 시 "조사 카드를 선택해야" 에러</td><td>활성 카드 없는 상태에서 저장 시도. 카드 클릭 후 다시</td></tr>
     <tr><td>수집 결과 0건 + status "succeeded"</td><td>소스 config 오류. 삭제 후 재추가</td></tr>
-    <tr><td>Reddit 검색 시 "Reddit search failed"</td><td>REDDIT_CLIENT_ID 등 미설정. Render Environment 확인</td></tr>
+    <tr><td>Reddit 검색 실패</td><td>REDDIT_CLIENT_ID 등 미설정. Render Environment 확인</td></tr>
     <tr><td>분석 시 401 / API key 에러</td><td>ANTHROPIC_API_KEY 미설정 또는 잘못된 키</td></tr>
-    <tr><td>분석 결과가 엉뚱한 카테고리로</td><td>카테고리 설명이 비어있거나 부정확. 설명 보강 후 "전체 재분석"</td></tr>
-    <tr><td>대시보드가 비어있음</td><td>분석이 한 번도 실행 안 됨. /analyze 진행 후 새로고침</td></tr>
-    <tr><td>첫 접속이 30초 걸림</td><td>Render free의 cold start. UptimeRobot 등으로 5분 간격 ping</td></tr>
-    <tr><td>Apple 수집은 되는데 너무 적음</td><td>RSS 한도(페이지당 50건 × 10페이지 = 최대 500건). 정상 동작</td></tr>
+    <tr><td>분석 결과 카테고리가 엉뚱함</td><td>카테고리 설명 비어있거나 부정확. 보강 후 "전체 재분석"</td></tr>
+    <tr><td>첫 접속 30초 걸림</td><td>Render free의 cold start. UptimeRobot 등으로 5분 간격 ping</td></tr>
   </tbody>
 </table>
 
 {% else %}
 
-<p>This is a single-user web app for collecting reviews from multiple channels,
-classifying them with a user-defined category tree, and grading each on a 5-band
-sentiment scale. Follow the steps below; you can reach your first analysis in
-about 10 minutes.</p>
+<p>This app collects user reviews from multiple channels, classifies them
+with your own category tree, and grades each on a 5-band sentiment scale.
+The central organising primitive is the <strong>Investigation card</strong>:
+a saved (sources × categories) pair. Click one and every panel — dashboard
+charts, mind maps, the reviews list — scopes to it.</p>
 
 <div class="toc">
   <strong>Contents</strong>
@@ -237,27 +261,37 @@ about 10 minutes.</p>
     <li><a href="#quickstart">Quick start (5 steps)</a></li>
     <li><a href="#sources">Add a source — 4 channels</a></li>
     <li><a href="#categories">Build a category tree</a></li>
-    <li><a href="#analyze">Run analysis</a></li>
-    <li><a href="#dashboard">Reading the dashboard</a></li>
+    <li><a href="#analyze">Run analysis + create an Investigation</a></li>
+    <li><a href="#dashboard">Dashboard — driven by cards</a></li>
+    <li><a href="#mindmap">Sentiment reasons mind map</a></li>
+    <li><a href="#reviews">Reviews explorer + export</a></li>
     <li><a href="#workspace">Workspace save / load</a></li>
     <li><a href="#troubleshoot">Troubleshooting</a></li>
   </ol>
 </div>
 
 <h2 id="overview">1. What this app does</h2>
-<p>Pull reviews from Google Play, Apple App Store, Reddit, and arbitrary web
-   pages, then automatically classify each into a <strong>hierarchical category
-   tree</strong> you define and grade it on a <strong>5-band sentiment</strong>
-   scale (very negative → very positive). Compare, filter, and export the
-   results in the dashboard and reviews tables.</p>
+<p>Pull reviews from Google Play, Apple App Store, Reddit, and arbitrary
+   web pages; classify each into your <strong>hierarchical category
+   tree</strong>; grade each on a 5-band sentiment (very negative → very
+   positive); then use <strong>Investigation cards</strong> to drill into
+   any saved (sources × categories) subset.</p>
+
+<div class="callout new">
+  <strong>What's an Investigation card?</strong>
+  When you run analysis you bundle the chosen sources and root categories
+  under a name. That bundle becomes a card on the dashboard and reviews
+  pages. Click the card and every panel filters to that subset. Mind maps
+  also live per card.
+</div>
 
 <h2 id="quickstart">2. Quick start (5 steps)</h2>
 <ol>
-  <li><strong>Add a source</strong> — register the app, subreddit, or URL in <a href="/sources" class="text-blue-600 hover:underline">Sources</a></li>
+  <li><strong>Add a source</strong> — register apps, subreddits, or URLs in <a href="/sources" class="text-blue-600 hover:underline">Sources</a></li>
   <li><strong>Define categories</strong> — build your classification tree in <a href="/categories" class="text-blue-600 hover:underline">Categories</a></li>
   <li><strong>Collect</strong> — click <em>Start collection</em> on each source card</li>
-  <li><strong>Analyze</strong> — pick a model in <a href="/analyze" class="text-blue-600 hover:underline">Analyze</a> and run</li>
-  <li><strong>Inspect</strong> — charts on the <a href="/" class="text-blue-600 hover:underline">Dashboard</a>, rows in <a href="/reviews" class="text-blue-600 hover:underline">Reviews</a></li>
+  <li><strong>Create an Investigation + analyse</strong> — in <a href="/analyze" class="text-blue-600 hover:underline">Analyze</a>, pick sources and root categories, give the run a name (auto-filled as <code>sources_categories</code>), and run</li>
+  <li><strong>Inspect</strong> — opening the <a href="/" class="text-blue-600 hover:underline">Dashboard</a> auto-activates the most recent card. Click a different card to switch context.</li>
 </ol>
 
 <h2 id="sources">3. Add a source — 4 channels</h2>
@@ -265,60 +299,32 @@ about 10 minutes.</p>
 <h3>3.1 Google Play</h3>
 <ol>
   <li>Sources → source type = <strong>Google Play</strong></li>
-  <li>Type the app name in the search box (e.g. <code>spotify</code>)</li>
+  <li>Search the app name (e.g. <code>spotify</code>)</li>
   <li>Pick a country — affects review language</li>
-  <li>Click the candidate card (icon + developer + rating)</li>
-  <li>Adjust label / max count → <em>Add</em></li>
+  <li>Click a candidate card → adjust label / max count → <em>Add</em></li>
 </ol>
 
 <h3>3.2 Apple App Store</h3>
-<p>Same flow as Google Play. <strong>Country matters more</strong> here — Apple
-   has a separate review pool per country store. Default <code>us</code>; pick
-   <code>kr</code> for Korean reviews, etc.</p>
+<p>Same flow as Google Play. <strong>Country matters more</strong> here — Apple has a separate review pool per country store. We use Apple's official customer-reviews RSS (50 entries × 10 pages = max 500).</p>
 
 <h3>3.3 Reddit</h3>
-<p>One-time setup required:</p>
 <ol>
-  <li>Create a <strong>script</strong>-type app at <a href="https://www.reddit.com/prefs/apps" target="_blank" class="text-blue-600 hover:underline">reddit.com/prefs/apps</a>
-      (verify your email first if you haven't)</li>
-  <li>Set the resulting credentials in Render Environment:
-      <ul>
-        <li><code>REDDIT_CLIENT_ID</code></li>
-        <li><code>REDDIT_CLIENT_SECRET</code></li>
-        <li><code>REDDIT_USER_AGENT=web:review-collector:v0.1 (by /u/your_id)</code></li>
-      </ul>
-  </li>
-  <li>After Render restarts, Sources → Reddit</li>
-  <li>Search by subreddit name (e.g. <code>spotify</code>) → click candidate</li>
-  <li>Adjust options:
-      <ul>
-        <li><strong>Search query</strong>: empty = the whole subreddit</li>
-        <li><strong>Sort</strong>: <code>new</code> / <code>top</code> / <code>hot</code> / <code>relevance</code></li>
-        <li><strong>Time filter</strong>: applies to top/relevance</li>
-        <li><strong>Include comments</strong>: also fetch top N comments per submission</li>
-      </ul>
-  </li>
-  <li>Click <em>Add</em></li>
+  <li>Create a <strong>script</strong>-type app at <a href="https://www.reddit.com/prefs/apps" target="_blank" class="text-blue-600 hover:underline">reddit.com/prefs/apps</a> (verify email first if needed)</li>
+  <li>Set Render env vars: <code>REDDIT_CLIENT_ID</code>, <code>REDDIT_CLIENT_SECRET</code>, <code>REDDIT_USER_AGENT=web:review-collector:v0.1 (by /u/your_id)</code></li>
+  <li>Sources → Reddit → search subreddit → pick → add</li>
 </ol>
 
 <h3>3.4 Custom URL</h3>
 <ol>
   <li>Sources → source type = <strong>Custom URL</strong></li>
-  <li>Enter URLs, one per line</li>
-  <li>CSS selectors (optional):
-      <ul>
-        <li><code>item_selector</code>: the repeated review block (e.g. <code>.review-item</code>)</li>
-        <li><code>text_selector</code>, <code>author_selector</code>, <code>date_selector</code>, <code>rating_selector</code>: extracted within each block</li>
-        <li>Leave blank → falls back to readability auto-extraction</li>
-      </ul>
-  </li>
-  <li>Check <strong>Use Playwright</strong> for pages requiring JS rendering
-      (disabled on Render free tier by default to avoid OOM)</li>
+  <li>One URL per line</li>
+  <li>Optional CSS selectors (empty = readability auto-extract)</li>
+  <li>Playwright toggle for JS-rendered pages (off by default on Render free for memory reasons)</li>
 </ol>
 
 <h2 id="categories">4. Build a category tree</h2>
 <ol>
-  <li>Categories → <em>Add root category</em> (top-right)</li>
+  <li>Categories → <em>Add root category</em></li>
   <li>Enter name + <strong>description</strong> — the description is the LLM's classification rubric</li>
   <li>Use each node's <em>Add child</em> to grow the tree</li>
 </ol>
@@ -326,105 +332,133 @@ about 10 minutes.</p>
 <div class="callout info">
   <strong>Description tip:</strong> A one-line description like
   "Billing-related (subscription, refund, pricing)" massively improves
-  classification accuracy. Empty descriptions are the #1 cause of poor results.
+  accuracy. Empty descriptions are the #1 cause of poor results.
 </div>
 
-<p>No depth limit, but 3 levels is recommended in practice. Example:</p>
-<pre class="bg-gray-50 border border-gray-200 rounded p-3 text-xs">UX
-├─ Onboarding       (signup, tutorial, first-use experience)
-├─ Core UX          (main screen, navigation)
-└─ Billing          (subscription, cancellation, refund, pricing)
-Performance
-├─ Speed            (loading, responsiveness)
-└─ Crashes & bugs   (app exits, error messages)
-Other               (anything not fitting the above)</pre>
-
-<h2 id="analyze">5. Run analysis</h2>
+<h2 id="analyze">5. Run analysis + create an Investigation</h2>
+<p>Analysis is no longer a one-shot — each run can also save a card.</p>
 <ol>
-  <li>Analyze page shows current unanalyzed / failed / total counts</li>
-  <li>Pick a <strong>mode</strong>:
-      <ul>
-        <li><em>Analyze unanalyzed only</em>: typical use</li>
-        <li><em>Retry failed only</em>: re-run previous failures</li>
-        <li><em>Re-analyze everything</em>: useful after editing the category tree</li>
-      </ul>
-  </li>
-  <li><strong>Category scope (root)</strong> — optional:
-      <ul>
-        <li>Check one or more roots → LLM only sees those subtrees</li>
-        <li>Leave all unchecked → full tree</li>
-      </ul>
-  </li>
+  <li>Header shows current unanalyzed / failed / total counts</li>
+  <li><strong>Mode</strong>: <em>unanalyzed only</em> (typical) / <em>retry failed</em> / <em>re-analyze everything</em></li>
+  <li><strong>Source scope</strong>: multi-select checkboxes; unchecked = every source</li>
+  <li><strong>Category scope (roots)</strong>: multi-select; LLM only sees those subtrees</li>
   <li><strong>Model</strong>:
       <table>
-        <thead><tr><th>Model</th><th>Speed / Cost</th><th>Accuracy</th><th>When to use</th></tr></thead>
+        <thead><tr><th>Model</th><th>Speed / Cost</th><th>Accuracy</th><th>When</th></tr></thead>
         <tbody>
-          <tr><td>Haiku</td><td>Fast / cheap</td><td>Good</td><td>Bulk classification, early exploration</td></tr>
-          <tr><td>Sonnet</td><td>Balanced</td><td>Very good</td><td>General analysis</td></tr>
-          <tr><td>Opus</td><td>Slower / pricier</td><td>Best</td><td>Important insights</td></tr>
+          <tr><td>Haiku</td><td>Fast / cheap</td><td>Good</td><td>Bulk, exploration</td></tr>
+          <tr><td>Sonnet</td><td>Balanced</td><td>Very good</td><td>General use</td></tr>
+          <tr><td>Opus</td><td>Slower / pricier</td><td>Best</td><td>High-stakes insights</td></tr>
         </tbody>
       </table>
   </li>
-  <li><strong>Summary language</strong>: English / Korean / Auto (match review)</li>
-  <li>Click <em>Run analysis</em> → progress bar (polls every 2 s)</li>
+  <li><strong>Summary language</strong>: English / Korean / Auto</li>
+  <li><strong>Live count</strong>: a "Reviews matching the current selection: N" line updates as you toggle</li>
+  <li><strong>Save as investigation card</strong>:
+      <ul>
+        <li>Auto-filled with <code>&lt;sources&gt;_&lt;categories&gt;</code> the moment you tick boxes</li>
+        <li>Keep it or rewrite. Empty means "just run, don't save a card."</li>
+      </ul>
+  </li>
+  <li>Click <em>Run analysis</em> → polled progress bar.</li>
 </ol>
 
 <div class="callout">
-  <strong>Heads up:</strong> Analysis hits the Anthropic API, which costs money.
-  This site has no auth, so anyone with the URL can press the button. Monitor
-  usage in the Anthropic console.
+  <strong>Anthropic cost:</strong> the button is open to anyone with the URL —
+  monitor usage in the Anthropic console.
 </div>
 
-<h2 id="dashboard">6. Reading the dashboard</h2>
+<h2 id="dashboard">6. Dashboard — driven by cards</h2>
 
-<h3>6.1 Top filter card</h3>
+<h3>6.1 First view</h3>
 <ul>
-  <li><strong>Source chips</strong>: multi-select; only selected sources contribute. Empty = all</li>
-  <li><strong>Category chips</strong>: multi-select root categories; all descendants are included</li>
-  <li>Combining both is an AND (e.g. "Cal AI App Store" + "UX" → only UX analyses for that app)</li>
+  <li><strong>At least one card exists</strong>: the most recently updated card is auto-activated; panels render its scope.</li>
+  <li><strong>No cards</strong>: empty-state placeholder pointing you to <em>Analyze</em>.</li>
 </ul>
 
-<h3>6.2 Four summary cards</h3>
+<h3>6.2 Cards grid</h3>
 <ul>
-  <li><strong>Total reviews</strong> after filters</li>
-  <li><strong>Average sentiment</strong> on the 1–5 scale</li>
-  <li><strong>Average rating</strong> (Google Play / App Store only)</li>
-  <li><strong>Last collected</strong> timestamp</li>
+  <li>Each card shows label, update date, source chips with icons, category chips.</li>
+  <li>Active card highlighted with a blue border + "Active" badge.</li>
+  <li>Bottom-right delete button — deleting a card cascades to its saved mind maps.</li>
 </ul>
 
-<h3>6.3 Charts</h3>
+<h3>6.3 "Currently viewing" strip</h3>
+<p>Read-only chips below the cards grid show the active sources and categories. No manual toggle — pick a different card to change scope.</p>
+
+<h3>6.4 Panels (all scoped to the active card)</h3>
 <ul>
-  <li><strong>Sentiment by root category</strong>: horizontal stacked bar</li>
-  <li><strong>By source</strong>: doughnut + table (source type + rating shown)</li>
-  <li><strong>By category</strong>: stacked bar for every leaf</li>
-  <li><strong>Trend</strong>: weekly/monthly × 5-band/average — toggle to compare</li>
+  <li>4 summary cards: total / avg sentiment / avg rating / last collected</li>
+  <li>Sentiment by root category (horizontal stacked bar)</li>
+  <li>By source (doughnut + table with avg rating)</li>
+  <li>By category (stacked bar)</li>
+  <li>Trend (weekly / monthly × 5-band / average)</li>
+  <li>Mind map (next section)</li>
+  <li>Recent reviews</li>
 </ul>
 
-<h3>6.4 Reviews explorer</h3>
-<p>Left filter pane (source/category/sentiment/date/keyword) → pagination →
-   <strong>Export CSV/JSON/Excel</strong> top-right.</p>
+<h2 id="mindmap">7. Sentiment reasons mind map</h2>
+<p>The LLM reads up to 100 reviews of the chosen sentiment within the active card and extracts the dominant themes per category.</p>
 
-<h2 id="workspace">7. Workspace save / load</h2>
-<p>The database is shared across every visitor. To keep your investigation
-   separate:</p>
+<h3>7.1 Workflow</h3>
+<ol>
+  <li>Pick a sentiment band from the dropdown (very_positive / positive / negative / very_negative)</li>
+  <li>Click <em>Generate</em> → Claude returns 5–8 themes grouped by category, each with 2–3 representative quote snippets</li>
+  <li>Mind map renders a 3-level tree: <strong>Sentiment</strong> → <strong>Category</strong> → <strong>Theme (count)</strong> → <strong>Quote</strong></li>
+  <li>Companion accordion below the mind map lets you click each category open / collapse</li>
+</ol>
+
+<h3>7.2 Interaction (markmap.js)</h3>
 <ul>
-  <li><strong>📤 Export to file</strong>: download the current state (sources, categories, reviews, analyses) as JSON</li>
-  <li><strong>📥 Import file</strong>: upload a saved JSON → overwrites the current DB with that snapshot</li>
-  <li><strong>🗑 Start fresh</strong>: wipe everything and begin from zero</li>
+  <li><strong>Click a node</strong> → fold / unfold its descendants</li>
+  <li><strong>Drag</strong> → pan</li>
+  <li><strong>Wheel</strong> → zoom</li>
+  <li><strong>📐 Fit</strong> → reset view</li>
+  <li><strong>⬇️ Download SVG</strong> → save the rendered map</li>
 </ul>
-<p>The controls live in the sidebar workspace section.</p>
 
-<h2 id="troubleshoot">8. Troubleshooting</h2>
+<h3>7.3 Saving (per card)</h3>
+<ul>
+  <li><strong>💾 Save</strong> → prompts for a label → persisted under the active card.</li>
+  <li>The "Saved mind maps" dropdown only lists this card's snapshots; switching cards swaps the list.</li>
+  <li>Deleting a card cascades to its saved mind maps.</li>
+  <li>Both SVG download and workspace export preserve them.</li>
+</ul>
+
+<div class="callout info">
+  <strong>Counts:</strong> each theme's number is the count of reviews whose
+  <em>primary</em> topic is that theme — a review is counted once. Per-category
+  sums should be ≤ the category total; tiny drift is normal.
+</div>
+
+<h2 id="reviews">8. Reviews explorer + export</h2>
+<ul>
+  <li>The Reviews page shows the same <strong>Investigation cards grid</strong> on top — click one to scope the table.</li>
+  <li>Sidebar filters (sentiment / dates / keyword) refine inside the active card.</li>
+  <li>Top-right <strong>CSV / JSON / Excel export</strong> — the active card + sidebar filters apply to the download.</li>
+  <li>"✕ Clear filter" header link drops the card filter back to "everything".</li>
+</ul>
+
+<h2 id="workspace">9. Workspace save / load</h2>
+<p>The DB is shared across visitors. To keep your investigation private, use the workspace block in the sidebar:</p>
+<ul>
+  <li><strong>📤 Export to file</strong>: full snapshot (sources, categories, reviews, analyses, <strong>investigations, mind maps</strong>) as JSON.</li>
+  <li><strong>📥 Import file</strong>: upload to overwrite the DB with that snapshot.</li>
+  <li><strong>🗑 Start fresh</strong>: wipe everything.</li>
+</ul>
+
+<h2 id="troubleshoot">10. Troubleshooting</h2>
 <table>
   <thead><tr><th>Symptom</th><th>Cause / fix</th></tr></thead>
   <tbody>
-    <tr><td>Collection finishes "succeeded · 0 new"</td><td>Bad source config. Delete and re-add</td></tr>
-    <tr><td>Reddit search returns "Reddit search failed"</td><td>REDDIT_CLIENT_ID etc. missing — check Render Environment</td></tr>
-    <tr><td>401 / API key error during analysis</td><td>ANTHROPIC_API_KEY missing or invalid</td></tr>
-    <tr><td>Wrong categories assigned</td><td>Empty / vague category descriptions — improve them and re-analyze</td></tr>
-    <tr><td>Dashboard is empty</td><td>Analysis hasn't run. Visit /analyze, run, then reload</td></tr>
-    <tr><td>First request takes ~30 s</td><td>Render free cold start. Ping /health every 5 min via UptimeRobot</td></tr>
-    <tr><td>Apple collection ends with few reviews</td><td>RSS limit is 50 entries × 10 pages = 500 max. Working as intended</td></tr>
+    <tr><td>Dashboard shows only the empty-state message</td><td>No Investigation cards. Visit /analyze, give your run a name, and execute.</td></tr>
+    <tr><td>Active card but charts are empty</td><td>No analyzed reviews fall inside this card's scope. Re-analyse with the same scope.</td></tr>
+    <tr><td>"Select an investigation card" alert when saving a mind map</td><td>You tried to save with no active card. Click one first.</td></tr>
+    <tr><td>Collection finishes "succeeded · 0 new"</td><td>Bad source config. Delete and re-add.</td></tr>
+    <tr><td>Reddit search fails</td><td>REDDIT_CLIENT_ID etc. missing — check Render Environment.</td></tr>
+    <tr><td>401 / API key error during analysis</td><td>ANTHROPIC_API_KEY missing or invalid.</td></tr>
+    <tr><td>Wrong categories assigned</td><td>Empty / vague category descriptions — improve them and re-analyze.</td></tr>
+    <tr><td>First request ~30 s</td><td>Render free cold start. Ping /health every 5 min via UptimeRobot.</td></tr>
   </tbody>
 </table>
 
