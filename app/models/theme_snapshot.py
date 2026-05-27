@@ -3,19 +3,22 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, Integer, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 
 
 class ThemeSnapshot(Base):
-    """Persisted mind-map result. Cached themes from LLM, saved by the user
-    so they survive cache expiry and server restarts."""
+    """Persisted mind-map result. Each snapshot belongs to an Investigation
+    card; deleting the card cascades to its snapshots."""
 
     __tablename__ = "theme_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    investigation_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     sentiment: Mapped[str] = mapped_column(String(50), nullable=False)
     source_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)

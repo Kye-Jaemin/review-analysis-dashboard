@@ -86,7 +86,12 @@
     "investigations_hint": "Saved (sources × categories) cards. Click one to scope every panel below.",
     "investigations_empty": "No investigations saved yet. On the Analyze page, give your run a name to save it here.",
     "investigations_active": "Active",
-    "investigations_clear": "Clear filter"
+    "investigations_clear": "Clear filter",
+    "active_filter_label": "Currently viewing:",
+    "active_filter_none": "All data (no investigation selected)",
+    "active_filter_sources": "Sources",
+    "active_filter_categories": "Categories",
+    "themes_pick_card_to_save": "Select an investigation card to enable saving / loading mind maps."
   },
   "source_type": {
     "google_play": "Google Play",

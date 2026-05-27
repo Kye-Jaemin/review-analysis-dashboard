@@ -49,8 +49,8 @@ ANALYSIS_COLS = [
     "confidence", "summary", "model", "analyzed_at", "status", "error",
 ]
 SNAPSHOT_COLS = [
-    "id", "label", "sentiment", "source_ids", "root_ids", "summary_lang",
-    "sample_size", "model", "themes", "created_at",
+    "id", "investigation_id", "label", "sentiment", "source_ids", "root_ids",
+    "summary_lang", "sample_size", "model", "themes", "created_at",
 ]
 INVESTIGATION_COLS = [
     "id", "label", "description", "source_ids", "root_ids", "created_at", "updated_at",
@@ -254,23 +254,8 @@ async def import_workspace(
         )
     await session.flush()
 
-    for row in data.get("theme_snapshots") or []:
-        session.add(
-            ThemeSnapshot(
-                id=row["id"],
-                label=row.get("label") or "(unnamed)",
-                sentiment=row.get("sentiment") or "neutral",
-                source_ids=row.get("source_ids") or [],
-                root_ids=row.get("root_ids") or [],
-                summary_lang=row.get("summary_lang") or "en",
-                sample_size=row.get("sample_size") or 0,
-                model=row.get("model"),
-                themes=row.get("themes") or [],
-                created_at=_parse_dt(row.get("created_at")) or datetime.utcnow(),
-            )
-        )
-    await session.flush()
-
+    # Investigations have to land BEFORE theme_snapshots because the latter
+    # has a FK pointing at them.
     for row in data.get("investigations") or []:
         now = datetime.utcnow()
         session.add(
@@ -282,6 +267,24 @@ async def import_workspace(
                 root_ids=row.get("root_ids") or [],
                 created_at=_parse_dt(row.get("created_at")) or now,
                 updated_at=_parse_dt(row.get("updated_at")) or now,
+            )
+        )
+    await session.flush()
+
+    for row in data.get("theme_snapshots") or []:
+        session.add(
+            ThemeSnapshot(
+                id=row["id"],
+                investigation_id=row.get("investigation_id"),
+                label=row.get("label") or "(unnamed)",
+                sentiment=row.get("sentiment") or "neutral",
+                source_ids=row.get("source_ids") or [],
+                root_ids=row.get("root_ids") or [],
+                summary_lang=row.get("summary_lang") or "en",
+                sample_size=row.get("sample_size") or 0,
+                model=row.get("model"),
+                themes=row.get("themes") or [],
+                created_at=_parse_dt(row.get("created_at")) or datetime.utcnow(),
             )
         )
     await session.flush()

@@ -86,7 +86,12 @@
     "investigations_hint": "저장된 (소스 × 카테고리) 조합. 클릭하면 아래 모든 패널이 그 범위로 좁혀집니다.",
     "investigations_empty": "저장된 조사가 없습니다. 분석 페이지에서 실행 시 이름을 입력하면 여기에 카드로 추가됩니다.",
     "investigations_active": "활성",
-    "investigations_clear": "필터 해제"
+    "investigations_clear": "필터 해제",
+    "active_filter_label": "현재 보기:",
+    "active_filter_none": "전체 데이터 (조사 카드 미선택)",
+    "active_filter_sources": "소스",
+    "active_filter_categories": "카테고리",
+    "themes_pick_card_to_save": "조사 카드를 선택해야 마인드맵을 저장·불러올 수 있습니다."
   },
   "source_type": {
     "google_play": "Google Play",

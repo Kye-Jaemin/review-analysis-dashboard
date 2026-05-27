@@ -19,6 +19,10 @@
   <div id="investigations-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
     <div class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
   </div>
+  <div id="active-filter-strip" class="mt-3 pt-3 border-t border-gray-100 text-xs flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <span class="text-gray-500 font-medium">{{ t('dashboard.active_filter_label') }}</span>
+    <span id="active-filter-content" class="text-gray-400">{{ t('dashboard.active_filter_none') }}</span>
+  </div>
 </div>
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -206,6 +210,10 @@ async function clearActiveInvestigation() {
   selectedSources.clear();
   selectedRoots.clear();
   activeInvestigationId = null;
+  renderInvestigations(_lastInvestigations);
+  updateActiveFilterStrip();
+  updateThemesPanelForActive();
+  await refreshSavedSnapshots();
   await reload();
 }
 
@@ -219,6 +227,41 @@ async function reload() {
 
 // ---- Investigation cards (click to apply saved source+category filter) ----
 let activeInvestigationId = null;
+let _lastInvestigations = [];
+
+function updateActiveFilterStrip() {
+  const el = document.getElementById('active-filter-content');
+  if (!el) return;
+  if (!activeInvestigationId) {
+    el.classList.add('text-gray-400');
+    el.classList.remove('text-gray-700');
+    el.textContent = `{{ t('dashboard.active_filter_none') }}`;
+    return;
+  }
+  const inv = _lastInvestigations.find(i => i.id === activeInvestigationId);
+  if (!inv) {
+    el.textContent = `{{ t('dashboard.active_filter_none') }}`;
+    return;
+  }
+  el.classList.remove('text-gray-400');
+  el.classList.add('text-gray-700');
+
+  const srcChips = (inv.sources || []).map(s => {
+    const icon = s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" class="w-3.5 h-3.5 rounded inline" alt="">` : '';
+    return `<span class="inline-flex items-center gap-1 bg-gray-100 px-1.5 py-0.5 rounded">${icon}${escapeHtml(s.label)}</span>`;
+  }).join(' ');
+  const catChips = (inv.roots || []).map(c =>
+    `<span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">${escapeHtml(c.name)}</span>`
+  ).join(' ');
+
+  el.innerHTML = `
+    <span class="text-gray-500">{{ t('dashboard.active_filter_sources') }}:</span>
+    ${srcChips || '<span class="text-gray-400">—</span>'}
+    <span class="mx-1 text-gray-300">|</span>
+    <span class="text-gray-500">{{ t('dashboard.active_filter_categories') }}:</span>
+    ${catChips || '<span class="text-gray-400">—</span>'}
+  `;
+}
 
 function arraysEq(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
@@ -231,7 +274,12 @@ async function loadInvestigations() {
   try {
     const res = await fetch('/api/investigations');
     const data = await res.json();
-    renderInvestigations(data.investigations || []);
+    _lastInvestigations = data.investigations || [];
+    renderInvestigations(_lastInvestigations);
+    updateActiveFilterStrip();
+    // Themes panel UI depends on whether a card is active.
+    updateThemesPanelForActive();
+    refreshSavedSnapshots();
   } catch (e) {
     document.getElementById('investigations-grid').innerHTML =
       '<div class="text-xs text-red-600">' + escapeHtml(String(e)) + '</div>';
@@ -290,9 +338,7 @@ function renderInvestigations(items) {
 }
 
 async function applyInvestigation(id) {
-  const res = await fetch('/api/investigations');
-  const data = await res.json();
-  const inv = (data.investigations || []).find(x => x.id === id);
+  const inv = _lastInvestigations.find(x => x.id === id);
   if (!inv) return;
   // Replace selected sets atomically.
   selectedSources.clear();
@@ -300,7 +346,10 @@ async function applyInvestigation(id) {
   selectedRoots.clear();
   (inv.root_ids || []).forEach(r => selectedRoots.add(r));
   activeInvestigationId = id;
-  renderInvestigations(data.investigations || []);
+  renderInvestigations(_lastInvestigations);
+  updateActiveFilterStrip();
+  updateThemesPanelForActive();
+  await refreshSavedSnapshots();
   await reload();
 }
 
@@ -803,12 +852,29 @@ const THEMES_SAMPLE_LABEL = {{ t('dashboard.themes_sample', n='__N__') | tojson 
 let currentThemesData = null;       // last rendered data (for Save)
 let currentLoadedSnapshotId = null; // id if loaded from saved (for Delete)
 
+function updateThemesPanelForActive() {
+  const saveBtn = document.getElementById('themes-save-btn');
+  const select = document.getElementById('themes-saved-select');
+  // Save & saved-list controls only make sense when a card is active.
+  if (activeInvestigationId) {
+    select.disabled = false;
+    if (currentThemesData && !currentLoadedSnapshotId) saveBtn.classList.remove('hidden');
+  } else {
+    select.disabled = true;
+    saveBtn.classList.add('hidden');
+  }
+}
+
 async function refreshSavedSnapshots() {
   try {
-    const res = await fetch('/api/themes/snapshots');
-    const data = await res.json();
     const sel = document.getElementById('themes-saved-select');
     const current = sel.value;
+    if (!activeInvestigationId) {
+      sel.innerHTML = `<option value="">— {{ t('dashboard.themes_pick_card_to_save') }} —</option>`;
+      return;
+    }
+    const res = await fetch(`/api/themes/snapshots?investigation_id=${activeInvestigationId}`);
+    const data = await res.json();
     sel.innerHTML = `<option value="">{{ t('dashboard.themes_load_placeholder') }}</option>`;
     (data.snapshots || []).forEach(s => {
       const date = s.created_at ? s.created_at.slice(0, 10) : '';
@@ -871,10 +937,15 @@ async function deleteCurrentSnapshot() {
 
 async function saveCurrentThemes() {
   if (!currentThemesData) return;
+  if (!activeInvestigationId) {
+    alert('{{ t("dashboard.themes_pick_card_to_save") }}');
+    return;
+  }
   const label = prompt('{{ t("dashboard.themes_save_label_prompt") }}', '');
   if (!label || !label.trim()) return;
   const payload = {
     label: label.trim(),
+    investigation_id: activeInvestigationId,
     sentiment: currentThemesData.sentiment,
     source_ids: [...selectedSources],
     root_ids: [...selectedRoots],
@@ -931,8 +1002,9 @@ async function renderThemesData(data, saved) {
 
   currentThemesData = data;
   renderBreakdown(data);
-  // Save button shows for freshly-generated (not for already-saved loads).
-  saveBtn.classList.toggle('hidden', !!saved);
+  // Save button: only when an investigation is active AND this is a fresh
+  // (unsaved) render — loads from a snapshot are already saved.
+  saveBtn.classList.toggle('hidden', !!saved || !activeInvestigationId);
   regenBtn.classList.toggle('hidden', !!saved);
   dlBtn.classList.remove('hidden');
   document.getElementById('themes-fit-btn').classList.remove('hidden');

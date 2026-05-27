@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import ThemeSnapshot
+from app.models import Investigation, ThemeSnapshot
 from app.routes.reviews import _parse_int
 from app.services.themes import extract_themes
 
@@ -39,6 +39,7 @@ async def themes_endpoint(
 
 class SnapshotIn(BaseModel):
     label: str
+    investigation_id: Optional[int] = None
     sentiment: str
     source_ids: list[int] = []
     root_ids: list[int] = []
@@ -54,12 +55,19 @@ async def save_snapshot(payload: SnapshotIn, session: AsyncSession = Depends(get
     label = (payload.label or "").strip()
     if not label:
         raise HTTPException(400, "label is required")
+    if payload.investigation_id is None:
+        raise HTTPException(
+            400,
+            "investigation_id is required — select an investigation card before saving a mind map",
+        )
+    inv = await session.get(Investigation, payload.investigation_id)
+    if not inv:
+        raise HTTPException(400, "investigation not found")
     if not payload.themes and not payload.categories:
         raise HTTPException(400, "themes or categories payload is required")
-    # We persist whichever structure carries the richer data. New flow sends
-    # `categories`; if only `themes` is present (legacy / flat), keep that.
     stored = payload.categories if payload.categories else payload.themes
     snap = ThemeSnapshot(
+        investigation_id=payload.investigation_id,
         label=label[:200],
         sentiment=payload.sentiment,
         source_ids=payload.source_ids or [],
@@ -75,14 +83,19 @@ async def save_snapshot(payload: SnapshotIn, session: AsyncSession = Depends(get
 
 
 @router.get("/api/themes/snapshots")
-async def list_snapshots(session: AsyncSession = Depends(get_session)):
-    rows = (
-        await session.execute(select(ThemeSnapshot).order_by(ThemeSnapshot.id.desc()))
-    ).scalars().all()
+async def list_snapshots(
+    investigation_id: Optional[int] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(ThemeSnapshot).order_by(ThemeSnapshot.id.desc())
+    if investigation_id is not None:
+        stmt = stmt.where(ThemeSnapshot.investigation_id == investigation_id)
+    rows = (await session.execute(stmt)).scalars().all()
     return {
         "snapshots": [
             {
                 "id": r.id,
+                "investigation_id": r.investigation_id,
                 "label": r.label,
                 "sentiment": r.sentiment,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -102,8 +115,6 @@ async def get_snapshot(snap_id: int, session: AsyncSession = Depends(get_session
     if not snap:
         raise HTTPException(404)
     raw = snap.themes or []
-    # Detect storage format: list of {category, themes:[...]} → grouped (new).
-    # Otherwise treat as flat themes list (legacy).
     is_grouped = (
         isinstance(raw, list)
         and raw
@@ -122,6 +133,7 @@ async def get_snapshot(snap_id: int, session: AsyncSession = Depends(get_session
         themes = raw if isinstance(raw, list) else []
     return {
         "id": snap.id,
+        "investigation_id": snap.investigation_id,
         "label": snap.label,
         "sentiment": snap.sentiment,
         "source_ids": snap.source_ids or [],
