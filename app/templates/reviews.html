@@ -3,7 +3,7 @@
 {% block title %}{{ t('reviews.title') }} — {{ t('app.name') }}{% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-between mb-6">
+<div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-semibold">{{ t('reviews.title') }}</h1>
   <div class="flex gap-2 text-sm">
     <span class="text-gray-500 mr-1">{{ t('reviews.export') }}:</span>
@@ -13,9 +13,59 @@
   </div>
 </div>
 
+{% if investigations %}
+<div class="bg-white rounded shadow-sm px-4 py-3 mb-5">
+  <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
+    <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
+    <div class="flex items-center gap-3">
+      {% if active_investigation_id %}
+        <a href="/reviews" class="text-xs text-blue-600 hover:underline">✕ {{ t('dashboard.investigations_clear') }}</a>
+      {% endif %}
+      <div class="text-xs text-gray-500">{{ t('dashboard.investigations_hint') }}</div>
+    </div>
+  </div>
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    {% for inv in investigations %}
+      {% set is_active = (active_investigation_id == inv.id) %}
+      <a href="/reviews?investigation_id={{ inv.id }}"
+         class="block border rounded p-3 transition
+                {{ 'border-blue-500 bg-blue-50' if is_active else 'border-gray-200 hover:border-gray-400 bg-white' }}">
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="font-medium text-sm truncate" title="{{ inv.label }}">{{ inv.label }}</div>
+          {% if is_active %}
+            <span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded">{{ t('dashboard.investigations_active') }}</span>
+          {% endif %}
+        </div>
+        <div class="text-[11px] text-gray-500 mb-2">{{ (inv.updated_at or '')[:10] }}</div>
+        <div class="flex flex-wrap gap-1 mb-1">
+          {% for s in inv.sources %}
+            <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[11px]">
+              {% if s.icon_url %}<img src="{{ s.icon_url }}" class="w-3.5 h-3.5 rounded" alt="">{% endif %}
+              <span class="truncate max-w-[8rem]">{{ s.label }}</span>
+            </span>
+          {% else %}
+            <span class="text-[11px] text-gray-400">— no sources —</span>
+          {% endfor %}
+        </div>
+        <div class="flex flex-wrap gap-1">
+          {% for c in inv.roots %}
+            <span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[11px]">{{ c.name }}</span>
+          {% else %}
+            <span class="text-[11px] text-gray-400">— no categories —</span>
+          {% endfor %}
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 <div class="flex gap-6">
   <aside class="w-64 bg-white p-4 rounded shadow-sm">
     <form method="get" action="/reviews" class="space-y-3 text-sm">
+      {% if active_investigation_id %}
+        <input type="hidden" name="investigation_id" value="{{ active_investigation_id }}" />
+      {% endif %}
       <div>
         <label class="text-xs text-gray-500 block mb-1">{{ t('reviews.filter.source') }}</label>
         <select name="source_id" class="w-full border rounded px-2 py-1">
