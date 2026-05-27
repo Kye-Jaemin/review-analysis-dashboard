@@ -70,7 +70,13 @@
     "themes_generate": "생성",
     "themes_regenerate": "재생성",
     "themes_sample": "{n}건 샘플 분석",
-    "themes_no_reviews": "이 감성·필터에 해당하는 리뷰가 아직 없습니다."
+    "themes_no_reviews": "이 감성·필터에 해당하는 리뷰가 아직 없습니다.",
+    "themes_save": "저장",
+    "themes_save_label_prompt": "이 마인드맵의 이름을 입력하세요 (나중에 불러올 때 사용):",
+    "themes_saved_label": "저장된 마인드맵",
+    "themes_load_placeholder": "— 저장된 항목 불러오기 —",
+    "themes_delete_confirm": "저장된 마인드맵을 삭제할까요?",
+    "themes_download_svg": "SVG 다운로드"
   },
   "source_type": {
     "google_play": "Google Play",

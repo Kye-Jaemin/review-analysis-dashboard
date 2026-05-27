@@ -105,9 +105,16 @@
 </div>
 
 <div class="bg-white p-4 rounded shadow-sm mb-6">
-  <div class="flex items-center justify-between mb-2">
+  <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
     <div class="text-sm font-medium">{{ t('dashboard.themes_panel_title') }}</div>
-    <div class="flex items-center gap-2 text-xs">
+    <div class="flex items-center gap-2 text-xs flex-wrap">
+      <span class="text-gray-500">{{ t('dashboard.themes_saved_label') }}:</span>
+      <select id="themes-saved-select" onchange="loadSnapshot(this.value)" class="border rounded px-2 py-1 max-w-[14rem]">
+        <option value="">{{ t('dashboard.themes_load_placeholder') }}</option>
+      </select>
+      <button id="themes-delete-btn" onclick="deleteCurrentSnapshot()"
+              class="text-red-600 hover:underline hidden">{{ t('common.delete') }}</button>
+      <span class="mx-1 text-gray-300">|</span>
       <select id="themes-sentiment" class="border rounded px-2 py-1">
         <option value="very_positive">{{ t('sentiment.very_positive') }}</option>
         <option value="positive">{{ t('sentiment.positive') }}</option>
@@ -121,6 +128,14 @@
       <button id="themes-regen-btn" onclick="generateThemes(true)"
               class="text-blue-600 hover:underline hidden">
         {{ t('dashboard.themes_regenerate') }}
+      </button>
+      <button id="themes-save-btn" onclick="saveCurrentThemes()"
+              class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 hidden">
+        💾 {{ t('dashboard.themes_save') }}
+      </button>
+      <button id="themes-download-btn" onclick="downloadMindmapSvg()"
+              class="text-gray-600 hover:underline hidden">
+        ⬇️ {{ t('dashboard.themes_download_svg') }}
       </button>
     </div>
   </div>
@@ -621,16 +636,156 @@ function buildMindmap(data) {
 
 const THEMES_SAMPLE_LABEL = {{ t('dashboard.themes_sample', n='__N__') | tojson }};
 
+let currentThemesData = null;       // last rendered data (for Save)
+let currentLoadedSnapshotId = null; // id if loaded from saved (for Delete)
+
+async function refreshSavedSnapshots() {
+  try {
+    const res = await fetch('/api/themes/snapshots');
+    const data = await res.json();
+    const sel = document.getElementById('themes-saved-select');
+    const current = sel.value;
+    sel.innerHTML = `<option value="">{{ t('dashboard.themes_load_placeholder') }}</option>`;
+    (data.snapshots || []).forEach(s => {
+      const date = s.created_at ? s.created_at.slice(0, 10) : '';
+      const sentLbl = SENTIMENT_LABELS[s.sentiment] || s.sentiment;
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `${s.label} · ${sentLbl} · ${date}`;
+      sel.appendChild(opt);
+    });
+    if (current) sel.value = current;
+  } catch (e) { /* silent */ }
+}
+
+async function loadSnapshot(idStr) {
+  if (!idStr) {
+    currentLoadedSnapshotId = null;
+    document.getElementById('themes-delete-btn').classList.add('hidden');
+    return;
+  }
+  const id = parseInt(idStr, 10);
+  const statusEl = document.getElementById('themes-status');
+  const container = document.getElementById('themes-mindmap');
+  statusEl.textContent = '{{ t("common.loading") }}';
+  container.innerHTML = '';
+  try {
+    const res = await fetch(`/api/themes/snapshots/${id}`);
+    if (!res.ok) { statusEl.textContent = 'load failed'; return; }
+    const data = await res.json();
+    await renderThemesData(data, /*saved=*/true);
+    currentLoadedSnapshotId = id;
+    document.getElementById('themes-delete-btn').classList.remove('hidden');
+    // Sync the sentiment dropdown to the saved snapshot's sentiment.
+    document.getElementById('themes-sentiment').value = data.sentiment;
+  } catch (e) {
+    statusEl.textContent = String(e);
+  }
+}
+
+async function deleteCurrentSnapshot() {
+  if (!currentLoadedSnapshotId) return;
+  if (!confirm('{{ t("dashboard.themes_delete_confirm") }}')) return;
+  const res = await fetch(`/api/themes/snapshots/${currentLoadedSnapshotId}`, { method: 'DELETE' });
+  if (!res.ok) { alert('delete failed'); return; }
+  currentLoadedSnapshotId = null;
+  document.getElementById('themes-delete-btn').classList.add('hidden');
+  document.getElementById('themes-mindmap').innerHTML = '';
+  document.getElementById('themes-status').textContent = '';
+  document.getElementById('themes-saved-select').value = '';
+  refreshSavedSnapshots();
+}
+
+async function saveCurrentThemes() {
+  if (!currentThemesData) return;
+  const label = prompt('{{ t("dashboard.themes_save_label_prompt") }}', '');
+  if (!label || !label.trim()) return;
+  const payload = {
+    label: label.trim(),
+    sentiment: currentThemesData.sentiment,
+    source_ids: [...selectedSources],
+    root_ids: [...selectedRoots],
+    summary_lang: '{{ lang }}',
+    sample_size: currentThemesData.sample_size || 0,
+    model: currentThemesData.model || null,
+    themes: currentThemesData.themes || [],
+  };
+  const res = await fetch('/api/themes/snapshots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) { alert('save failed'); return; }
+  await refreshSavedSnapshots();
+}
+
+function downloadMindmapSvg() {
+  const svg = document.getElementById('themes-mindmap').querySelector('svg');
+  if (!svg) return;
+  const xml = new XMLSerializer().serializeToString(svg);
+  const blob = new Blob(
+    ['<?xml version="1.0" encoding="UTF-8"?>\n', xml],
+    { type: 'image/svg+xml' }
+  );
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.href = url;
+  a.download = `mindmap-${ts}.svg`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function renderThemesData(data, saved) {
+  const statusEl = document.getElementById('themes-status');
+  const container = document.getElementById('themes-mindmap');
+  const regenBtn = document.getElementById('themes-regen-btn');
+  const saveBtn = document.getElementById('themes-save-btn');
+  const dlBtn = document.getElementById('themes-download-btn');
+
+  if (!data.themes || data.themes.length === 0) {
+    statusEl.textContent = '{{ t("dashboard.themes_no_reviews") }}';
+    return;
+  }
+  const sampleLine = THEMES_SAMPLE_LABEL.replace('__N__', data.sample_size || 0);
+  const cachedTag = data.cached ? ' · cached' : '';
+  const modelTag = data.model ? ` · ${data.model}` : '';
+  const savedTag = saved ? ` · 💾 ${escapeHtml(data.label || '')}` : '';
+  statusEl.innerHTML = escapeHtml(sampleLine + modelTag + cachedTag) + savedTag;
+
+  const mindmapText = buildMindmap(data);
+  if (window.__mermaid) {
+    try {
+      const id = 'mindmap-' + Date.now();
+      const { svg } = await window.__mermaid.render(id, mindmapText);
+      container.innerHTML = svg;
+    } catch (e) {
+      container.innerHTML = `<pre class="text-xs text-red-600 whitespace-pre-wrap">${escapeHtml(String(e))}\n\n${escapeHtml(mindmapText)}</pre>`;
+    }
+  } else {
+    container.innerHTML = `<pre class="text-xs">${escapeHtml(mindmapText)}</pre>`;
+  }
+
+  currentThemesData = data;
+  // Save button shows for freshly-generated (not for already-saved loads).
+  saveBtn.classList.toggle('hidden', !!saved);
+  regenBtn.classList.toggle('hidden', !!saved);
+  dlBtn.classList.remove('hidden');
+}
+
 async function generateThemes(force) {
   const sentEl = document.getElementById('themes-sentiment');
   const statusEl = document.getElementById('themes-status');
   const container = document.getElementById('themes-mindmap');
   const genBtn = document.getElementById('themes-generate-btn');
-  const regenBtn = document.getElementById('themes-regen-btn');
   const sentiment = sentEl.value;
 
+  // Generating a fresh one breaks the "loaded saved snapshot" context.
+  currentLoadedSnapshotId = null;
+  document.getElementById('themes-delete-btn').classList.add('hidden');
+  document.getElementById('themes-saved-select').value = '';
+
   genBtn.disabled = true;
-  regenBtn.classList.add('hidden');
   statusEl.textContent = '{{ t("common.loading") }}';
   container.innerHTML = '';
 
@@ -652,34 +807,15 @@ async function generateThemes(force) {
       statusEl.textContent = data.error;
       return;
     }
-    if (!data.themes || data.themes.length === 0) {
-      statusEl.textContent = '{{ t("dashboard.themes_no_reviews") }}';
-      return;
-    }
-    const sampleLine = THEMES_SAMPLE_LABEL.replace('__N__', data.sample_size);
-    const cachedTag = data.cached ? ' · cached' : '';
-    const modelTag = data.model ? ` · ${data.model}` : '';
-    statusEl.textContent = `${sampleLine}${modelTag}${cachedTag}`;
-
-    const mindmapText = buildMindmap(data);
-    if (window.__mermaid) {
-      try {
-        const id = 'mindmap-' + Date.now();
-        const { svg } = await window.__mermaid.render(id, mindmapText);
-        container.innerHTML = svg;
-      } catch (e) {
-        container.innerHTML = `<pre class="text-xs text-red-600 whitespace-pre-wrap">${escapeHtml(String(e))}\n\n${escapeHtml(mindmapText)}</pre>`;
-      }
-    } else {
-      container.innerHTML = `<pre class="text-xs">${escapeHtml(mindmapText)}</pre>`;
-    }
-    regenBtn.classList.remove('hidden');
+    await renderThemesData(data, /*saved=*/false);
   } catch (e) {
     statusEl.textContent = String(e);
   } finally {
     genBtn.disabled = false;
   }
 }
+
+refreshSavedSnapshots();
 </script>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';

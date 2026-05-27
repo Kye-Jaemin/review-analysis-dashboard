@@ -70,7 +70,13 @@
     "themes_generate": "Generate",
     "themes_regenerate": "Regenerate",
     "themes_sample": "Sampled {n} reviews",
-    "themes_no_reviews": "No reviews match this sentiment + filters yet."
+    "themes_no_reviews": "No reviews match this sentiment + filters yet.",
+    "themes_save": "Save",
+    "themes_save_label_prompt": "Name this mind map (so you can find it later):",
+    "themes_saved_label": "Saved mind maps",
+    "themes_load_placeholder": "— Load saved —",
+    "themes_delete_confirm": "Delete this saved mind map?",
+    "themes_download_svg": "Download SVG"
   },
   "source_type": {
     "google_play": "Google Play",

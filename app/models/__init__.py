@@ -2,6 +2,7 @@ from app.models.source import Source, CollectionJob, SourceType, CollectionStatu
 from app.models.review import Review
 from app.models.category import Category
 from app.models.analysis import Analysis, AnalysisJob, Sentiment, AnalysisStatus
+from app.models.theme_snapshot import ThemeSnapshot
 
 __all__ = [
     "Source",
@@ -14,4 +15,5 @@ __all__ = [
     "AnalysisJob",
     "Sentiment",
     "AnalysisStatus",
+    "ThemeSnapshot",
 ]
