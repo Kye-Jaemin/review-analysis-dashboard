@@ -104,6 +104,31 @@
   <canvas id="chart-trend" height="140"></canvas>
 </div>
 
+<div class="bg-white p-4 rounded shadow-sm mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <div class="text-sm font-medium">{{ t('dashboard.themes_panel_title') }}</div>
+    <div class="flex items-center gap-2 text-xs">
+      <select id="themes-sentiment" class="border rounded px-2 py-1">
+        <option value="very_positive">{{ t('sentiment.very_positive') }}</option>
+        <option value="positive">{{ t('sentiment.positive') }}</option>
+        <option value="negative">{{ t('sentiment.negative') }}</option>
+        <option value="very_negative">{{ t('sentiment.very_negative') }}</option>
+      </select>
+      <button id="themes-generate-btn" onclick="generateThemes(false)"
+              class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50">
+        {{ t('dashboard.themes_generate') }}
+      </button>
+      <button id="themes-regen-btn" onclick="generateThemes(true)"
+              class="text-blue-600 hover:underline hidden">
+        {{ t('dashboard.themes_regenerate') }}
+      </button>
+    </div>
+  </div>
+  <div class="text-xs text-gray-500 mb-2">{{ t('dashboard.themes_hint') }}</div>
+  <div id="themes-status" class="text-xs text-gray-500 mb-2"></div>
+  <div id="themes-mindmap" class="overflow-auto" style="min-height: 0;"></div>
+</div>
+
 <div class="bg-white p-4 rounded shadow-sm">
   <div class="flex items-center justify-between mb-3">
     <div class="text-sm font-medium">{{ t('dashboard.recent_reviews') }}</div>
@@ -568,5 +593,97 @@ async function renderTrend(mode, period) {
 
 loadStats();
 renderTrend('distribution', 'week');
+
+// ---- Sentiment themes (mind map) ----
+function sanitizeMermaidLabel(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/[()\[\]"#:;{}|&<>]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+}
+
+function buildMindmap(data) {
+  const sentLabel = sanitizeMermaidLabel(SENTIMENT_LABELS[data.sentiment] || data.sentiment) || data.sentiment;
+  const lines = ['mindmap', `  root((${sentLabel}))`];
+  for (const t of data.themes || []) {
+    const themeName = sanitizeMermaidLabel(t.theme);
+    const suffix = (typeof t.count === 'number') ? ` (${t.count})` : '';
+    lines.push(`    ${themeName}${suffix}`);
+    for (const ex of (t.examples || [])) {
+      const safeEx = sanitizeMermaidLabel(ex);
+      if (safeEx) lines.push(`      ${safeEx}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+const THEMES_SAMPLE_LABEL = {{ t('dashboard.themes_sample', n='__N__') | tojson }};
+
+async function generateThemes(force) {
+  const sentEl = document.getElementById('themes-sentiment');
+  const statusEl = document.getElementById('themes-status');
+  const container = document.getElementById('themes-mindmap');
+  const genBtn = document.getElementById('themes-generate-btn');
+  const regenBtn = document.getElementById('themes-regen-btn');
+  const sentiment = sentEl.value;
+
+  genBtn.disabled = true;
+  regenBtn.classList.add('hidden');
+  statusEl.textContent = '{{ t("common.loading") }}';
+  container.innerHTML = '';
+
+  const params = new URLSearchParams();
+  params.append('sentiment', sentiment);
+  params.append('summary_lang', '{{ lang }}');
+  if (force) params.append('force', 'true');
+  selectedSources.forEach(id => params.append('source_ids', id));
+  selectedRoots.forEach(id => params.append('root_ids', id));
+
+  try {
+    const res = await fetch('/api/themes?' + params.toString(), { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      statusEl.textContent = data.detail || 'failed';
+      return;
+    }
+    if (data.error) {
+      statusEl.textContent = data.error;
+      return;
+    }
+    if (!data.themes || data.themes.length === 0) {
+      statusEl.textContent = '{{ t("dashboard.themes_no_reviews") }}';
+      return;
+    }
+    const sampleLine = THEMES_SAMPLE_LABEL.replace('__N__', data.sample_size);
+    const cachedTag = data.cached ? ' · cached' : '';
+    const modelTag = data.model ? ` · ${data.model}` : '';
+    statusEl.textContent = `${sampleLine}${modelTag}${cachedTag}`;
+
+    const mindmapText = buildMindmap(data);
+    if (window.__mermaid) {
+      try {
+        const id = 'mindmap-' + Date.now();
+        const { svg } = await window.__mermaid.render(id, mindmapText);
+        container.innerHTML = svg;
+      } catch (e) {
+        container.innerHTML = `<pre class="text-xs text-red-600 whitespace-pre-wrap">${escapeHtml(String(e))}\n\n${escapeHtml(mindmapText)}</pre>`;
+      }
+    } else {
+      container.innerHTML = `<pre class="text-xs">${escapeHtml(mindmapText)}</pre>`;
+    }
+    regenBtn.classList.remove('hidden');
+  } catch (e) {
+    statusEl.textContent = String(e);
+  } finally {
+    genBtn.disabled = false;
+  }
+}
+</script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+  window.__mermaid = mermaid;
 </script>
 {% endblock %}

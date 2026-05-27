@@ -64,7 +64,13 @@
     "app_rating": "App rating",
     "count_label": "Count",
     "percent_label": "%",
-    "total_label": "Total"
+    "total_label": "Total",
+    "themes_panel_title": "Sentiment reasons (mind map)",
+    "themes_hint": "Claude reads sampled reviews of the chosen sentiment and extracts the main themes. Uses the Anthropic API — costs apply. Cached for 10 min per filter combination.",
+    "themes_generate": "Generate",
+    "themes_regenerate": "Regenerate",
+    "themes_sample": "Sampled {n} reviews",
+    "themes_no_reviews": "No reviews match this sentiment + filters yet."
   },
   "source_type": {
     "google_play": "Google Play",
