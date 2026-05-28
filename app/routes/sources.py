@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +40,24 @@ async def list_sources(request: Request, session: AsyncSession = Depends(get_ses
         ).scalar_one_or_none()
         if last:
             last_runs[src.id] = last
-    return render(request, "sources.html", sources=rows, last_runs=last_runs)
+
+    # Total collected reviews per source — surfaced prominently next to each
+    # row so the user sees how big each source actually is at a glance.
+    count_rows = (
+        await session.execute(
+            select(Review.source_id, func.count(Review.id))
+            .group_by(Review.source_id)
+        )
+    ).all()
+    review_counts: dict[int, int] = {sid: cnt for sid, cnt in count_rows}
+
+    return render(
+        request,
+        "sources.html",
+        sources=rows,
+        last_runs=last_runs,
+        review_counts=review_counts,
+    )
 
 
 @router.get("/sources/search")
