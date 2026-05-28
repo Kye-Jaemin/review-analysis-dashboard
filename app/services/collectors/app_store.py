@@ -81,7 +81,7 @@ class AppStoreCollector(CollectorBase):
                 slug = (r.get("trackName") or "").strip().lower().replace(" ", "-")
             subtitle = (r.get("artistName") or "") + (f" · {rating:.1f}★" if rating else "")
             if r.get("_via_developer"):
-                subtitle = "📛 " + subtitle
+                subtitle = f"{r.get('artistName') or ''} (developer match)" + (f" · {rating:.1f}★" if rating else "")
             out.append({
                 "id": str(track_id),
                 "title": r.get("trackName") or "",

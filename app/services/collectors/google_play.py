@@ -32,7 +32,9 @@ class GooglePlayCollector(CollectorBase):
             dev_match = q_lower and q_lower not in title.lower() and q_lower in developer.lower()
             subtitle = developer + (f" · {r.get('score'):.1f}★" if r.get("score") else "")
             if dev_match:
-                subtitle = "📛 " + subtitle  # subtle indicator the hit came from developer name
+                # When the match came via developer name (not title), italicise
+                # the developer prefix so it's still distinguishable.
+                subtitle = f"{developer} (developer match)" + (f" · {r.get('score'):.1f}★" if r.get("score") else "")
             out.append({
                 "id": app_id,
                 "title": title,

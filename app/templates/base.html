@@ -15,6 +15,56 @@
     .sentiment-neutral { background-color: #d1d5db; color: #1f2937; }
     .sentiment-negative { background-color: #fdba74; color: #7c2d12; }
     .sentiment-very_negative { background-color: #b91c1c; color: white; }
+
+    /* Subtle, consistent motion across the whole UI. */
+    @keyframes panelIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes tileIn {
+      from { opacity: 0; transform: scale(0.97); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .panel-in { animation: panelIn 0.28s cubic-bezier(.22,.61,.36,1) both; }
+    .tile-in  { animation: tileIn  0.22s cubic-bezier(.22,.61,.36,1) both; }
+    .modal-in > div { animation: modalIn 0.18s cubic-bezier(.22,.61,.36,1) both; }
+    /* Stagger when many tiles render together. */
+    .stagger > *:nth-child(1) { animation-delay: 0ms; }
+    .stagger > *:nth-child(2) { animation-delay: 35ms; }
+    .stagger > *:nth-child(3) { animation-delay: 70ms; }
+    .stagger > *:nth-child(4) { animation-delay: 105ms; }
+    .stagger > *:nth-child(5) { animation-delay: 140ms; }
+    .stagger > *:nth-child(6) { animation-delay: 175ms; }
+    .stagger > *:nth-child(7) { animation-delay: 210ms; }
+    .stagger > *:nth-child(8) { animation-delay: 245ms; }
+    .stagger > *:nth-child(9) { animation-delay: 280ms; }
+    .stagger > *:nth-child(10) { animation-delay: 315ms; }
+
+    /* Lift on hover for clickable cards/tiles. */
+    .lift {
+      transition: transform 160ms ease-out, box-shadow 160ms ease-out, border-color 160ms ease-out;
+    }
+    .lift:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px -8px rgba(15, 23, 42, 0.12);
+    }
+    button, a { transition: background-color 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out; }
+
+    /* Nav active marker */
+    .nav-link { position: relative; }
+    .nav-link.active::before {
+      content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+      border-radius: 2px; background: #2563eb;
+    }
+
+    /* Reduce motion for users who ask for it. */
+    @media (prefers-reduced-motion: reduce) {
+      .panel-in, .tile-in, .modal-in > div, .lift { animation: none !important; transition: none !important; }
+    }
   </style>
 </head>
 <body class="bg-gray-50 text-gray-900 min-h-screen">
@@ -26,42 +76,42 @@
           <div class="text-xs text-gray-500 mt-1 leading-tight">{{ t('app.tagline') }}</div>
         </a>
       </div>
-      <nav class="flex-1 px-2 py-3 space-y-1 text-sm">
+      <nav class="flex-1 px-2 py-3 space-y-0.5 text-sm">
         {% set nav = [
-          ('/', 'nav.dashboard', '📊'),
-          ('/sources', 'nav.sources', '🔗'),
-          ('/categories', 'nav.categories', '🗂'),
-          ('/analyze', 'nav.analyze', '✨'),
-          ('/reviews', 'nav.reviews', '💬'),
-          ('/howto', 'nav.howto', '📖'),
+          ('/', 'nav.dashboard'),
+          ('/sources', 'nav.sources'),
+          ('/categories', 'nav.categories'),
+          ('/analyze', 'nav.analyze'),
+          ('/reviews', 'nav.reviews'),
+          ('/howto', 'nav.howto'),
         ] %}
-        {% for path, key, icon in nav %}
+        {% for path, key in nav %}
           {% set active = request.url.path == path or (path != '/' and request.url.path.startswith(path)) %}
-          <a href="{{ path }}" class="flex items-center gap-2 px-3 py-2 rounded {{ 'bg-blue-50 text-blue-700 font-medium' if active else 'text-gray-700 hover:bg-gray-100' }}">
-            <span>{{ icon }}</span><span>{{ t(key) }}</span>
+          <a href="{{ path }}"
+             class="nav-link block px-3 py-2 rounded {{ 'active bg-blue-50 text-blue-700 font-medium' if active else 'text-gray-700 hover:bg-gray-50' }}">
+            {{ t(key) }}
           </a>
         {% endfor %}
       </nav>
       <div class="px-3 py-3 border-t border-gray-100 text-xs">
         <div class="text-gray-500 mb-2">{{ t('workspace.title') }}</div>
-        <div class="space-y-1">
+        <div class="space-y-0.5">
           <form action="/workspace/import" method="post" enctype="multipart/form-data" id="ws-import-form">
-            <label class="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
-              <span>📥</span><span>{{ t('workspace.import') }}</span>
+            <label class="block px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
+              {{ t('workspace.import') }}
               <input type="file" name="file" accept="application/json,.json"
                      class="hidden"
                      onchange="if (this.files.length && confirm('{{ t('workspace.confirm_reset') }}')) { document.getElementById('ws-import-form').submit(); } else { this.value=''; }">
             </label>
           </form>
-          <a href="/workspace/export"
-             class="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-gray-100">
-            <span>📤</span><span>{{ t('workspace.export') }}</span>
+          <a href="/workspace/export" class="block px-2 py-1 rounded hover:bg-gray-50">
+            {{ t('workspace.export') }}
           </a>
           <form action="/workspace/reset" method="post"
                 onsubmit="return confirm('{{ t('workspace.confirm_reset') }}')">
             <button type="submit"
-                    class="flex items-center gap-1.5 w-full text-left px-2 py-1 rounded hover:bg-red-50 text-red-600">
-              <span>🗑</span><span>{{ t('workspace.reset') }}</span>
+                    class="block w-full text-left px-2 py-1 rounded hover:bg-red-50 text-red-600">
+              {{ t('workspace.reset') }}
             </button>
           </form>
         </div>

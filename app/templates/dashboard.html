@@ -11,19 +11,19 @@
     <div class="flex items-center gap-3">
       <form id="inv-import-form" enctype="multipart/form-data" class="inline-flex">
         <label class="text-xs text-blue-600 hover:underline cursor-pointer">
-          📥 {{ t('dashboard.investigations_import') }}
+          {{ t('dashboard.investigations_import') }}
           <input type="file" name="file" accept="application/json,.json" class="hidden"
                  onchange="importInvestigation(this)">
         </label>
       </form>
       <button type="button" id="investigations-clear-btn" onclick="clearActiveInvestigation()"
               class="text-xs text-blue-600 hover:underline hidden">
-        ✕ {{ t('dashboard.investigations_clear') }}
+        {{ t('dashboard.investigations_clear') }}
       </button>
       <div class="text-xs text-gray-500">{{ t('dashboard.investigations_hint') }}</div>
     </div>
   </div>
-  <div id="investigations-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+  <div id="investigations-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 stagger">
     <div class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
   </div>
   <div id="active-filter-strip" class="mt-3 pt-3 border-t border-gray-100 text-xs flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -32,7 +32,7 @@
   </div>
 </div>
 
-<div id="dashboard-empty" class="hidden bg-white rounded shadow-sm p-10 text-center text-sm text-gray-500">
+<div id="dashboard-empty" class="hidden bg-white rounded shadow-sm p-10 text-center text-sm text-gray-500 panel-in">
   {{ t('dashboard.empty_state') }}
 </div>
 
@@ -58,7 +58,7 @@
 </div>
 
 <div id="charts-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-  <div id="sentiment-by-root-panel" class="bg-white p-4 rounded shadow-sm">
+  <div id="sentiment-by-root-panel" class="bg-white p-4 rounded shadow-sm panel-in">
     <div class="flex items-baseline justify-between mb-3">
       <div class="text-sm font-medium">{{ t('dashboard.sentiment_by_root') }}</div>
       <div class="text-xs text-gray-500" id="sentiment-total">—</div>
@@ -66,13 +66,17 @@
     <canvas id="chart-sentiment" height="180"></canvas>
     <div class="mt-3" id="sentiment-table"></div>
   </div>
-  <div class="bg-white p-4 rounded shadow-sm">
-    <div class="flex items-baseline justify-between mb-3">
-      <div class="text-sm font-medium">{{ t('dashboard.by_source') }}</div>
-      <div class="text-xs text-gray-500" id="source-total">—</div>
+  <div class="bg-white p-3 rounded shadow-sm panel-in">
+    <div class="flex items-baseline justify-between mb-1.5">
+      <div class="text-xs font-medium text-gray-700">{{ t('dashboard.by_source') }}</div>
+      <div class="text-[11px] text-gray-500" id="source-total">—</div>
     </div>
-    <canvas id="chart-source" height="180"></canvas>
-    <div class="mt-3" id="source-table"></div>
+    <div class="flex items-center gap-3">
+      <div class="w-24 shrink-0">
+        <canvas id="chart-source" height="90"></canvas>
+      </div>
+      <div id="source-table" class="flex-1 min-w-0 text-[11px]"></div>
+    </div>
   </div>
 </div>
 
@@ -95,7 +99,7 @@
         <button type="button" data-tier="paid" class="auto-tier-btn px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200">{{ t('dashboard.tier_paid') }}</button>
         <button type="button" data-tier="free" class="auto-tier-btn px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200">{{ t('dashboard.tier_free') }}</button>
         <button type="button" data-tier="unknown" class="auto-tier-btn px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200">{{ t('dashboard.tier_unknown') }}</button>
-        <span class="text-[10px] uppercase tracking-wider bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1">BETA</span>
+        <span class="text-[10px] uppercase tracking-wider bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded ml-1">BETA</span>
       </div>
       <div class="text-gray-500">{{ t('dashboard.auto_cats_hint') }}</div>
     </div>
@@ -106,11 +110,11 @@
     </div>
     <div id="auto-cats-legend" class="text-xs space-y-1"></div>
   </div>
-  <div id="auto-cats-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+  <div id="auto-cats-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 stagger"></div>
 </div>
 
 <!-- Auto-category reviews modal -->
-<div id="auto-cat-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+<div id="auto-cat-modal" class="modal-in hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
      onclick="if (event.target === this) closeAutoCatModal()">
   <div class="bg-white rounded shadow-lg p-4 w-[40rem] max-w-[92vw] max-h-[85vh] flex flex-col">
     <div class="flex items-center justify-between mb-2">
@@ -159,7 +163,7 @@
       <button id="themes-delete-btn" onclick="deleteCurrentSnapshot()"
               class="text-red-600 hover:underline hidden">{{ t('common.delete') }}</button>
       <button id="themes-manage-btn" type="button" onclick="openThemesManage()"
-              class="text-gray-600 hover:underline">🗂 {{ t('dashboard.themes_manage') }}</button>
+              class="text-gray-600 hover:underline">{{ t('dashboard.themes_manage') }}</button>
       <span class="mx-1 text-gray-300">|</span>
       <select id="themes-sentiment" class="border rounded px-2 py-1">
         <option value="very_positive">{{ t('sentiment.very_positive') }}</option>
@@ -177,15 +181,15 @@
       </button>
       <button id="themes-save-btn" onclick="saveCurrentThemes()"
               class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 hidden">
-        💾 {{ t('dashboard.themes_save') }}
+        {{ t('dashboard.themes_save') }}
       </button>
       <button id="themes-fit-btn" onclick="fitMindmap()"
               class="text-gray-600 hover:underline hidden">
-        📐 Fit
+        Fit
       </button>
       <button id="themes-download-btn" onclick="downloadMindmapSvg()"
               class="text-gray-600 hover:underline hidden">
-        ⬇️ {{ t('dashboard.themes_download_svg') }}
+        {{ t('dashboard.themes_download_svg') }}
       </button>
     </div>
   </div>
@@ -199,7 +203,7 @@
   <div id="themes-mindmap" class="border border-gray-100 rounded" style="height: 0; overflow: hidden;"></div>
   <!-- Manage saved mind maps modal -->
   <div id="themes-manage-modal"
-       class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+       class="modal-in hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
        onclick="if (event.target === this) closeThemesManage()">
     <div class="bg-white rounded shadow-lg p-4 w-[32rem] max-w-[90vw] max-h-[80vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-3">
@@ -394,8 +398,8 @@ function renderInvestigations(items) {
     const date = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
     return `
       <div data-inv-id="${inv.id}"
-           class="investigation-card border rounded p-3 cursor-pointer transition
-                  ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-400 bg-white'}"
+           class="investigation-card lift tile-in border rounded p-3 cursor-pointer
+                  ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300 bg-white'}"
            onclick="applyInvestigation(${inv.id})">
         <div class="flex items-center justify-between mb-1.5">
           <div class="font-medium text-sm truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</div>
@@ -407,7 +411,7 @@ function renderInvestigations(items) {
         <div class="flex justify-end items-center gap-3">
           <a href="/api/investigations/${inv.id}/export"
              onclick="event.stopPropagation()"
-             class="text-[11px] text-gray-600 hover:underline">📤 ${escapeHtml('{{ t("dashboard.investigations_export") }}')}</a>
+             class="text-[11px] text-gray-600 hover:underline">${escapeHtml('{{ t("dashboard.investigations_export") }}')}</a>
           <button type="button"
                   onclick="event.stopPropagation(); deleteInvestigation(${inv.id})"
                   class="text-[11px] text-red-600 hover:underline">${escapeHtml('{{ t("common.delete") }}')}</button>
@@ -692,7 +696,7 @@ function renderAutoCatsGrid() {
     return `
       <button type="button"
               onclick="openAutoCatModal(${c.id})"
-              class="text-left border border-gray-200 rounded p-3 hover:border-blue-400 hover:shadow-sm transition bg-white">
+              class="text-left lift tile-in border border-gray-200 rounded p-3 hover:border-blue-400 bg-white">
         <div class="flex items-baseline justify-between gap-2">
           <div class="font-medium text-sm truncate" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
           <div class="text-xs text-gray-500 shrink-0">${total.toLocaleString()}</div>
@@ -776,9 +780,9 @@ async function renderAutoCatModal() {
     return;
   }
   const tierLabel = {
-    paid: '💳 {{ t("dashboard.tier_paid") }}',
-    free: '🆓 {{ t("dashboard.tier_free") }}',
-    unknown: '? {{ t("dashboard.tier_unknown") }}',
+    paid: '{{ t("dashboard.tier_paid") }}',
+    free: '{{ t("dashboard.tier_free") }}',
+    unknown: '{{ t("dashboard.tier_unknown") }}',
   };
   body.innerHTML = reviews.map(r => `
     <div class="border-b border-gray-100 pb-2">
@@ -925,32 +929,18 @@ function renderSource(data) {
   });
 
   document.getElementById('source-table').innerHTML = `
-    <table class="w-full text-xs">
-      <thead class="text-gray-500">
-        <tr>
-          <th class="text-left py-1">${escapeHtml('{{ t('reviews.table.source') }}')}</th>
-          <th class="text-left py-1">${escapeHtml('{{ t('common.type') }}')}</th>
-          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.count_label') }}')}</th>
-          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.percent_label') }}')}</th>
-          <th class="text-right py-1">${escapeHtml('{{ t('dashboard.app_rating') }}')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${data.by_source.map((s, i) => `
-          <tr class="border-t border-gray-100">
-            <td class="py-1 flex items-center gap-1.5">
-              <span class="inline-block w-2.5 h-2.5 rounded-full" style="background:${SOURCE_COLORS[i % SOURCE_COLORS.length]}"></span>
-              ${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" class="w-4 h-4 rounded">` : ''}
-              <span class="truncate max-w-[12rem]" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
-            </td>
-            <td class="py-1">${escapeHtml(SOURCE_TYPE_LABELS[s.type] || s.type)}</td>
-            <td class="text-right">${(s.count || 0).toLocaleString()}</td>
-            <td class="text-right">${pct(s.count || 0, totalAcross)}</td>
-            <td class="text-right">${(s.type === 'google_play' || s.type === 'app_store') && s.avg_rating != null ? s.avg_rating.toFixed(2) + ' ★' : '—'}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
+    <div class="space-y-0.5">
+      ${data.by_source.map((s, i) => {
+        const ratingTxt = (s.type === 'google_play' || s.type === 'app_store') && s.avg_rating != null
+          ? ` · ${s.avg_rating.toFixed(2)}★` : '';
+        return `
+          <div class="flex items-center gap-1.5 leading-tight">
+            <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${SOURCE_COLORS[i % SOURCE_COLORS.length]}"></span>
+            <span class="truncate flex-1 text-gray-700" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
+            <span class="text-gray-500 shrink-0 tabular-nums">${(s.count || 0).toLocaleString()} (${pct(s.count || 0, totalAcross)})${ratingTxt}</span>
+          </div>`;
+      }).join('')}
+    </div>
   `;
 }
 
