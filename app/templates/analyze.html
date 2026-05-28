@@ -224,9 +224,10 @@
     </div>
     <div>
       <label class="text-sm font-medium block mb-1">{{ t('analyze.summary_language') }}</label>
+      <div class="text-xs text-gray-500 mb-2">{{ t('analyze.summary_language_hint') }}</div>
       <select name="summary_lang" class="border rounded px-3 py-2 text-sm w-full">
-        <option value="en">English</option>
-        <option value="ko">한국어</option>
+        <option value="ko" {% if lang == 'ko' %}selected{% endif %}>한국어</option>
+        <option value="en" {% if lang == 'en' %}selected{% endif %}>English</option>
         <option value="auto">{{ t('analyze.auto') }}</option>
       </select>
     </div>
