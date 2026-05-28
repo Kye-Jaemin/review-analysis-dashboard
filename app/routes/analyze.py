@@ -13,6 +13,7 @@ from app.models import Analysis, AnalysisJob, AnalysisStatus, Category, Investig
 from app.routes.reviews import _parse_int
 from app.services.analyzer import _select_review_ids, run_analysis_job
 from app.services.auto_analyzer import run_auto_analysis_job
+from app.services.themes import autogen_theme_snapshots
 from app.templating import render
 
 router = APIRouter()
@@ -162,6 +163,15 @@ async def start_analysis(
             parsed_sources or None,
             clamped_conf,
         )
+
+    # Once analysis is done, auto-generate the 5 sentiment-band mind maps for
+    # the investigation. Runs as a second sequential background task — only
+    # makes sense when there's a card to attach them to.
+    if inv is not None:
+        background_tasks.add_task(
+            autogen_theme_snapshots, inv.id, model, summary_lang,
+        )
+
     registry.prune()
 
     response = render(request, "partials/job_progress.html", job=job)

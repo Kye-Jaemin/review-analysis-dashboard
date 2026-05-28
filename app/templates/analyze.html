@@ -284,6 +284,10 @@
         const res = await fetch('/api/analyze/count?' + params.toString());
         const data = await res.json();
         countEl.textContent = (data.count || 0).toLocaleString() + ' {{ t('analyze.live_count_unit') }}';
+        countEl.classList.remove('num-flash');
+        // Trigger reflow so the class re-fires the keyframe on subsequent updates.
+        void countEl.offsetWidth;
+        countEl.classList.add('num-flash');
       } catch (e) {
         countEl.textContent = '?';
       }

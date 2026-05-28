@@ -67,6 +67,7 @@
     "total_label": "Total",
     "themes_panel_title": "Sentiment reasons (mind map)",
     "themes_hint": "Claude reads sampled reviews of the chosen sentiment and extracts the main themes. Uses the Anthropic API — costs apply. Cached for 10 min per filter combination.",
+    "themes_auto_hint": "One mind map per sentiment band is generated and saved automatically right after each analysis. Pick a tab below; the cached map loads instantly. In auto mode you can also click an auto-category chip to scope the map further (the first new scope generates on demand and is cached).",
     "themes_generate": "Generate",
     "themes_regenerate": "Regenerate",
     "themes_sample": "Sampled {n} reviews",

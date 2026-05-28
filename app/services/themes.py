@@ -36,12 +36,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Analysis, AutoCategory, Category, Review, Sentiment
+from sqlalchemy import delete
+
+from app.models import Analysis, AutoCategory, Category, Investigation, Review, Sentiment, ThemeSnapshot
 from app.services.stats import _descendants_of, _normalize_ids
 
 SAMPLE_SIZE = 100
 CACHE_TTL = 600  # 10 minutes
 UNCATEGORIZED_LABEL = "Uncategorized"
+AUTO_LABEL_PREFIX = "[auto]"
+ALL_SENTIMENTS = ["very_positive", "positive", "neutral", "negative", "very_negative"]
 
 _cache: dict[str, tuple[float, dict]] = {}
 
@@ -306,3 +310,87 @@ async def extract_themes(
     }
     _set_cached(key, result)
     return result
+
+
+async def autogen_theme_snapshots(
+    investigation_id: int,
+    model: Optional[str] = None,
+    summary_lang: str = "en",
+    auto_category_ids: Optional[Sequence[int]] = None,
+) -> int:
+    """Generate and persist the 5 sentiment-band mind maps for an Investigation
+    (optionally scoped to specific auto categories). Replaces any prior auto-
+    generated snapshots matching the same scope so the dashboard always sees
+    the latest run.
+
+    Opens its own AsyncSession so it's safe to call as a fire-and-forget
+    background task. Returns the number of snapshots inserted.
+    """
+    from app.db import AsyncSessionLocal  # local import avoids a circular module load
+
+    ac_ids = sorted([int(x) for x in (auto_category_ids or []) if x is not None])
+
+    async with AsyncSessionLocal() as session:
+        inv = await session.get(Investigation, investigation_id)
+        if not inv:
+            return 0
+
+        # Remove existing auto-generated snapshots for the same scope so we
+        # don't accumulate duplicates over re-analyses.
+        existing = (
+            await session.execute(
+                select(ThemeSnapshot)
+                .where(ThemeSnapshot.investigation_id == investigation_id)
+                .where(ThemeSnapshot.label.like(f"{AUTO_LABEL_PREFIX}%"))
+            )
+        ).scalars().all()
+        for snap in existing:
+            snap_ac = sorted(snap.auto_category_ids or [])
+            if snap_ac == ac_ids:
+                await session.delete(snap)
+        await session.flush()
+
+        inserted = 0
+        for sent in ALL_SENTIMENTS:
+            try:
+                result = await extract_themes(
+                    session,
+                    sentiment=sent,
+                    source_ids=inv.source_ids or None,
+                    root_ids=inv.root_ids or None,
+                    summary_lang=summary_lang,
+                    model=model,
+                    force=True,
+                    auto_category_ids=ac_ids or None,
+                )
+            except Exception:
+                continue
+            if result.get("error"):
+                continue
+            stored = result.get("categories") or result.get("themes") or []
+            if not stored:
+                continue
+
+            label_parts = [f"{AUTO_LABEL_PREFIX} {sent}"]
+            if ac_ids:
+                label_parts.append(f"cats:{','.join(str(x) for x in ac_ids)}")
+            label = " · ".join(label_parts)
+
+            session.add(
+                ThemeSnapshot(
+                    investigation_id=investigation_id,
+                    label=label[:200],
+                    sentiment=sent,
+                    source_ids=inv.source_ids or [],
+                    root_ids=inv.root_ids or [],
+                    auto_category_ids=ac_ids,
+                    summary_lang=summary_lang,
+                    sample_size=result.get("sample_size", 0),
+                    model=result.get("model"),
+                    themes=stored,
+                )
+            )
+            inserted += 1
+
+        await session.commit()
+        return inserted

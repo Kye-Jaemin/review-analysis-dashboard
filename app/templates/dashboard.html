@@ -105,7 +105,7 @@
       <div class="text-gray-500">{{ t('dashboard.auto_cats_hint') }}</div>
     </div>
   </div>
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 fade-soft">
     <div>
       <canvas id="chart-auto-cats" height="200"></canvas>
     </div>
@@ -165,17 +165,6 @@
               class="text-red-600 hover:underline hidden">{{ t('common.delete') }}</button>
       <button id="themes-manage-btn" type="button" onclick="openThemesManage()"
               class="text-gray-600 hover:underline">{{ t('dashboard.themes_manage') }}</button>
-      <span class="mx-1 text-gray-300">|</span>
-      <select id="themes-sentiment" class="border rounded px-2 py-1">
-        <option value="very_positive">{{ t('sentiment.very_positive') }}</option>
-        <option value="positive">{{ t('sentiment.positive') }}</option>
-        <option value="negative">{{ t('sentiment.negative') }}</option>
-        <option value="very_negative">{{ t('sentiment.very_negative') }}</option>
-      </select>
-      <button id="themes-generate-btn" onclick="generateThemes(false)"
-              class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50">
-        {{ t('dashboard.themes_generate') }}
-      </button>
       <button id="themes-regen-btn" onclick="generateThemes(true)"
               class="text-blue-600 hover:underline hidden">
         {{ t('dashboard.themes_regenerate') }}
@@ -194,7 +183,8 @@
       </button>
     </div>
   </div>
-  <div class="text-xs text-gray-500 mb-2">{{ t('dashboard.themes_hint') }}</div>
+  <div class="text-xs text-gray-500 mb-2">{{ t('dashboard.themes_auto_hint') }}</div>
+  <div id="themes-sentiment-tabs" class="flex flex-wrap gap-1.5 mb-3"></div>
   <div id="themes-auto-cat-filter" class="hidden mb-3 border border-blue-100 bg-blue-50 rounded p-2">
     <div class="text-[11px] text-blue-800 mb-1.5 font-medium">{{ t('dashboard.themes_auto_cat_filter') }}</div>
     <div id="themes-auto-cat-chips" class="flex flex-wrap gap-1.5"></div>
@@ -583,6 +573,10 @@ async function loadAutoCategories() {
     renderAutoCatsDoughnut();
     updateAutoCatsTotal();
     renderThemesAutoCatChips();
+    // Try to display the cached mind map for the current sentiment tab right
+    // away. If it isn't there yet (analysis still in progress), the tabs
+    // still re-load when the user picks one.
+    loadOrGenerateCurrentScope().catch(() => {});
   } catch (e) {
     panel.classList.add('hidden');
     _isAutoMode = false;
@@ -691,11 +685,12 @@ function renderThemesAutoCatChips() {
     </button>`;
   }).join('');
   chips.querySelectorAll('.theme-cat-chip').forEach(b => {
-    b.addEventListener('click', () => {
+    b.addEventListener('click', async () => {
       const id = parseInt(b.dataset.catId, 10);
       if (_selectedAutoCats.has(id)) _selectedAutoCats.delete(id);
       else _selectedAutoCats.add(id);
       renderThemesAutoCatChips();
+      await loadOrGenerateCurrentScope();
     });
   });
 }
@@ -1382,14 +1377,17 @@ async function refreshSavedSnapshots() {
     const res = await fetch(`/api/themes/snapshots?investigation_id=${activeInvestigationId}`);
     const data = await res.json();
     sel.innerHTML = `<option value="">{{ t('dashboard.themes_load_placeholder') }}</option>`;
-    (data.snapshots || []).forEach(s => {
-      const date = s.created_at ? s.created_at.slice(0, 10) : '';
-      const sentLbl = SENTIMENT_LABELS[s.sentiment] || s.sentiment;
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = `${s.label} · ${sentLbl} · ${date}`;
-      sel.appendChild(opt);
-    });
+    // Hide [auto] snapshots — the sentiment tabs already drive those.
+    (data.snapshots || [])
+      .filter(s => !s.is_auto)
+      .forEach(s => {
+        const date = s.created_at ? s.created_at.slice(0, 10) : '';
+        const sentLbl = SENTIMENT_LABELS[s.sentiment] || s.sentiment;
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.label} · ${sentLbl} · ${date}`;
+        sel.appendChild(opt);
+      });
     if (current) sel.value = current;
   } catch (e) { /* silent */ }
 }
@@ -1442,7 +1440,8 @@ async function refreshThemesManageList() {
   try {
     const res = await fetch(`/api/themes/snapshots?investigation_id=${activeInvestigationId}`);
     const data = await res.json();
-    const items = data.snapshots || [];
+    // Only show user-saved (non-auto) snapshots in the manage modal.
+    const items = (data.snapshots || []).filter(s => !s.is_auto);
     if (items.length === 0) {
       list.innerHTML = `<div class="text-gray-400 text-center py-4">{{ t('common.no_data') }}</div>`;
       return;
@@ -1598,18 +1597,14 @@ async function renderThemesData(data, saved) {
 }
 
 async function generateThemes(force) {
-  const sentEl = document.getElementById('themes-sentiment');
+  const sentiment = _currentSentimentTab;
   const statusEl = document.getElementById('themes-status');
   const container = document.getElementById('themes-mindmap');
-  const genBtn = document.getElementById('themes-generate-btn');
-  const sentiment = sentEl.value;
 
-  // Generating a fresh one breaks the "loaded saved snapshot" context.
   currentLoadedSnapshotId = null;
   document.getElementById('themes-delete-btn').classList.add('hidden');
   document.getElementById('themes-saved-select').value = '';
 
-  genBtn.disabled = true;
   statusEl.textContent = '{{ t("common.loading") }}';
   container.innerHTML = '';
   container.style.height = '0';
@@ -1623,8 +1618,6 @@ async function generateThemes(force) {
   if (force) params.append('force', 'true');
   selectedSources.forEach(id => params.append('source_ids', id));
   selectedRoots.forEach(id => params.append('root_ids', id));
-  // When the user picked a subset of auto categories in the mind-map filter,
-  // pass them so the LLM only sees reviews tagged with those.
   if (_isAutoMode) {
     _selectedAutoCats.forEach(id => params.append('auto_category_ids', id));
   }
@@ -1632,23 +1625,108 @@ async function generateThemes(force) {
   try {
     const res = await fetch('/api/themes?' + params.toString(), { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) {
-      statusEl.textContent = data.detail || 'failed';
-      return;
-    }
-    if (data.error) {
-      statusEl.textContent = data.error;
-      return;
-    }
+    if (!res.ok) { statusEl.textContent = data.detail || 'failed'; return; }
+    if (data.error) { statusEl.textContent = data.error; return; }
     await renderThemesData(data, /*saved=*/false);
+
+    // Auto-save so the same scope loads instantly next time.
+    if (activeInvestigationId && (data.categories?.length || data.themes?.length)) {
+      const acList = _isAutoMode ? [..._selectedAutoCats] : [];
+      const labelParts = ['[auto]', sentiment];
+      if (acList.length) labelParts.push('cats:' + acList.join(','));
+      const label = labelParts.join(' · ');
+      await fetch('/api/themes/snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label, investigation_id: activeInvestigationId, sentiment,
+          source_ids: [...selectedSources], root_ids: [...selectedRoots],
+          auto_category_ids: acList,
+          summary_lang: '{{ lang }}',
+          sample_size: data.sample_size || 0,
+          model: data.model || null,
+          themes: data.themes || [],
+          categories: data.categories || [],
+        }),
+      }).catch(() => {});
+    }
   } catch (e) {
     statusEl.textContent = String(e);
-  } finally {
-    genBtn.disabled = false;
   }
 }
 
+// ---- Sentiment tab strip + cached-snapshot loader ----
+let _currentSentimentTab = 'very_positive';
+
+function renderSentimentTabs() {
+  const wrap = document.getElementById('themes-sentiment-tabs');
+  if (!wrap) return;
+  const sentiments = ['very_positive', 'positive', 'neutral', 'negative', 'very_negative'];
+  wrap.innerHTML = sentiments.map(s => {
+    const active = s === _currentSentimentTab;
+    const baseCls = 'px-3 py-1.5 rounded text-xs font-medium select-none cursor-pointer transition';
+    const cls = active
+      ? `${baseCls} sentiment-${s}`
+      : `${baseCls} bg-white border border-gray-200 text-gray-600 hover:border-gray-400`;
+    return `<button type="button" data-sent="${s}" class="theme-sent-tab ${cls}">${SENTIMENT_LABELS[s]}</button>`;
+  }).join('');
+  wrap.querySelectorAll('.theme-sent-tab').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      _currentSentimentTab = btn.dataset.sent;
+      renderSentimentTabs();
+      // Tiny pop on the newly-active tab.
+      const active = wrap.querySelector('.theme-sent-tab[data-sent="' + _currentSentimentTab + '"]');
+      if (active) {
+        active.classList.add('tab-pop');
+        setTimeout(() => active.classList.remove('tab-pop'), 240);
+      }
+      await loadOrGenerateCurrentScope();
+    });
+  });
+}
+
+function _signaturesEqual(a, b) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort(), sb = [...b].sort();
+  for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return false;
+  return true;
+}
+
+async function findCachedSnapshot(sentiment, autoCatIds) {
+  if (!activeInvestigationId) return null;
+  try {
+    const res = await fetch(`/api/themes/snapshots?investigation_id=${activeInvestigationId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.snapshots || []).find(s =>
+      s.sentiment === sentiment &&
+      _signaturesEqual(s.auto_category_ids || [], autoCatIds || []) &&
+      s.is_auto !== false  // accept any saved snapshot for that scope
+    ) || null;
+  } catch (e) { return null; }
+}
+
+async function loadOrGenerateCurrentScope() {
+  if (!activeInvestigationId) return;
+  const acList = _isAutoMode ? [..._selectedAutoCats] : [];
+  const statusEl = document.getElementById('themes-status');
+  const container = document.getElementById('themes-mindmap');
+  statusEl.textContent = '{{ t("common.loading") }}';
+  container.innerHTML = '';
+  container.style.height = '0';
+
+  const cached = await findCachedSnapshot(_currentSentimentTab, acList);
+  if (cached) {
+    document.getElementById('themes-saved-select').value = '';  // we manage state ourselves
+    await loadSnapshot(String(cached.id));
+    return;
+  }
+  // Not cached → generate on demand and save.
+  await generateThemes(false);
+}
+
 refreshSavedSnapshots();
+renderSentimentTabs();
 </script>
 <script type="module">
   // markmap.js — interactive mind map (click a node to collapse/expand).

@@ -46,6 +46,7 @@ class SnapshotIn(BaseModel):
     sentiment: str
     source_ids: list[int] = []
     root_ids: list[int] = []
+    auto_category_ids: list[int] = []
     summary_lang: str = "en"
     sample_size: int = 0
     model: Optional[str] = None
@@ -75,6 +76,7 @@ async def save_snapshot(payload: SnapshotIn, session: AsyncSession = Depends(get
         sentiment=payload.sentiment,
         source_ids=payload.source_ids or [],
         root_ids=payload.root_ids or [],
+        auto_category_ids=payload.auto_category_ids or [],
         summary_lang=payload.summary_lang,
         sample_size=payload.sample_size,
         model=payload.model,
@@ -106,6 +108,8 @@ async def list_snapshots(
                 "model": r.model,
                 "source_ids": r.source_ids or [],
                 "root_ids": r.root_ids or [],
+                "auto_category_ids": r.auto_category_ids or [],
+                "is_auto": (r.label or "").startswith("[auto]"),
             }
             for r in rows
         ]
@@ -141,6 +145,8 @@ async def get_snapshot(snap_id: int, session: AsyncSession = Depends(get_session
         "sentiment": snap.sentiment,
         "source_ids": snap.source_ids or [],
         "root_ids": snap.root_ids or [],
+        "auto_category_ids": snap.auto_category_ids or [],
+        "is_auto": (snap.label or "").startswith("[auto]"),
         "summary_lang": snap.summary_lang,
         "sample_size": snap.sample_size,
         "model": snap.model,

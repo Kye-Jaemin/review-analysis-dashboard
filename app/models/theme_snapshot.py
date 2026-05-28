@@ -23,6 +23,7 @@ class ThemeSnapshot(Base):
     sentiment: Mapped[str] = mapped_column(String(50), nullable=False)
     source_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     root_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    auto_category_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     summary_lang: Mapped[str] = mapped_column(String(10), default="en")
     sample_size: Mapped[int] = mapped_column(Integer, default=0)
     model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

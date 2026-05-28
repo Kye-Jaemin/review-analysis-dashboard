@@ -61,9 +61,48 @@
       border-radius: 2px; background: #2563eb;
     }
 
+    /* Tab/chip selection feedback */
+    @keyframes tabPop {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.06); }
+      100% { transform: scale(1); }
+    }
+    .tab-pop { animation: tabPop 220ms ease-out; }
+
+    /* Doughnut + mind map fade-in when first drawn */
+    @keyframes softFadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    .fade-soft { animation: softFadeIn 0.4s ease-out both; }
+
+    /* Number ticker — light pulse when a count value updates */
+    @keyframes numFlash {
+      0%   { color: inherit; }
+      45%  { color: #2563eb; }
+      100% { color: inherit; }
+    }
+    .num-flash { animation: numFlash 540ms ease-out; }
+
+    /* Subtle background hover on sentiment tab labels */
+    .theme-sent-tab { transition: transform 140ms ease-out, background-color 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out; }
+    .theme-sent-tab:hover { transform: translateY(-1px); }
+
+    /* Mind-map SVG soft entrance */
+    #themes-mindmap svg { animation: softFadeIn 0.35s ease-out both; }
+
+    /* Auto-tier toggle buttons get a soft press feel */
+    .auto-tier-btn { transition: transform 120ms ease-out, background-color 140ms ease-out; }
+    .auto-tier-btn:active { transform: scale(0.96); }
+
+    /* Investigation grid items lift slightly more when current */
+    .investigation-card.border-blue-500 { box-shadow: 0 4px 12px -6px rgba(37, 99, 235, 0.35); }
+
     /* Reduce motion for users who ask for it. */
     @media (prefers-reduced-motion: reduce) {
-      .panel-in, .tile-in, .modal-in > div, .lift { animation: none !important; transition: none !important; }
+      .panel-in, .tile-in, .modal-in > div, .lift,
+      .tab-pop, .fade-soft, .num-flash, .theme-sent-tab, .auto-tier-btn,
+      #themes-mindmap svg { animation: none !important; transition: none !important; }
     }
   </style>
 </head>

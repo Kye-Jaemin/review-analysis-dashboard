@@ -54,7 +54,8 @@ AUTO_CATEGORY_COLS = [
 ]
 SNAPSHOT_COLS = [
     "id", "investigation_id", "label", "sentiment", "source_ids", "root_ids",
-    "summary_lang", "sample_size", "model", "themes", "created_at",
+    "auto_category_ids", "summary_lang", "sample_size", "model", "themes",
+    "created_at",
 ]
 INVESTIGATION_COLS = [
     "id", "label", "description", "source_ids", "root_ids", "created_at", "updated_at",
@@ -310,6 +311,7 @@ async def import_workspace(
                 sentiment=row.get("sentiment") or "neutral",
                 source_ids=row.get("source_ids") or [],
                 root_ids=row.get("root_ids") or [],
+                auto_category_ids=row.get("auto_category_ids") or [],
                 summary_lang=row.get("summary_lang") or "en",
                 sample_size=row.get("sample_size") or 0,
                 model=row.get("model"),
