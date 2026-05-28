@@ -4,6 +4,7 @@ from app.models.category import Category
 from app.models.analysis import Analysis, AnalysisJob, Sentiment, AnalysisStatus
 from app.models.theme_snapshot import ThemeSnapshot
 from app.models.investigation import Investigation
+from app.models.auto_category import AutoCategory
 
 __all__ = [
     "Source",
@@ -18,4 +19,5 @@ __all__ = [
     "AnalysisStatus",
     "ThemeSnapshot",
     "Investigation",
+    "AutoCategory",
 ]

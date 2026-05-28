@@ -24,6 +24,7 @@ from app.models import (
     Analysis,
     AnalysisJob,
     AnalysisStatus,
+    AutoCategory,
     Category,
     CollectionJob,
     Investigation,
@@ -45,8 +46,11 @@ REVIEW_COLS = [
     "text", "url", "raw", "collected_at",
 ]
 ANALYSIS_COLS = [
-    "id", "review_id", "category_id", "sentiment", "sentiment_score",
+    "id", "review_id", "category_id", "auto_category_id", "sentiment", "sentiment_score",
     "confidence", "summary", "model", "analyzed_at", "status", "error",
+]
+AUTO_CATEGORY_COLS = [
+    "id", "investigation_id", "name", "description", "review_count", "display_order", "created_at",
 ]
 SNAPSHOT_COLS = [
     "id", "investigation_id", "label", "sentiment", "source_ids", "root_ids",
@@ -93,6 +97,7 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
     analyses = (await session.execute(select(Analysis))).scalars().all()
     snapshots = (await session.execute(select(ThemeSnapshot))).scalars().all()
     investigations = (await session.execute(select(Investigation))).scalars().all()
+    auto_cats = (await session.execute(select(AutoCategory))).scalars().all()
 
     payload = {
         "version": EXPORT_VERSION,
@@ -103,6 +108,7 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
         "analyses": [_dump(a, ANALYSIS_COLS) for a in analyses],
         "theme_snapshots": [_dump(s, SNAPSHOT_COLS) for s in snapshots],
         "investigations": [_dump(i, INVESTIGATION_COLS) for i in investigations],
+        "auto_categories": [_dump(a, AUTO_CATEGORY_COLS) for a in auto_cats],
     }
 
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -118,6 +124,7 @@ async def _wipe(session: AsyncSession) -> None:
     # FK order: analyses → analysis_jobs → reviews → collection_jobs → sources → categories.
     # ThemeSnapshot and Investigation have no FKs, can be wiped any time.
     await session.execute(delete(ThemeSnapshot))
+    await session.execute(delete(AutoCategory))
     await session.execute(delete(Investigation))
     await session.execute(delete(Analysis))
     await session.execute(delete(AnalysisJob))
@@ -135,7 +142,7 @@ async def _reset_pg_sequences(session: AsyncSession) -> None:
         return
     for table in [
         "analyses", "analysis_jobs", "reviews", "collection_jobs", "sources", "categories",
-        "theme_snapshots", "investigations",
+        "theme_snapshots", "investigations", "auto_categories",
     ]:
         await session.execute(
             text(
@@ -228,6 +235,39 @@ async def import_workspace(
         )
     await session.flush()
 
+    # Investigations + auto_categories land before analyses because
+    # Analysis.auto_category_id FKs into them.
+    for row in data.get("investigations") or []:
+        now = datetime.utcnow()
+        existing_inv = await session.get(Investigation, row["id"])
+        if existing_inv:
+            continue
+        session.add(
+            Investigation(
+                id=row["id"],
+                label=row.get("label") or "(unnamed)",
+                description=row.get("description"),
+                source_ids=row.get("source_ids") or [],
+                root_ids=row.get("root_ids") or [],
+                created_at=_parse_dt(row.get("created_at")) or now,
+                updated_at=_parse_dt(row.get("updated_at")) or now,
+            )
+        )
+    await session.flush()
+    for row in data.get("auto_categories") or []:
+        session.add(
+            AutoCategory(
+                id=row["id"],
+                investigation_id=row["investigation_id"],
+                name=row.get("name") or "(unnamed)",
+                description=row.get("description"),
+                review_count=row.get("review_count") or 0,
+                display_order=row.get("display_order") or 0,
+                created_at=_parse_dt(row.get("created_at")) or datetime.utcnow(),
+            )
+        )
+    await session.flush()
+
     for row in data.get("analyses") or []:
         try:
             sent = Sentiment(row["sentiment"]) if row.get("sentiment") else None
@@ -242,6 +282,7 @@ async def import_workspace(
                 id=row["id"],
                 review_id=row["review_id"],
                 category_id=row.get("category_id"),
+                auto_category_id=row.get("auto_category_id"),
                 sentiment=sent,
                 sentiment_score=row.get("sentiment_score"),
                 confidence=row.get("confidence"),
@@ -256,20 +297,8 @@ async def import_workspace(
 
     # Investigations have to land BEFORE theme_snapshots because the latter
     # has a FK pointing at them.
-    for row in data.get("investigations") or []:
-        now = datetime.utcnow()
-        session.add(
-            Investigation(
-                id=row["id"],
-                label=row.get("label") or "(unnamed)",
-                description=row.get("description"),
-                source_ids=row.get("source_ids") or [],
-                root_ids=row.get("root_ids") or [],
-                created_at=_parse_dt(row.get("created_at")) or now,
-                updated_at=_parse_dt(row.get("updated_at")) or now,
-            )
-        )
-    await session.flush()
+    # Investigations were inserted earlier (before analyses) so their
+    # FK target exists; nothing more to do here.
 
     for row in data.get("theme_snapshots") or []:
         session.add(

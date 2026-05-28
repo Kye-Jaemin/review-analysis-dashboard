@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request
@@ -11,6 +12,7 @@ from app.jobs import registry
 from app.models import Analysis, AnalysisJob, AnalysisStatus, Category, Investigation, Review, Source
 from app.routes.reviews import _parse_int
 from app.services.analyzer import _select_review_ids, run_analysis_job
+from app.services.auto_analyzer import run_auto_analysis_job
 from app.templating import render
 
 router = APIRouter()
@@ -89,6 +91,7 @@ async def start_analysis(
     source_ids: List[str] = Form(default_factory=list),
     investigation_label: str = Form(""),
     min_confidence: float = Form(0.0),
+    classification_mode: str = Form("auto"),
     session: AsyncSession = Depends(get_session),
 ):
     model = model or settings.ANTHROPIC_MODEL
@@ -98,9 +101,8 @@ async def start_analysis(
     parsed_roots = [v for v in (_parse_int(s) for s in root_ids) if v is not None]
     parsed_sources = [v for v in (_parse_int(s) for s in source_ids) if v is not None]
 
-    # If the user provided a label, persist (source_ids, root_ids) as a
-    # dashboard card. Empty label means "just run, no card".
     label = (investigation_label or "").strip()
+    inv: Investigation | None = None
     if label:
         inv = Investigation(
             label=label[:200],
@@ -109,6 +111,7 @@ async def start_analysis(
         )
         session.add(inv)
         await session.commit()
+        await session.refresh(inv)
 
     aj = AnalysisJob(status="running", model=model)
     session.add(aj)
@@ -119,20 +122,43 @@ async def start_analysis(
     job.db_id = aj.id
     job.status = "pending"
 
-    # Clamp confidence to [0, 1] just in case the form was tampered with.
     clamped_conf = max(0.0, min(1.0, float(min_confidence or 0.0)))
 
-    background_tasks.add_task(
-        run_analysis_job,
-        job.id,
-        aj.id,
-        mode,
-        model,
-        summary_lang,
-        parsed_roots or None,
-        parsed_sources or None,
-        clamped_conf,
-    )
+    use_auto = classification_mode == "auto"
+    if use_auto:
+        if inv is None:
+            # Auto mode needs an Investigation row to attach categories to.
+            inv = Investigation(
+                label=f"Auto · {datetime.utcnow():%Y-%m-%d %H:%M}",
+                source_ids=parsed_sources,
+                root_ids=[],
+            )
+            session.add(inv)
+            await session.commit()
+            await session.refresh(inv)
+        background_tasks.add_task(
+            run_auto_analysis_job,
+            job.id,
+            aj.id,
+            inv.id,
+            mode,
+            model,
+            summary_lang,
+            parsed_sources or None,
+            clamped_conf,
+        )
+    else:
+        background_tasks.add_task(
+            run_analysis_job,
+            job.id,
+            aj.id,
+            mode,
+            model,
+            summary_lang,
+            parsed_roots or None,
+            parsed_sources or None,
+            clamped_conf,
+        )
     registry.prune()
 
     response = render(request, "partials/job_progress.html", job=job)

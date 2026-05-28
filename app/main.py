@@ -9,6 +9,7 @@ from app.db import init_db
 from app.i18n import COOKIE_MAX_AGE, COOKIE_NAME, SUPPORTED, detect_lang, make_t
 from app.routes import (
     analyze,
+    auto_categories,
     categories,
     export,
     investigations,
@@ -70,4 +71,5 @@ app.include_router(analyze.router)
 app.include_router(export.router)
 app.include_router(themes.router)
 app.include_router(investigations.router)
+app.include_router(auto_categories.router)
 app.include_router(workspace.router)

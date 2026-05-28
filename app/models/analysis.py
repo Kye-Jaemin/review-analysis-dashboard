@@ -48,6 +48,9 @@ class Analysis(Base):
     category_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
     )
+    auto_category_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("auto_categories.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     sentiment: Mapped[Optional[Sentiment]] = mapped_column(SAEnum(Sentiment), nullable=True)
     sentiment_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
