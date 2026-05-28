@@ -72,8 +72,8 @@
       <div class="text-[11px] text-gray-500" id="source-total">—</div>
     </div>
     <div class="flex items-center gap-3">
-      <div class="w-24 shrink-0">
-        <canvas id="chart-source" height="90"></canvas>
+      <div class="w-36 h-36 shrink-0">
+        <canvas id="chart-source"></canvas>
       </div>
       <div id="source-table" class="flex-1 min-w-0 text-[11px]"></div>
     </div>
@@ -1226,8 +1226,12 @@ function renderSource(data) {
       }],
     },
     options: {
+      // Without these, Chart.js scales the canvas to fill the container
+      // width and ignores our w-36 h-36 lock, blowing the doughnut up.
+      responsive: true,
+      maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'right' },
+        legend: { display: false },  // we render our own rich legend below
         tooltip: {
           callbacks: {
             label: (ctx) => {
@@ -1240,14 +1244,21 @@ function renderSource(data) {
     },
   });
 
+  // Custom legend with platform icon + colour swatch + count + %. The icon
+  // makes "where did this number come from" obvious without having to read
+  // the label text. Falls back to the generic web icon for sources whose
+  // type doesn't match a known platform.
   document.getElementById('source-table').innerHTML = `
-    <div class="space-y-0.5">
+    <div class="space-y-1">
       ${data.by_source.map((s, i) => {
         const ratingTxt = (s.type === 'google_play' || s.type === 'app_store') && s.avg_rating != null
           ? ` · ${s.avg_rating.toFixed(2)}★` : '';
+        const icon = platformIcon(s.type);
+        const platform = SOURCE_TYPE_LABELS[s.type] || s.type;
         return `
           <div class="flex items-center gap-1.5 leading-tight">
             <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${SOURCE_COLORS[i % SOURCE_COLORS.length]}"></span>
+            <span class="inline-flex items-center shrink-0" title="${escapeHtml(platform)}">${icon}</span>
             <span class="truncate flex-1 text-gray-700" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
             <span class="text-gray-500 shrink-0 tabular-nums">${(s.count || 0).toLocaleString()} (${pct(s.count || 0, totalAcross)})${ratingTxt}</span>
           </div>`;
