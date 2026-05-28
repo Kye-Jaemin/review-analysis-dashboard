@@ -235,6 +235,18 @@ async def run_auto_analysis_job(
                 session.add(ac)
                 auto_cats.append(ac)
             await session.flush()
+            # CRITICAL: commit Phase 1 so other sessions opened by Phase 2
+            # batches can see the new auto_categories rows. Without this,
+            # batch sessions try to insert/update Analysis rows whose
+            # auto_category_id FK points to rows that aren't yet visible
+            # to them, and Postgres raises ForeignKeyViolationError.
+            # The same commit applies the SET-NULL cascade from the prior
+            # delete, so other sessions also see the cleaned-up Analysis
+            # rows in a consistent snapshot.
+            await session.commit()
+            # Capture the ids before the session can detach them.
+            auto_cat_ids: list[int] = [ac.id for ac in auto_cats]
+            auto_cats_by_id: dict[int, AutoCategory] = {ac.id: ac for ac in auto_cats}
 
             # ---- Phase 2: classify every in-scope review ----
             job.message = "classifying reviews"
@@ -246,7 +258,7 @@ async def run_auto_analysis_job(
 
             processed = 0
             failed = 0
-            per_cat_count: dict[int, int] = {ac.id: 0 for ac in auto_cats}
+            per_cat_count: dict[int, int] = {cid: 0 for cid in auto_cat_ids}
             counts_lock = asyncio.Lock()
 
             async def _process_batch(batch_ids: list[int]):
