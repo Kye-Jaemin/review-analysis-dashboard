@@ -38,7 +38,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from sqlalchemy import delete
 
-from app.models import Analysis, AutoCategory, Category, Investigation, Review, Sentiment, ThemeSnapshot
+from app.models import (
+    Analysis,
+    AutoCategory,
+    Category,
+    Investigation,
+    ReviewAutoCategoryLink,
+    Review,
+    Sentiment,
+    ThemeSnapshot,
+)
 from app.services.stats import _descendants_of, _normalize_ids
 
 SAMPLE_SIZE = 100
@@ -242,13 +251,28 @@ async def extract_themes(
 
     # Fetch the auto-category name too so we can group results by it when the
     # active card is in auto mode (Analysis.category_id is NULL there).
+    #
+    # The (review ↔ auto_category) relation lives in the junction table now,
+    # so we outer-join through it. When the caller passes `auto_category_ids`
+    # the junction also becomes the filter — we restrict to junction rows
+    # whose auto_category_id is in the requested subset. Without auto_ids the
+    # outer join lets us still grab a category name (any one) for grouping;
+    # when a review sits in two cards we just take whichever the join picks,
+    # which is fine for mind-map labelling.
     stmt = (
         select(
             Review.id, Review.text, Analysis.summary, Category.path, AutoCategory.name,
         )
         .join(Analysis, Analysis.review_id == Review.id)
         .outerjoin(Category, Category.id == Analysis.category_id)
-        .outerjoin(AutoCategory, AutoCategory.id == Analysis.auto_category_id)
+        .outerjoin(
+            ReviewAutoCategoryLink,
+            ReviewAutoCategoryLink.c.review_id == Review.id,
+        )
+        .outerjoin(
+            AutoCategory,
+            AutoCategory.id == ReviewAutoCategoryLink.c.auto_category_id,
+        )
         .where(Analysis.sentiment == sent_enum)
     )
     if src_ids:
@@ -256,7 +280,7 @@ async def extract_themes(
     if cat_filter is not None:
         stmt = stmt.where(Analysis.category_id.in_(cat_filter))
     if auto_ids:
-        stmt = stmt.where(Analysis.auto_category_id.in_(auto_ids))
+        stmt = stmt.where(ReviewAutoCategoryLink.c.auto_category_id.in_(auto_ids))
     stmt = stmt.order_by(Review.collected_at.desc()).limit(SAMPLE_SIZE)
     rows = (await session.execute(stmt)).all()
 
@@ -272,8 +296,16 @@ async def extract_themes(
         _set_cached(key, result)
         return result
 
+    # The junction outer-join can emit a row per (review, auto_cat) link, so
+    # a review shared between two cards would appear twice. Collapse on
+    # review id — keep the first label we see (deterministic enough for
+    # mind-map grouping; manual cat path is preferred when present).
+    seen_ids: set[int] = set()
     sample = []
     for rid, text, summary, cat_path, auto_cat_name in rows:
+        if rid in seen_ids:
+            continue
+        seen_ids.add(rid)
         snippet = (summary if summary else (text or "")).strip().replace("\n", " ")
         # Prefer the manual category path when present, fall back to the
         # auto-category name (auto mode), then to a generic bucket.

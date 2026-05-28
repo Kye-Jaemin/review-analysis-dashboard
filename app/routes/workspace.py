@@ -28,6 +28,7 @@ from app.models import (
     Category,
     CollectionJob,
     Investigation,
+    ReviewAutoCategoryLink,
     Review,
     Sentiment,
     Source,
@@ -46,7 +47,7 @@ REVIEW_COLS = [
     "text", "url", "raw", "collected_at",
 ]
 ANALYSIS_COLS = [
-    "id", "review_id", "category_id", "auto_category_id", "sentiment", "sentiment_score",
+    "id", "review_id", "category_id", "sentiment", "sentiment_score",
     "user_tier", "confidence", "summary", "model", "analyzed_at", "status", "error",
 ]
 AUTO_CATEGORY_COLS = [
@@ -100,6 +101,14 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
     snapshots = (await session.execute(select(ThemeSnapshot))).scalars().all()
     investigations = (await session.execute(select(Investigation))).scalars().all()
     auto_cats = (await session.execute(select(AutoCategory))).scalars().all()
+    links = (
+        await session.execute(
+            select(
+                ReviewAutoCategoryLink.c.review_id,
+                ReviewAutoCategoryLink.c.auto_category_id,
+            )
+        )
+    ).all()
 
     payload = {
         "version": EXPORT_VERSION,
@@ -111,6 +120,9 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
         "theme_snapshots": [_dump(s, SNAPSHOT_COLS) for s in snapshots],
         "investigations": [_dump(i, INVESTIGATION_COLS) for i in investigations],
         "auto_categories": [_dump(a, AUTO_CATEGORY_COLS) for a in auto_cats],
+        "review_auto_categories": [
+            {"review_id": rid, "auto_category_id": acid} for rid, acid in links
+        ],
     }
 
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -125,6 +137,8 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
 async def _wipe(session: AsyncSession) -> None:
     # FK order: analyses → analysis_jobs → reviews → collection_jobs → sources → categories.
     # ThemeSnapshot and Investigation have no FKs, can be wiped any time.
+    # review_auto_categories must go before its two parents.
+    await session.execute(delete(ReviewAutoCategoryLink))
     await session.execute(delete(ThemeSnapshot))
     await session.execute(delete(AutoCategory))
     await session.execute(delete(Investigation))
@@ -272,6 +286,11 @@ async def import_workspace(
         )
     await session.flush()
 
+    # Capture (review_id, auto_category_id) pairs hidden inside old v1
+    # exports — pre-junction the relation lived as a column on analyses,
+    # so we backfill the junction from those values for compat.
+    legacy_links: list[tuple[int, int]] = []
+
     for row in data.get("analyses") or []:
         try:
             sent = Sentiment(row["sentiment"]) if row.get("sentiment") else None
@@ -281,12 +300,14 @@ async def import_workspace(
             astatus = AnalysisStatus(row["status"]) if row.get("status") else AnalysisStatus.succeeded
         except (ValueError, KeyError):
             astatus = AnalysisStatus.succeeded
+        legacy_ac = row.get("auto_category_id")
+        if isinstance(legacy_ac, int):
+            legacy_links.append((row["review_id"], legacy_ac))
         session.add(
             Analysis(
                 id=row["id"],
                 review_id=row["review_id"],
                 category_id=row.get("category_id"),
-                auto_category_id=row.get("auto_category_id"),
                 sentiment=sent,
                 sentiment_score=row.get("sentiment_score"),
                 user_tier=row.get("user_tier"),
@@ -299,6 +320,29 @@ async def import_workspace(
             )
         )
     await session.flush()
+
+    # New-style junction rows from the export. Old exports won't have this
+    # key — that's fine, legacy_links above already covers them.
+    junction_rows: list[dict] = []
+    seen_pairs: set[tuple[int, int]] = set()
+    for row in data.get("review_auto_categories") or []:
+        try:
+            rid = int(row["review_id"])
+            acid = int(row["auto_category_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (rid, acid) in seen_pairs:
+            continue
+        seen_pairs.add((rid, acid))
+        junction_rows.append({"review_id": rid, "auto_category_id": acid})
+    for rid, acid in legacy_links:
+        if (rid, acid) in seen_pairs:
+            continue
+        seen_pairs.add((rid, acid))
+        junction_rows.append({"review_id": rid, "auto_category_id": acid})
+    if junction_rows:
+        await session.execute(ReviewAutoCategoryLink.insert(), junction_rows)
+        await session.flush()
 
     # Investigations have to land BEFORE theme_snapshots because the latter
     # has a FK pointing at them.

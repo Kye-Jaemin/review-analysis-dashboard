@@ -11,10 +11,13 @@ Two-pass LLM flow scoped to an Investigation card:
   Phase 2 — classify every in-scope review into one of those categories.
     Batched call: each batch includes the 10 categories + a chunk of
     reviews; the response tags every review with a category_index plus
-    the usual sentiment / score / confidence / summary. Analysis rows
-    are upserted with auto_category_id set; manual category_id is left
-    alone (so a card can carry both classifications without losing
-    either).
+    the usual sentiment / score / confidence / summary.
+
+    Analysis rows are upserted with sentiment / user_tier / summary —
+    these are review-level attributes shared across cards. The
+    per-card "this review belongs to this Top-10 category" link goes
+    into the `review_auto_categories` junction table, so a review
+    sitting in two cards keeps a tag for each.
 """
 from __future__ import annotations
 
@@ -25,6 +28,8 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -35,11 +40,28 @@ from app.models import (
     AnalysisJob,
     AnalysisStatus,
     AutoCategory,
+    ReviewAutoCategoryLink,
     Review,
     Sentiment,
 )
 from app.models.analysis import SCORE_TO_SENTIMENT, SENTIMENT_TO_SCORE
 from app.services.analyzer import _select_review_ids
+
+
+def _link_upsert(values: list[dict]):
+    """ON CONFLICT DO NOTHING insert for the junction table, dialect-aware
+    so the same call works on Postgres (prod) and SQLite (local/test)."""
+    if not values:
+        return None
+    if settings.database_url.startswith("postgresql"):
+        stmt = pg_insert(ReviewAutoCategoryLink).values(values)
+        return stmt.on_conflict_do_nothing(
+            index_elements=["review_id", "auto_category_id"]
+        )
+    stmt = sqlite_insert(ReviewAutoCategoryLink).values(values)
+    return stmt.on_conflict_do_nothing(
+        index_elements=["review_id", "auto_category_id"]
+    )
 
 SAMPLE_SIZE_FOR_EXTRACTION = 200
 TOP_N = 10
@@ -216,8 +238,11 @@ async def run_auto_analysis_job(
             if not cat_defs:
                 raise RuntimeError("LLM did not return any categories")
 
-            # Replace any prior auto categories for this card. Analysis rows
-            # have ON DELETE SET NULL, so their auto_category_id resets cleanly.
+            # Replace any prior auto categories for this card. The junction
+            # table has ON DELETE CASCADE on auto_category_id, so the deletes
+            # also clear THIS card's tags for every affected review — other
+            # cards' tags on the same reviews are untouched (their tags point
+            # at their own auto_categories rows).
             await session.execute(
                 delete(AutoCategory).where(AutoCategory.investigation_id == investigation_id)
             )
@@ -279,6 +304,7 @@ async def run_auto_analysis_job(
                             outs = []
                         valid_ids = {r.id for r in rows}
                         seen: set[int] = set()
+                        link_rows: list[dict] = []  # junction inserts for this batch
                         for item in outs:
                             if not isinstance(item, dict):
                                 continue
@@ -330,7 +356,6 @@ async def run_auto_analysis_job(
                             ).scalar_one_or_none()
                             success = sent is not None
                             if existing:
-                                existing.auto_category_id = ac_id_to_store
                                 if sent is not None:
                                     existing.sentiment = sent
                                     existing.sentiment_score = score
@@ -349,7 +374,6 @@ async def run_auto_analysis_job(
                                 s2.add(
                                     Analysis(
                                         review_id=rid,
-                                        auto_category_id=ac_id_to_store,
                                         sentiment=sent,
                                         sentiment_score=score,
                                         confidence=conf,
@@ -359,6 +383,16 @@ async def run_auto_analysis_job(
                                         status=AnalysisStatus.succeeded if success else AnalysisStatus.failed,
                                     )
                                 )
+
+                            # Per-card link goes into the junction. Card A's
+                            # earlier tags on this review (pointing at Card A
+                            # auto_categories) stay put — only this card's
+                            # old tags were cleared by the cascade above.
+                            if ac_id_to_store is not None:
+                                link_rows.append(
+                                    {"review_id": rid, "auto_category_id": ac_id_to_store}
+                                )
+
                             if success:
                                 processed += 1
                                 if ac_id_to_store is not None:
@@ -367,7 +401,9 @@ async def run_auto_analysis_job(
                             else:
                                 failed += 1
 
-                        # Any review in batch the LLM skipped → failed bucket
+                        # Any review in batch the LLM skipped → failed bucket.
+                        # No junction insert for them (they aren't tagged on
+                        # this card at all this run).
                         for missed in valid_ids - seen:
                             existing = (
                                 await s2.execute(
@@ -384,12 +420,14 @@ async def run_auto_analysis_job(
                                     )
                                 )
                             else:
-                                existing.auto_category_id = None
                                 existing.status = AnalysisStatus.failed
                                 existing.error = "no auto-classification output"
                                 existing.analyzed_at = datetime.utcnow()
                             failed += 1
 
+                        link_stmt = _link_upsert(link_rows)
+                        if link_stmt is not None:
+                            await s2.execute(link_stmt)
                         await s2.commit()
                 job.processed = processed
                 job.failed_count = failed

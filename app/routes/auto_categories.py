@@ -6,7 +6,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import Analysis, AutoCategory, Investigation, Review, Sentiment
+from app.models import (
+    Analysis,
+    AutoCategory,
+    Investigation,
+    ReviewAutoCategoryLink,
+    Review,
+    Sentiment,
+)
 from app.services.translator import translate_auto_categories, translate_text
 
 router = APIRouter()
@@ -51,17 +58,25 @@ async def list_auto_categories(
     if lang:
         translated_by_id = await translate_auto_categories(session, cats, lang)
 
-    # Sentiment × user_tier distribution per auto category.
+    # Sentiment × user_tier distribution per auto category, via the
+    # junction so the same review can count for multiple cards.
+    cat_ids = [c.id for c in cats]
     rows = (
         await session.execute(
             select(
-                Analysis.auto_category_id,
+                ReviewAutoCategoryLink.c.auto_category_id,
                 Analysis.sentiment,
                 Analysis.user_tier,
                 func.count(Analysis.id),
             )
-            .where(Analysis.auto_category_id.in_([c.id for c in cats]))
-            .group_by(Analysis.auto_category_id, Analysis.sentiment, Analysis.user_tier)
+            .select_from(ReviewAutoCategoryLink)
+            .join(Analysis, Analysis.review_id == ReviewAutoCategoryLink.c.review_id)
+            .where(ReviewAutoCategoryLink.c.auto_category_id.in_(cat_ids))
+            .group_by(
+                ReviewAutoCategoryLink.c.auto_category_id,
+                Analysis.sentiment,
+                Analysis.user_tier,
+            )
         )
     ).all()
 
@@ -132,12 +147,20 @@ async def list_auto_categories(
     classified_other = 0  # (a) — has Analysis but auto_category_id is NULL
 
     if src_ids:
+        # Reviews tagged in THIS card's Top 10 — anything else in scope is
+        # "Other" (whether the LLM skipped it, confidence cut it, or it
+        # hasn't been classified yet).
+        tagged_subq = (
+            select(ReviewAutoCategoryLink.c.review_id)
+            .where(ReviewAutoCategoryLink.c.auto_category_id.in_(cat_ids))
+            .subquery()
+        )
         other_rows = (
             await session.execute(
                 select(Analysis.sentiment, Analysis.user_tier, func.count(Analysis.id))
                 .join(Review, Review.id == Analysis.review_id)
                 .where(Review.source_id.in_(src_ids))
-                .where(Analysis.auto_category_id.is_(None))
+                .where(~Analysis.review_id.in_(select(tagged_subq.c.review_id)))
                 .group_by(Analysis.sentiment, Analysis.user_tier)
             )
         ).all()
@@ -203,8 +226,9 @@ async def reviews_for_other(
     session: AsyncSession = Depends(get_session),
 ):
     """Reviews in the investigation's source scope that aren't in the Top 10:
-    analyses with auto_category_id IS NULL plus reviews without any Analysis
-    row. The latter only show up when no sentiment / tier filter is applied."""
+    analyses that have no junction row for any of this card's categories,
+    plus reviews without any Analysis row. The latter only show up when no
+    sentiment / tier filter is applied."""
     inv = await session.get(Investigation, investigation_id)
     if not inv:
         raise HTTPException(404, "investigation not found")
@@ -212,12 +236,25 @@ async def reviews_for_other(
     if not src_ids:
         return {"category": {"id": "other", "name": "Other", "description": None}, "reviews": []}
 
+    # Reviews tagged on this card's Top 10 — anything in scope that isn't
+    # in this set is "Other". Built per-call because the categories change
+    # whenever auto analysis re-runs.
+    this_card_cat_ids = (
+        await session.execute(
+            select(AutoCategory.id).where(AutoCategory.investigation_id == investigation_id)
+        )
+    ).scalars().all()
+    tagged_review_ids_subq = (
+        select(ReviewAutoCategoryLink.c.review_id)
+        .where(ReviewAutoCategoryLink.c.auto_category_id.in_(this_card_cat_ids))
+    )
+
     # First the classified-but-uncategorized reviews.
     stmt = (
         select(Review, Analysis)
         .join(Analysis, Analysis.review_id == Review.id)
         .where(Review.source_id.in_(src_ids))
-        .where(Analysis.auto_category_id.is_(None))
+        .where(~Review.id.in_(tagged_review_ids_subq))
     )
     sentiment_filter = sentiment
     tier_filter = user_tier if user_tier in ("paid", "free", "unknown") else None
@@ -292,10 +329,16 @@ async def reviews_for_auto_category(
     if not cat:
         raise HTTPException(404, "auto category not found")
 
+    # Pull reviews via the junction so a review shared with another card
+    # still shows up here as long as it was tagged into THIS category.
     stmt = (
         select(Review, Analysis)
+        .join(
+            ReviewAutoCategoryLink,
+            ReviewAutoCategoryLink.c.review_id == Review.id,
+        )
         .join(Analysis, Analysis.review_id == Review.id)
-        .where(Analysis.auto_category_id == cat_id)
+        .where(ReviewAutoCategoryLink.c.auto_category_id == cat_id)
     )
     if sentiment:
         try:

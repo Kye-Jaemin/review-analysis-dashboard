@@ -3,10 +3,38 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+
+
+# Junction table: a review can belong to multiple investigation cards,
+# and each card has its own Top-10 set. So (review, auto_category) is
+# many-to-many. Both cascades are intentional:
+#   - delete a review → its tags disappear
+#   - delete an auto_category (typically when re-running auto analysis
+#     on a card) → that card's tags for every review disappear, but
+#     other cards' tags for the same reviews are untouched.
+ReviewAutoCategoryLink = Table(
+    "review_auto_categories",
+    Base.metadata,
+    Column(
+        "review_id",
+        Integer,
+        ForeignKey("reviews.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    ),
+    Column(
+        "auto_category_id",
+        Integer,
+        ForeignKey("auto_categories.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+        index=True,
+    ),
+)
 
 
 class AutoCategory(Base):
