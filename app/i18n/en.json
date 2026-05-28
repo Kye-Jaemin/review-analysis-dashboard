@@ -104,6 +104,8 @@
     "auto_cats_hint": "Click a tile to see the reviews tagged with that category.",
     "auto_cats_other_name": "Other",
     "auto_cats_other_desc": "Reviews that didn't fit any of the Top 10 categories (below confidence threshold or LLM skipped).",
+    "auto_cats_unanalyzed": "not yet analyzed",
+    "auto_cats_unanalyzed_chip": "Not analyzed",
     "user_tier_label": "User tier",
     "tier_paid": "Paid",
     "tier_free": "Free",

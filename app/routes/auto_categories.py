@@ -89,9 +89,17 @@ async def list_auto_categories(
             },
         })
 
-    # ---- Other bucket: analyses in scope whose auto_category_id is NULL ----
-    # Reasons a review lands here: confidence below the user's threshold,
-    # the LLM skipped it, or returned an out-of-range category_index.
+    # ---- Other bucket ----
+    # "Other" should account for EVERY review in scope that didn't end up in
+    # the Top 10. That includes:
+    #   (a) analyses with auto_category_id IS NULL (LLM skipped, threshold
+    #       cut it, out-of-range category_index, etc.) — these still carry
+    #       sentiment and user_tier when classification succeeded.
+    #   (b) reviews with no Analysis row at all (analysis never finished,
+    #       failed during INSERT, source still collecting, etc.) — no
+    #       sentiment / tier metadata available.
+    # The header total must equal the actual review count in scope so the
+    # math the user does (Top 10 + Other = Total) is honest.
     src_ids = inv.source_ids or []
     other_sentiments = _empty_tier_dict()
     other_by_tier = {
@@ -99,7 +107,8 @@ async def list_auto_categories(
         "free": {"count": 0, "sentiments": _empty_tier_dict()},
         "unknown": {"count": 0, "sentiments": _empty_tier_dict()},
     }
-    other_total = 0
+    classified_other = 0  # (a) — has Analysis but auto_category_id is NULL
+
     if src_ids:
         other_rows = (
             await session.execute(
@@ -112,7 +121,7 @@ async def list_auto_categories(
         ).all()
         for sent, tier, cnt in other_rows:
             s_key = sent.value if hasattr(sent, "value") else (sent if sent else None)
-            other_total += cnt
+            classified_other += cnt
             if s_key and s_key in other_sentiments:
                 other_sentiments[s_key] += cnt
             tier_key = tier if tier in ("paid", "free", "unknown") else None
@@ -121,8 +130,22 @@ async def list_auto_categories(
                 if s_key and s_key in other_by_tier[tier_key]["sentiments"]:
                     other_by_tier[tier_key]["sentiments"][s_key] += cnt
 
-    # Convenience totals so the header can show "Paid: X / Total: Y" etc.
-    grand_total_all = sum(totals_all.values()) + other_total
+    # Total reviews collected in scope — the number the user sees on the
+    # investigation card and expects everything to add up to.
+    total_in_scope = 0
+    if src_ids:
+        total_in_scope = (
+            await session.execute(
+                select(func.count(Review.id)).where(Review.source_id.in_(src_ids))
+            )
+        ).scalar() or 0
+
+    top10_sum = sum(totals_all.values())
+    other_total = max(0, total_in_scope - top10_sum)
+    unanalyzed_count = max(0, other_total - classified_other)
+
+    # Convenience totals — grand_total_all anchors on the raw review count.
+    grand_total_all = total_in_scope
     grand_total_by_tier = {
         "paid": sum(totals_by_tier[c.id]["paid"] for c in cats) + other_by_tier["paid"]["count"],
         "free": sum(totals_by_tier[c.id]["free"] for c in cats) + other_by_tier["free"]["count"],
@@ -134,6 +157,8 @@ async def list_auto_categories(
         "categories": out,
         "other": {
             "count": other_total,
+            "classified_count": classified_other,
+            "unanalyzed_count": unanalyzed_count,
             "sentiments": other_sentiments,
             "by_tier": other_by_tier,
         },
@@ -155,8 +180,9 @@ async def reviews_for_other(
     limit: int = Query(50, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
 ):
-    """Reviews in the investigation's source scope that have an Analysis but
-    no assigned auto_category (below confidence threshold or LLM skipped)."""
+    """Reviews in the investigation's source scope that aren't in the Top 10:
+    analyses with auto_category_id IS NULL plus reviews without any Analysis
+    row. The latter only show up when no sentiment / tier filter is applied."""
     inv = await session.get(Investigation, investigation_id)
     if not inv:
         raise HTTPException(404, "investigation not found")
@@ -164,19 +190,22 @@ async def reviews_for_other(
     if not src_ids:
         return {"category": {"id": "other", "name": "Other", "description": None}, "reviews": []}
 
+    # First the classified-but-uncategorized reviews.
     stmt = (
         select(Review, Analysis)
         .join(Analysis, Analysis.review_id == Review.id)
         .where(Review.source_id.in_(src_ids))
         .where(Analysis.auto_category_id.is_(None))
     )
-    if sentiment:
+    sentiment_filter = sentiment
+    tier_filter = user_tier if user_tier in ("paid", "free", "unknown") else None
+    if sentiment_filter:
         try:
-            stmt = stmt.where(Analysis.sentiment == Sentiment(sentiment))
+            stmt = stmt.where(Analysis.sentiment == Sentiment(sentiment_filter))
         except ValueError:
             pass
-    if user_tier in ("paid", "free", "unknown"):
-        stmt = stmt.where(Analysis.user_tier == user_tier)
+    if tier_filter is not None:
+        stmt = stmt.where(Analysis.user_tier == tier_filter)
     stmt = stmt.order_by(Review.collected_at.desc()).limit(limit)
     rows = (await session.execute(stmt)).all()
     out = []
@@ -193,6 +222,34 @@ async def reviews_for_other(
             "summary": a.summary,
             "source_id": r.source_id,
         })
+
+    # Reviews without any Analysis row at all — only meaningful when neither
+    # sentiment nor tier filter is set, because those reviews have neither.
+    if not sentiment_filter and tier_filter is None and len(out) < limit:
+        remaining = limit - len(out)
+        unanalyzed_stmt = (
+            select(Review)
+            .outerjoin(Analysis, Analysis.review_id == Review.id)
+            .where(Review.source_id.in_(src_ids))
+            .where(Analysis.id.is_(None))
+            .order_by(Review.collected_at.desc())
+            .limit(remaining)
+        )
+        for r in (await session.execute(unanalyzed_stmt)).scalars().all():
+            out.append({
+                "id": r.id,
+                "author": r.author,
+                "posted_at": r.posted_at.isoformat() if r.posted_at else None,
+                "rating": float(r.rating) if r.rating is not None else None,
+                "text": (r.text or "")[:500],
+                "sentiment": None,
+                "sentiment_score": None,
+                "user_tier": None,
+                "summary": None,
+                "source_id": r.source_id,
+                "unanalyzed": True,
+            })
+
     return {
         "category": {"id": "other", "name": "Other", "description": None},
         "reviews": out,

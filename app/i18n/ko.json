@@ -104,6 +104,8 @@
     "auto_cats_hint": "타일을 클릭하면 해당 카테고리로 분류된 리뷰가 표시됩니다.",
     "auto_cats_other_name": "기타",
     "auto_cats_other_desc": "Top 10 카테고리 중 어디에도 들어가지 못한 리뷰 (신뢰도 임계값 미달 또는 LLM이 분류 못함).",
+    "auto_cats_unanalyzed": "건은 아직 분석되지 않음",
+    "auto_cats_unanalyzed_chip": "미분석",
     "user_tier_label": "사용자 구분",
     "tier_paid": "유료",
     "tier_free": "무료",

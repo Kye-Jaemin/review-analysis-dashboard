@@ -875,6 +875,10 @@ function renderAutoCatsGrid() {
         ${neg.v ? `<div style="width:${neg.pct}%;background:${SENTIMENT_COLORS.negative}"></div>` : ''}
         ${vneg.v ? `<div style="width:${vneg.pct}%;background:${SENTIMENT_COLORS.very_negative}"></div>` : ''}
       </div>`;
+    const unanalyzedCount = (_lastAutoCatsData.other && _lastAutoCatsData.other.unanalyzed_count) || 0;
+    const unanalyzedNote = (_autoCatsTier === 'all' && unanalyzedCount > 0)
+      ? `<div class="text-[10px] text-amber-700 mt-1">+ ${unanalyzedCount.toLocaleString()} {{ t('dashboard.auto_cats_unanalyzed') }}</div>`
+      : '';
     grid.insertAdjacentHTML('beforeend', `
       <button type="button"
               onclick="openAutoCatModal('other')"
@@ -890,6 +894,7 @@ function renderAutoCatsGrid() {
           <span>·${neu.v.toLocaleString()}</span>
           <span>−${(neg.v + vneg.v).toLocaleString()}</span>
         </div>
+        ${unanalyzedNote}
       </button>`);
   }
 }
@@ -971,13 +976,15 @@ async function renderAutoCatModal() {
     unknown: '{{ t("dashboard.tier_unknown") }}',
   };
   body.innerHTML = reviews.map(r => `
-    <div class="border-b border-gray-100 pb-2">
+    <div class="border-b border-gray-100 pb-2 ${r.unanalyzed ? 'opacity-70' : ''}">
       <div class="flex items-center gap-2 text-xs text-gray-500 mb-1 flex-wrap">
         ${r.author ? escapeHtml(r.author) : '—'}
         ${r.posted_at ? '· ' + r.posted_at.slice(0,10) : ''}
         ${r.rating != null ? '· ' + r.rating.toFixed(1) + '★' : ''}
         ${r.user_tier ? `<span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]">${tierLabel[r.user_tier] || r.user_tier}</span>` : ''}
-        ${r.sentiment ? `<span class="ml-auto px-1.5 py-0.5 rounded text-xs sentiment-${r.sentiment}">${SENTIMENT_LABELS[r.sentiment]}</span>` : ''}
+        ${r.unanalyzed
+          ? `<span class="ml-auto px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px]">{{ t('dashboard.auto_cats_unanalyzed_chip') }}</span>`
+          : (r.sentiment ? `<span class="ml-auto px-1.5 py-0.5 rounded text-xs sentiment-${r.sentiment}">${SENTIMENT_LABELS[r.sentiment]}</span>` : '')}
       </div>
       <div class="text-gray-800 text-sm">${escapeHtml(r.text)}</div>
       ${r.summary ? `<div class="text-xs text-gray-500 mt-1 italic">— ${escapeHtml(r.summary)}</div>` : ''}
