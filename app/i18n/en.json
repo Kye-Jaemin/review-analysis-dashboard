@@ -248,5 +248,12 @@
     "succeeded": "Succeeded",
     "failed": "Failed",
     "progress": "{processed} / {total}"
+  },
+  "toast": {
+    "collection_done_title": "Collection complete",
+    "collection_done_message": "{new} new of {total} fetched.",
+    "analysis_done_title": "Analysis complete",
+    "analysis_done_message": "Analyzed {processed} reviews ({failed} failed).",
+    "failed_title": "Job failed"
   }
 }

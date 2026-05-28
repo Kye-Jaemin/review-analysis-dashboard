@@ -248,5 +248,12 @@
     "succeeded": "성공",
     "failed": "실패",
     "progress": "{processed} / {total}"
+  },
+  "toast": {
+    "collection_done_title": "수집 완료",
+    "collection_done_message": "{total}건 중 {new}건이 새로 추가되었습니다.",
+    "analysis_done_title": "분석 완료",
+    "analysis_done_message": "{processed}건 분석 (실패 {failed}건).",
+    "failed_title": "작업 실패"
   }
 }

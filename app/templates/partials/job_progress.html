@@ -27,3 +27,28 @@
     <div class="mt-2 text-xs text-red-600">{{ job.error }}</div>
   {% endif %}
 </div>
+{% if job.status in ('succeeded', 'failed') %}
+<script>
+  // Each job ID fires the completion toast at most once, even if the partial
+  // is rendered again (e.g. user revisits / HTMX double-fires).
+  (function () {
+    const k = 'job-toast-{{ job.id }}';
+    if (window[k] || !window.showToast) return;
+    window[k] = true;
+    {% if job.status == 'succeeded' %}
+      {% if job.kind == 'collection' %}
+        const title = '{{ t("toast.collection_done_title") }}';
+        const message = '{{ t("toast.collection_done_message", new=job.new_count, total=job.total) }}';
+      {% else %}
+        const title = '{{ t("toast.analysis_done_title") }}';
+        const message = '{{ t("toast.analysis_done_message", processed=job.processed, failed=job.failed_count) }}';
+      {% endif %}
+      window.showToast({ kind: 'success', title, message, duration: 7000 });
+    {% else %}
+      const title = '{{ t("toast.failed_title") }}';
+      const message = {{ (job.error or "")|truncate(200)|tojson }};
+      window.showToast({ kind: 'error', title, message, duration: 10000 });
+    {% endif %}
+  })();
+</script>
+{% endif %}

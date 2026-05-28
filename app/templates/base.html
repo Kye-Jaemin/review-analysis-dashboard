@@ -194,13 +194,27 @@
     }
     .grid-swap { animation: gridSwap 0.32s cubic-bezier(.22,.61,.36,1) both; }
 
+    /* --- Toast notifications --- */
+    @keyframes toastIn {
+      from { transform: translateY(20px) scale(0.96); opacity: 0; }
+      to   { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    @keyframes toastOut {
+      from { transform: translateY(0) scale(1); opacity: 1; }
+      to   { transform: translateY(8px) scale(0.97); opacity: 0; }
+    }
+    .toast-in  { animation: toastIn 0.32s cubic-bezier(.22,.61,.36,1) both; }
+    .toast-out { animation: toastOut 0.28s ease-in both; }
+    #toast-container { width: min(380px, 90vw); }
+
     /* Reduce motion for users who ask for it. */
     @media (prefers-reduced-motion: reduce) {
       .panel-in, .tile-in, .modal-in > div, .lift,
       .tab-pop, .fade-soft, .num-flash, .theme-sent-tab, .auto-tier-btn,
       .skeleton::before, .investigation-card.border-blue-500,
       .press-feedback, .ripple-target .ripple-dot, .progress-fill-animated,
-      .pulse-soft, #themes-mindmap svg, .grid-swap {
+      .pulse-soft, #themes-mindmap svg, .grid-swap,
+      .toast-in, .toast-out {
         animation: none !important; transition: none !important;
       }
     }
@@ -276,6 +290,61 @@
     </main>
   </div>
 
+  <div id="toast-container"
+       class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none flex flex-col items-end"></div>
+  <script>
+    (function () {
+      function esc(s) {
+        if (s == null) return '';
+        return String(s).replace(/[&<>"']/g, c =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+        );
+      }
+      window.showToast = function (opts) {
+        opts = opts || {};
+        const c = document.getElementById('toast-container');
+        if (!c) return;
+        const kind = opts.kind || 'info';
+        const accent = {
+          success: 'border-l-4 border-green-500 bg-white text-gray-800',
+          error:   'border-l-4 border-red-500 bg-white text-gray-800',
+          info:    'border-l-4 border-blue-500 bg-white text-gray-800',
+        }[kind] || 'border-l-4 border-gray-300 bg-white text-gray-800';
+        const iconBg = {
+          success: 'bg-green-100 text-green-700',
+          error:   'bg-red-100 text-red-700',
+          info:    'bg-blue-100 text-blue-700',
+        }[kind];
+        const iconChar = { success: '✓', error: '!', info: 'i' }[kind] || '·';
+        const t = document.createElement('div');
+        t.className = 'toast-in pointer-events-auto shadow-lg rounded ' + accent;
+        t.style.width = '100%';
+        t.innerHTML = `
+          <div class="flex items-start gap-3 p-3">
+            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full shrink-0 text-sm font-semibold ${iconBg}">${iconChar}</span>
+            <div class="flex-1 min-w-0">
+              ${opts.title ? `<div class="font-medium text-sm">${esc(opts.title)}</div>` : ''}
+              ${opts.message ? `<div class="text-xs text-gray-600 mt-0.5 break-words">${esc(opts.message)}</div>` : ''}
+            </div>
+            <button type="button"
+                    class="text-gray-400 hover:text-gray-700 text-lg leading-none shrink-0"
+                    onclick="(function(b){b.parentElement.classList.add('toast-out');setTimeout(()=>b.parentElement.remove(),280);})(this)">
+              &times;
+            </button>
+          </div>`;
+        c.appendChild(t);
+        const dur = opts.duration === 0 ? 0 : (opts.duration || 6000);
+        if (dur > 0) {
+          setTimeout(() => {
+            if (!t.isConnected) return;
+            t.classList.remove('toast-in');
+            t.classList.add('toast-out');
+            setTimeout(() => t.remove(), 280);
+          }, dur);
+        }
+      };
+    })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
