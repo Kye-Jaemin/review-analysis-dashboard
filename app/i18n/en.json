@@ -103,7 +103,9 @@
     "user_tier_label": "User tier",
     "tier_paid": "Paid",
     "tier_free": "Free",
-    "tier_unknown": "Unknown"
+    "tier_unknown": "Unknown",
+    "themes_auto_cat_filter": "Limit to auto categories (multi-select)",
+    "themes_auto_cat_filter_hint": "If none are selected, the LLM sees every category. Pick chips to restrict the sample to specific Top-10 categories before generating."
   },
   "source_type": {
     "google_play": "Google Play",

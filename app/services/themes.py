@@ -36,7 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Analysis, Category, Review, Sentiment
+from app.models import Analysis, AutoCategory, Category, Review, Sentiment
 from app.services.stats import _descendants_of, _normalize_ids
 
 SAMPLE_SIZE = 100
@@ -46,10 +46,13 @@ UNCATEGORIZED_LABEL = "Uncategorized"
 _cache: dict[str, tuple[float, dict]] = {}
 
 
-def _cache_key(sentiment: str, source_ids, root_ids, summary_lang: str) -> str:
+def _cache_key(
+    sentiment: str, source_ids, root_ids, summary_lang: str, auto_category_ids=None
+) -> str:
     src = sorted(source_ids or [])
     rts = sorted(root_ids or [])
-    raw = f"{sentiment}|{src}|{rts}|{summary_lang}|v2"  # v2 marks new schema
+    acs = sorted(auto_category_ids or [])
+    raw = f"{sentiment}|{src}|{rts}|{summary_lang}|ac:{acs}|v3"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
@@ -210,8 +213,9 @@ async def extract_themes(
     summary_lang: str = "en",
     model: Optional[str] = None,
     force: bool = False,
+    auto_category_ids: Optional[Sequence[int]] = None,
 ) -> dict:
-    key = _cache_key(sentiment, source_ids, root_ids, summary_lang)
+    key = _cache_key(sentiment, source_ids, root_ids, summary_lang, auto_category_ids)
     if not force:
         cached = _get_cached(key)
         if cached:
@@ -224,6 +228,7 @@ async def extract_themes(
 
     src_ids = _normalize_ids(source_ids)
     selected_roots = _normalize_ids(root_ids)
+    auto_ids = _normalize_ids(auto_category_ids)
 
     cat_filter: Optional[set[int]] = None
     if selected_roots:
@@ -231,16 +236,23 @@ async def extract_themes(
         parent_by_id = {c.id: c.parent_id for c in all_cats}
         cat_filter = _descendants_of(parent_by_id, selected_roots)
 
+    # Fetch the auto-category name too so we can group results by it when the
+    # active card is in auto mode (Analysis.category_id is NULL there).
     stmt = (
-        select(Review.id, Review.text, Analysis.summary, Category.path)
+        select(
+            Review.id, Review.text, Analysis.summary, Category.path, AutoCategory.name,
+        )
         .join(Analysis, Analysis.review_id == Review.id)
         .outerjoin(Category, Category.id == Analysis.category_id)
+        .outerjoin(AutoCategory, AutoCategory.id == Analysis.auto_category_id)
         .where(Analysis.sentiment == sent_enum)
     )
     if src_ids:
         stmt = stmt.where(Review.source_id.in_(src_ids))
     if cat_filter is not None:
         stmt = stmt.where(Analysis.category_id.in_(cat_filter))
+    if auto_ids:
+        stmt = stmt.where(Analysis.auto_category_id.in_(auto_ids))
     stmt = stmt.order_by(Review.collected_at.desc()).limit(SAMPLE_SIZE)
     rows = (await session.execute(stmt)).all()
 
@@ -257,11 +269,14 @@ async def extract_themes(
         return result
 
     sample = []
-    for rid, text, summary, cat_path in rows:
+    for rid, text, summary, cat_path, auto_cat_name in rows:
         snippet = (summary if summary else (text or "")).strip().replace("\n", " ")
+        # Prefer the manual category path when present, fall back to the
+        # auto-category name (auto mode), then to a generic bucket.
+        label = cat_path or auto_cat_name or UNCATEGORIZED_LABEL
         sample.append({
             "id": rid,
-            "category": cat_path or UNCATEGORIZED_LABEL,
+            "category": label,
             "snippet": snippet[:400],
         })
 

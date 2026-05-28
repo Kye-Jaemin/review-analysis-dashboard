@@ -103,7 +103,9 @@
     "user_tier_label": "사용자 구분",
     "tier_paid": "유료",
     "tier_free": "무료",
-    "tier_unknown": "미상"
+    "tier_unknown": "미상",
+    "themes_auto_cat_filter": "자동 카테고리 선택 (Top 10 멀티 선택)",
+    "themes_auto_cat_filter_hint": "아무 것도 선택하지 않으면 전체 카테고리를 대상으로 합니다. 칩을 클릭해 특정 Top-10 카테고리로 좁힌 뒤 마인드맵을 생성하세요."
   },
   "source_type": {
     "google_play": "Google Play",
