@@ -259,6 +259,63 @@ const SOURCE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#
 
 let charts = {};
 
+// ----- Animated number tweener -----
+const _animFrameMap = new Map();
+function animateCount(el, target, opts) {
+  if (!el || target == null || Number.isNaN(target)) return;
+  opts = opts || {};
+  const duration = opts.duration || 700;
+  const formatter = opts.formatter || (v => Math.round(v).toLocaleString());
+  const startVal = parseFloat(el.dataset._numCurrent || '0') || 0;
+  if (Math.abs(startVal - target) < 1e-6) return;
+  if (_animFrameMap.has(el)) cancelAnimationFrame(_animFrameMap.get(el));
+  const t0 = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - t0) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    const v = startVal + (target - startVal) * eased;
+    el.textContent = formatter(v);
+    if (t < 1) {
+      _animFrameMap.set(el, requestAnimationFrame(tick));
+    } else {
+      el.dataset._numCurrent = String(target);
+      _animFrameMap.delete(el);
+    }
+  }
+  _animFrameMap.set(el, requestAnimationFrame(tick));
+}
+
+// ----- Ripple feedback on click -----
+function attachRipples(scope) {
+  (scope || document).querySelectorAll('.ripple-target').forEach(el => {
+    if (el.dataset._rippleBound) return;
+    el.dataset._rippleBound = '1';
+    el.addEventListener('pointerdown', e => {
+      const rect = el.getBoundingClientRect();
+      const size = Math.max(rect.width, rect.height) * 0.6;
+      const dot = document.createElement('span');
+      dot.className = 'ripple-dot';
+      dot.style.width = dot.style.height = size + 'px';
+      dot.style.left = (e.clientX - rect.left - size / 2) + 'px';
+      dot.style.top = (e.clientY - rect.top - size / 2) + 'px';
+      el.appendChild(dot);
+      setTimeout(() => dot.remove(), 500);
+    });
+  });
+}
+
+// ----- Skeleton helper -----
+function showSkeleton(container, lines) {
+  if (!container) return;
+  const n = lines || 4;
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    const w = 55 + (i % 4) * 9;
+    html += `<div class="skeleton h-3 my-1.5" style="width:${w}%"></div>`;
+  }
+  container.innerHTML = html;
+}
+
 // Filter state — only mutated by Investigation card clicks now.
 // Empty sets = no filter = show all data.
 const selectedSources = new Set();
@@ -389,7 +446,7 @@ function renderInvestigations(items) {
     const date = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
     return `
       <div data-inv-id="${inv.id}"
-           class="investigation-card lift tile-in border rounded p-3 cursor-pointer
+           class="investigation-card lift tile-in ripple-target press-feedback border rounded p-3 cursor-pointer
                   ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300 bg-white'}"
            onclick="applyInvestigation(${inv.id})">
         <div class="flex items-center justify-between mb-1.5">
@@ -413,6 +470,10 @@ function renderInvestigations(items) {
   if (clearBtn) {
     clearBtn.classList.toggle('hidden', !(curSrc.length || curRoot.length));
   }
+  attachRipples(grid);
+  // Brief swap-in animation on the wrapper so changes (delete, reorder) feel
+  // continuous rather than abrupt.
+  grid.classList.remove('grid-swap'); void grid.offsetWidth; grid.classList.add('grid-swap');
 }
 
 async function applyInvestigation(id) {
@@ -502,9 +563,18 @@ async function loadStats() {
   const qs = filterQuery();
   const res = await fetch('/api/stats' + (qs ? '?' + qs : ''));
   const data = await res.json();
-  document.getElementById('card-total').textContent = data.total.toLocaleString();
-  document.getElementById('card-avg-sent').textContent = data.avg_sentiment != null ? data.avg_sentiment.toFixed(2) : '—';
-  document.getElementById('card-avg-rating').textContent = data.avg_rating != null ? data.avg_rating.toFixed(2) + ' ★' : '—';
+  // Animated counters where it makes sense.
+  animateCount(document.getElementById('card-total'), data.total);
+  if (data.avg_sentiment != null) {
+    animateCount(document.getElementById('card-avg-sent'), data.avg_sentiment, { formatter: v => v.toFixed(2) });
+  } else {
+    document.getElementById('card-avg-sent').textContent = '—';
+  }
+  if (data.avg_rating != null) {
+    animateCount(document.getElementById('card-avg-rating'), data.avg_rating, { formatter: v => v.toFixed(2) + ' ★' });
+  } else {
+    document.getElementById('card-avg-rating').textContent = '—';
+  }
   document.getElementById('card-last').textContent = data.last_collected ? data.last_collected.slice(0,16).replace('T',' ') : '—';
 
   renderSentiment(data);
@@ -735,7 +805,7 @@ function renderAutoCatsGrid() {
     return `
       <button type="button"
               onclick="openAutoCatModal(${c.id})"
-              class="text-left lift tile-in border border-gray-200 rounded p-3 hover:border-blue-400 bg-white">
+              class="text-left lift tile-in ripple-target press-feedback border border-gray-200 rounded p-3 hover:border-blue-400 bg-white">
         <div class="flex items-baseline justify-between gap-2">
           <div class="font-medium text-sm truncate" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
           <div class="text-xs text-gray-500 shrink-0">${total.toLocaleString()}</div>
@@ -754,6 +824,7 @@ function renderAutoCatsGrid() {
       </button>`;
   }).join('');
 
+  attachRipples(grid);
   // Append the "Other" tile when there are any uncategorized reviews in scope.
   const ob = otherBucket();
   if (ob.total > 0) {
@@ -1605,9 +1676,21 @@ async function generateThemes(force) {
   document.getElementById('themes-delete-btn').classList.add('hidden');
   document.getElementById('themes-saved-select').value = '';
 
-  statusEl.textContent = '{{ t("common.loading") }}';
-  container.innerHTML = '';
-  container.style.height = '0';
+  statusEl.innerHTML = '<span class="pulse-soft">{{ t("common.loading") }}</span>';
+  // Keep the skeleton visible if one is already there (set by loadOrGenerate),
+  // otherwise drop one in.
+  if (!container.querySelector('.skeleton')) {
+    container.style.height = '520px';
+    container.innerHTML = `
+      <div class="p-6 space-y-3">
+        <div class="skeleton h-4" style="width:42%"></div>
+        <div class="skeleton h-3" style="width:88%"></div>
+        <div class="skeleton h-3" style="width:74%"></div>
+        <div class="skeleton h-3" style="width:80%"></div>
+        <div class="skeleton h-3" style="width:55%"></div>
+        <div class="skeleton h-3" style="width:90%"></div>
+      </div>`;
+  }
   document.getElementById('themes-fit-btn').classList.add('hidden');
   document.getElementById('themes-breakdown-wrap').classList.add('hidden');
   document.getElementById('themes-breakdown').innerHTML = '';
@@ -1711,17 +1794,27 @@ async function loadOrGenerateCurrentScope() {
   const acList = _isAutoMode ? [..._selectedAutoCats] : [];
   const statusEl = document.getElementById('themes-status');
   const container = document.getElementById('themes-mindmap');
-  statusEl.textContent = '{{ t("common.loading") }}';
-  container.innerHTML = '';
-  container.style.height = '0';
+  statusEl.innerHTML = '<span class="pulse-soft">{{ t("common.loading") }}</span>';
+  // Skeleton shimmer fills the mindmap area while we resolve the cache or wait
+  // for the LLM, so the layout doesn't jump.
+  container.style.height = '520px';
+  container.style.overflow = 'hidden';
+  container.innerHTML = `
+    <div class="p-6 space-y-3">
+      <div class="skeleton h-4" style="width:42%"></div>
+      <div class="skeleton h-3" style="width:88%"></div>
+      <div class="skeleton h-3" style="width:74%"></div>
+      <div class="skeleton h-3" style="width:80%"></div>
+      <div class="skeleton h-3" style="width:55%"></div>
+      <div class="skeleton h-3" style="width:90%"></div>
+    </div>`;
 
   const cached = await findCachedSnapshot(_currentSentimentTab, acList);
   if (cached) {
-    document.getElementById('themes-saved-select').value = '';  // we manage state ourselves
+    document.getElementById('themes-saved-select').value = '';
     await loadSnapshot(String(cached.id));
     return;
   }
-  // Not cached → generate on demand and save.
   await generateThemes(false);
 }
 
