@@ -118,6 +118,8 @@
       </select>
       <button id="themes-delete-btn" onclick="deleteCurrentSnapshot()"
               class="text-red-600 hover:underline hidden">{{ t('common.delete') }}</button>
+      <button id="themes-manage-btn" type="button" onclick="openThemesManage()"
+              class="text-gray-600 hover:underline">🗂 {{ t('dashboard.themes_manage') }}</button>
       <span class="mx-1 text-gray-300">|</span>
       <select id="themes-sentiment" class="border rounded px-2 py-1">
         <option value="very_positive">{{ t('sentiment.very_positive') }}</option>
@@ -150,6 +152,19 @@
   <div class="text-xs text-gray-500 mb-2">{{ t('dashboard.themes_hint') }}</div>
   <div id="themes-status" class="text-xs text-gray-500 mb-2"></div>
   <div id="themes-mindmap" class="border border-gray-100 rounded" style="height: 0; overflow: hidden;"></div>
+  <!-- Manage saved mind maps modal -->
+  <div id="themes-manage-modal"
+       class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+       onclick="if (event.target === this) closeThemesManage()">
+    <div class="bg-white rounded shadow-lg p-4 w-[32rem] max-w-[90vw] max-h-[80vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-medium">{{ t('dashboard.themes_manage_title') }}</div>
+        <button onclick="closeThemesManage()" class="text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
+      </div>
+      <div id="themes-manage-list" class="space-y-1.5 text-sm"></div>
+    </div>
+  </div>
+
   <div id="themes-breakdown-wrap" class="hidden mt-4">
     <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
       <div>{{ t('dashboard.themes_breakdown') }}</div>
@@ -1001,6 +1016,87 @@ async function loadSnapshot(idStr) {
   } catch (e) {
     statusEl.textContent = String(e);
   }
+}
+
+async function openThemesManage() {
+  if (!activeInvestigationId) {
+    alert('{{ t("dashboard.themes_pick_card_to_save") }}');
+    return;
+  }
+  await refreshThemesManageList();
+  document.getElementById('themes-manage-modal').classList.remove('hidden');
+}
+
+function closeThemesManage() {
+  document.getElementById('themes-manage-modal').classList.add('hidden');
+}
+
+async function refreshThemesManageList() {
+  const list = document.getElementById('themes-manage-list');
+  list.innerHTML = `<div class="text-gray-400 text-center py-4">{{ t('common.loading') }}</div>`;
+  try {
+    const res = await fetch(`/api/themes/snapshots?investigation_id=${activeInvestigationId}`);
+    const data = await res.json();
+    const items = data.snapshots || [];
+    if (items.length === 0) {
+      list.innerHTML = `<div class="text-gray-400 text-center py-4">{{ t('common.no_data') }}</div>`;
+      return;
+    }
+    list.innerHTML = items.map(s => {
+      const date = s.created_at ? s.created_at.slice(0, 10) : '';
+      const sentLbl = SENTIMENT_LABELS[s.sentiment] || s.sentiment;
+      const sentColor = {
+        very_positive: '#15803d', positive: '#86efac', neutral: '#9ca3af',
+        negative: '#fdba74', very_negative: '#b91c1c',
+      }[s.sentiment] || '#9ca3af';
+      return `
+        <div class="flex items-center justify-between border border-gray-200 rounded px-3 py-2">
+          <div class="flex-1 min-w-0 mr-3">
+            <div class="font-medium text-sm truncate" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</div>
+            <div class="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
+              <span class="inline-block w-2 h-2 rounded-full" style="background:${sentColor}"></span>
+              ${escapeHtml(sentLbl)} · ${date}
+              ${s.sample_size ? ' · sample ' + s.sample_size : ''}
+            </div>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <button type="button" onclick="loadAndCloseManage(${s.id})"
+                    class="text-xs text-blue-600 hover:underline">${escapeHtml('{{ t("dashboard.themes_load_action") }}')}</button>
+            <button type="button" onclick="deleteSnapshotFromManage(${s.id})"
+                    class="text-xs text-red-600 hover:underline">${escapeHtml('{{ t("common.delete") }}')}</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="text-xs text-red-600 py-4 text-center">${escapeHtml(String(e))}</div>`;
+  }
+}
+
+async function loadAndCloseManage(id) {
+  closeThemesManage();
+  document.getElementById('themes-saved-select').value = String(id);
+  await loadSnapshot(String(id));
+}
+
+async function deleteSnapshotFromManage(id) {
+  if (!confirm('{{ t("dashboard.themes_delete_confirm") }}')) return;
+  const res = await fetch(`/api/themes/snapshots/${id}`, { method: 'DELETE' });
+  if (!res.ok) { alert('delete failed'); return; }
+  // If the deleted snapshot was the one currently rendered, clear the panel.
+  if (currentLoadedSnapshotId === id) {
+    currentLoadedSnapshotId = null;
+    document.getElementById('themes-delete-btn').classList.add('hidden');
+    const mm = document.getElementById('themes-mindmap');
+    mm.innerHTML = '';
+    mm.style.height = '0';
+    document.getElementById('themes-fit-btn').classList.add('hidden');
+    document.getElementById('themes-status').textContent = '';
+    document.getElementById('themes-saved-select').value = '';
+    document.getElementById('themes-breakdown-wrap').classList.add('hidden');
+    document.getElementById('themes-breakdown').innerHTML = '';
+  }
+  await refreshThemesManageList();
+  await refreshSavedSnapshots();
 }
 
 async function deleteCurrentSnapshot() {
