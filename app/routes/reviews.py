@@ -155,16 +155,27 @@ async def list_reviews(
     ).scalars().all()
     source_map = {s.id: s for s in sources}
     cat_map = {c.id: c for c in categories}
+    # Per-source review counts so each card can show its grand total too.
+    src_count_rows = (
+        await session.execute(
+            select(Review.source_id, func.count(Review.id)).group_by(Review.source_id)
+        )
+    ).all()
+    src_review_count: dict[int, int] = {sid: int(c) for sid, c in src_count_rows}
     investigations = []
     for inv in inv_rows:
         inv_src_items = []
+        total_reviews = 0
         for sid in inv.source_ids or []:
             s = source_map.get(sid)
             if s:
+                cnt = src_review_count.get(s.id, 0)
+                total_reviews += cnt
                 inv_src_items.append({
                     "id": s.id, "label": s.label,
                     "type": s.type.value if hasattr(s.type, "value") else str(s.type),
                     "icon_url": s.icon_url,
+                    "review_count": cnt,
                 })
         inv_root_items = []
         for cid in inv.root_ids or []:
@@ -174,6 +185,7 @@ async def list_reviews(
         investigations.append({
             "id": inv.id, "label": inv.label,
             "sources": inv_src_items, "roots": inv_root_items,
+            "review_count": total_reviews,
             "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
         })
 

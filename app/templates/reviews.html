@@ -32,28 +32,51 @@
     </div>
   </div>
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    {% set source_type_labels = {
+      'google_play': t('source_type.google_play'),
+      'app_store': t('source_type.app_store'),
+      'reddit': t('source_type.reddit'),
+      'web': t('source_type.web'),
+    } %}
     {% for inv in investigations %}
       {% set is_active = (active_investigation_id == inv.id) %}
       <a href="/reviews?investigation_id={{ inv.id }}"
-         class="block border rounded p-3 transition
-                {{ 'border-blue-500 bg-blue-50' if is_active else 'border-gray-200 hover:border-gray-400 bg-white' }}">
-        <div class="flex items-center justify-between mb-1.5">
-          <div class="font-medium text-sm truncate" title="{{ inv.label }}">{{ inv.label }}</div>
-          {% if is_active %}
-            <span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded">{{ t('dashboard.investigations_active') }}</span>
-          {% endif %}
+         class="block border rounded p-3 transition flex flex-col gap-2
+                {{ 'border-blue-500 bg-blue-50' if is_active else 'border-gray-200 hover:border-blue-300 bg-white' }}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="font-semibold text-sm truncate" title="{{ inv.label }}">{{ inv.label }}</div>
+            <div class="text-[10px] text-gray-500 mt-0.5">{{ (inv.updated_at or '')[:10] }}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-base font-semibold text-gray-800 leading-none tabular-nums">{{ '{:,}'.format(inv.review_count or 0) }}</div>
+            <div class="text-[10px] text-gray-500">{{ t('dashboard.card_total_reviews') }}</div>
+          </div>
         </div>
-        <div class="text-[11px] text-gray-500 mb-2">{{ (inv.updated_at or '')[:10] }}</div>
-        <div class="flex flex-wrap gap-1 mb-1">
+
+        {% if is_active %}
+          <div><span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded">{{ t('dashboard.investigations_active') }}</span></div>
+        {% endif %}
+
+        <div class="border-t border-gray-100 pt-2 space-y-1.5">
           {% for s in inv.sources %}
-            <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[11px]">
-              {% if s.icon_url %}<img src="{{ s.icon_url }}" class="w-3.5 h-3.5 rounded" alt="">{% endif %}
-              <span class="truncate max-w-[8rem]">{{ s.label }}</span>
-            </span>
+            <div class="flex items-center gap-2 text-[11px]">
+              {% if s.icon_url %}
+                <img src="{{ s.icon_url }}" class="w-5 h-5 rounded shrink-0" alt="">
+              {% else %}
+                <span class="w-5 h-5 rounded bg-gray-200 shrink-0 inline-block"></span>
+              {% endif %}
+              <div class="flex-1 min-w-0 leading-tight">
+                <div class="font-medium text-gray-800 truncate" title="{{ s.label }}">{{ s.label }}</div>
+                <div class="text-[10px] text-gray-500">{{ source_type_labels.get(s.type, s.type) }}</div>
+              </div>
+              <div class="text-gray-500 tabular-nums shrink-0">{{ '{:,}'.format(s.review_count or 0) }}</div>
+            </div>
           {% else %}
-            <span class="text-[11px] text-gray-400">— no sources —</span>
+            <div class="text-[11px] text-gray-400">— no sources —</div>
           {% endfor %}
         </div>
+
         <div class="flex flex-wrap gap-1">
           {% for c in inv.roots %}
             <span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[11px]">{{ c.name }}</span>
@@ -61,10 +84,11 @@
             <span class="text-[11px] text-gray-400">— no categories —</span>
           {% endfor %}
         </div>
-        <div class="flex justify-end mt-2">
+
+        <div class="flex justify-end mt-auto">
           <a href="/api/investigations/{{ inv.id }}/export"
              onclick="event.stopPropagation()"
-             class="text-[11px] text-gray-600 hover:underline">📤 {{ t('dashboard.investigations_export') }}</a>
+             class="text-[11px] text-gray-600 hover:underline">{{ t('dashboard.investigations_export') }}</a>
         </div>
       </a>
     {% endfor %}

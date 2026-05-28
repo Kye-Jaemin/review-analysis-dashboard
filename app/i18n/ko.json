@@ -92,6 +92,7 @@
     "investigations_active": "활성",
     "investigations_clear": "필터 해제",
     "investigations_export": "카드 내보내기",
+    "card_total_reviews": "리뷰",
     "investigations_import": "카드 불러오기",
     "active_filter_label": "현재 보기:",
     "active_filter_none": "전체 데이터 (조사 카드 미선택)",

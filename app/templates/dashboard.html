@@ -436,27 +436,59 @@ function renderInvestigations(items) {
   grid.innerHTML = items.map(inv => {
     const isActive = arraysEq(curSrc, inv.source_ids) && arraysEq(curRoot, inv.root_ids) && curSrc.length + curRoot.length > 0;
     if (isActive) activeInvestigationId = inv.id;
-    const srcChips = (inv.sources || []).map(s => {
-      const icon = s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" class="w-3.5 h-3.5 rounded" alt="">` : '';
-      return `<span class="inline-flex items-center gap-1 bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[11px]">${icon}<span class="truncate max-w-[8rem]">${escapeHtml(s.label)}</span></span>`;
-    }).join(' ');
+
+    // Source rows: each one shows app name + platform label clearly stacked.
+    const srcRows = (inv.sources || []).map(s => {
+      const platform = SOURCE_TYPE_LABELS[s.type] || s.type;
+      const icon = s.icon_url
+        ? `<img src="${escapeHtml(s.icon_url)}" class="w-5 h-5 rounded shrink-0" alt="">`
+        : `<span class="w-5 h-5 rounded bg-gray-200 shrink-0 inline-block"></span>`;
+      const count = (s.review_count || 0).toLocaleString();
+      return `
+        <div class="flex items-center gap-2 text-[11px]">
+          ${icon}
+          <div class="flex-1 min-w-0 leading-tight">
+            <div class="font-medium text-gray-800 truncate" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</div>
+            <div class="text-[10px] text-gray-500">${escapeHtml(platform)}</div>
+          </div>
+          <div class="text-gray-500 tabular-nums shrink-0">${count}</div>
+        </div>`;
+    }).join('');
+
     const catChips = (inv.roots || []).map(c =>
       `<span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[11px]">${escapeHtml(c.name)}</span>`
     ).join(' ');
+
     const date = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
+    const totalReviews = (inv.review_count || 0).toLocaleString();
+
     return `
       <div data-inv-id="${inv.id}"
-           class="investigation-card lift tile-in ripple-target press-feedback border rounded p-3 cursor-pointer
+           class="investigation-card lift tile-in ripple-target press-feedback border rounded p-3 cursor-pointer flex flex-col gap-2
                   ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300 bg-white'}"
            onclick="applyInvestigation(${inv.id})">
-        <div class="flex items-center justify-between mb-1.5">
-          <div class="font-medium text-sm truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</div>
-          ${isActive ? `<span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded">{{ t('dashboard.investigations_active') }}</span>` : ''}
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="font-semibold text-sm truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</div>
+            <div class="text-[10px] text-gray-500 mt-0.5">${date}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-base font-semibold text-gray-800 leading-none tabular-nums">${totalReviews}</div>
+            <div class="text-[10px] text-gray-500">{{ t('dashboard.card_total_reviews') }}</div>
+          </div>
         </div>
-        <div class="text-[11px] text-gray-500 mb-2">${date}</div>
-        <div class="flex flex-wrap gap-1 mb-1">${srcChips || '<span class="text-[11px] text-gray-400">— no sources —</span>'}</div>
-        <div class="flex flex-wrap gap-1 mb-2">${catChips || '<span class="text-[11px] text-gray-400">— no categories —</span>'}</div>
-        <div class="flex justify-end items-center gap-3">
+
+        ${isActive ? `<div><span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded">{{ t('dashboard.investigations_active') }}</span></div>` : ''}
+
+        <div class="border-t border-gray-100 pt-2 space-y-1.5">
+          ${srcRows || `<div class="text-[11px] text-gray-400">— no sources —</div>`}
+        </div>
+
+        <div class="flex flex-wrap gap-1">
+          ${catChips || `<span class="text-[11px] text-gray-400">— no categories —</span>`}
+        </div>
+
+        <div class="flex justify-end items-center gap-3 mt-auto">
           <a href="/api/investigations/${inv.id}/export"
              onclick="event.stopPropagation()"
              class="text-[11px] text-gray-600 hover:underline">${escapeHtml('{{ t("dashboard.investigations_export") }}')}</a>

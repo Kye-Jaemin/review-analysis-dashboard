@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
@@ -103,18 +103,32 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
     }
     cats = {c.id: c for c in (await session.execute(select(Category))).scalars().all()}
 
+    # Precompute total review counts per source so we can roll them up
+    # per investigation in one pass below.
+    src_count_rows = (
+        await session.execute(
+            select(Review.source_id, func.count(Review.id)).group_by(Review.source_id)
+        )
+    ).all()
+    src_review_count: dict[int, int] = {sid: int(c) for sid, c in src_count_rows}
+
     out = []
     for inv in rows:
         src_items = []
+        total_reviews = 0
         for sid in inv.source_ids or []:
             s = sources.get(sid)
             if s:
+                cnt = src_review_count.get(s.id, 0)
+                total_reviews += cnt
                 src_items.append(
                     {
                         "id": s.id,
                         "label": s.label,
+                        "display_name": s.display_name,
                         "type": s.type.value if hasattr(s.type, "value") else str(s.type),
                         "icon_url": s.icon_url,
+                        "review_count": cnt,
                     }
                 )
         cat_items = []
@@ -131,6 +145,7 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
                 "root_ids": inv.root_ids or [],
                 "sources": src_items,
                 "roots": cat_items,
+                "review_count": total_reviews,
                 "created_at": inv.created_at.isoformat() if inv.created_at else None,
                 "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
             }
