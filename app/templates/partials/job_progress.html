@@ -44,6 +44,9 @@
         const message = '{{ t("toast.analysis_done_message", processed=job.processed, failed=job.failed_count) }}';
       {% endif %}
       window.showToast({ kind: 'success', title, message, duration: 7000 });
+      // Confetti burst — only on success, only once per job, only when
+      // the user hasn't asked for reduced motion.
+      if (window.fireCelebration) window.fireCelebration();
     {% else %}
       const title = '{{ t("toast.failed_title") }}';
       const message = {{ (job.error or "")|truncate(200)|tojson }};

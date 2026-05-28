@@ -285,6 +285,39 @@ function animateCount(el, target, opts) {
   _animFrameMap.set(el, requestAnimationFrame(tick));
 }
 
+// ----- Chart.js plugin: doughnut center label -----
+// Draws "TOTAL\nN,NNN" at the centre of a doughnut. Set per-chart via
+// `options.plugins.centerLabel = { title, value, valueColor }`.
+const doughnutCenterLabel = {
+  id: 'doughnutCenterLabel',
+  afterDraw(chart) {
+    const cfg = chart.options.plugins && chart.options.plugins.centerLabel;
+    if (!cfg) return;
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return;
+    const cx = (chartArea.left + chartArea.right) / 2;
+    const cy = (chartArea.top + chartArea.bottom) / 2;
+    const radius = Math.min(chartArea.right - chartArea.left, chartArea.bottom - chartArea.top) / 2;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Big value
+    const valueSize = Math.max(14, Math.round(radius * 0.32));
+    ctx.font = `700 ${valueSize}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    ctx.fillStyle = cfg.valueColor || '#111827';
+    ctx.fillText(cfg.value, cx, cy - 2);
+    // Small label below
+    if (cfg.title) {
+      const titleSize = Math.max(9, Math.round(radius * 0.14));
+      ctx.font = `500 ${titleSize}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+      ctx.fillStyle = '#6b7280';
+      ctx.fillText(cfg.title, cx, cy + valueSize * 0.7);
+    }
+    ctx.restore();
+  },
+};
+if (window.Chart) Chart.register(doughnutCenterLabel);
+
 // ----- Ripple feedback on click -----
 function attachRipples(scope) {
   (scope || document).querySelectorAll('.ripple-target').forEach(el => {
@@ -300,6 +333,36 @@ function attachRipples(scope) {
       dot.style.top = (e.clientY - rect.top - size / 2) + 'px';
       el.appendChild(dot);
       setTimeout(() => dot.remove(), 500);
+    });
+  });
+}
+
+// ----- Investigation card 3D tilt -----
+// On pointermove we tilt the card up to TILT_DEG_MAX along X / Y based on
+// where the cursor sits relative to the card centre. The transform stack
+// is `perspective() rotateX() rotateY() translateZ(0)` so other animations
+// (apply-pulse, lift) keep working. Resets on leave.
+const TILT_DEG_MAX = 6;
+const TILT_PERSPECTIVE = 800;
+const _prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function attachCardTilt(scope) {
+  if (_prefersReducedMotion) return;
+  (scope || document).querySelectorAll('.investigation-card').forEach(el => {
+    if (el.dataset._tiltBound) return;
+    el.dataset._tiltBound = '1';
+    el.addEventListener('pointermove', (e) => {
+      const r = el.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width;   // 0..1
+      const py = (e.clientY - r.top) / r.height;   // 0..1
+      const ry = (px - 0.5) *  TILT_DEG_MAX * 2;   // left/right tilt
+      const rx = (py - 0.5) * -TILT_DEG_MAX * 2;   // top/bottom tilt (inverted)
+      el.classList.add('is-tilting');
+      el.style.transform =
+        `perspective(${TILT_PERSPECTIVE}px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) translateZ(0)`;
+    });
+    el.addEventListener('pointerleave', () => {
+      el.classList.remove('is-tilting');
+      el.style.transform = '';
     });
   });
 }
@@ -513,6 +576,7 @@ function renderInvestigations(items) {
     clearBtn.classList.toggle('hidden', !(curSrc.length || curRoot.length));
   }
   attachRipples(grid);
+  attachCardTilt(grid);
   // Brief swap-in animation on the wrapper so changes (delete, reorder) feel
   // continuous rather than abrupt.
   grid.classList.remove('grid-swap'); void grid.offsetWidth; grid.classList.add('grid-swap');
@@ -797,8 +861,13 @@ function renderAutoCatsDoughnut() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      cutout: '64%',
       plugins: {
         legend: { display: false },
+        centerLabel: {
+          value: total.toLocaleString(),
+          title: '{{ t("dashboard.total_label") }}',
+        },
         tooltip: {
           callbacks: {
             label: (ctx) => {
@@ -874,9 +943,17 @@ function renderAutoCatsGrid() {
     return { total: b.count || 0, sentiments: b.sentiments || {} };
   }
 
-  grid.innerHTML = cats.map(c => {
+  // Grand total for "share of whole" percentages — sum of every Top-10
+  // tile + Other, in the currently-selected tier scope. The animated fill
+  // bar on each tile shows that share.
+  const ob0 = otherBucket();
+  const grandTotal = cats.reduce((s, c) => s + bucket(c).total, 0) + (ob0.total || 0);
+
+  grid.innerHTML = cats.map((c, idx) => {
     const b = bucket(c);
     const total = b.total;
+    const sharePct = grandTotal ? (total / grandTotal * 100) : 0;
+    const color = AUTO_CAT_COLORS[idx % AUTO_CAT_COLORS.length];
     const seg = (key) => {
       const v = (b.sentiments && b.sentiments[key]) || 0;
       const pct = total ? (v / total * 100).toFixed(1) : '0.0';
@@ -885,7 +962,7 @@ function renderAutoCatsGrid() {
     const vpos = seg('very_positive'), pos = seg('positive'), neu = seg('neutral'),
           neg = seg('negative'), vneg = seg('very_negative');
     const bar = `
-      <div class="flex h-2 rounded overflow-hidden bg-gray-100 mt-2" title="${vpos.v}/${pos.v}/${neu.v}/${neg.v}/${vneg.v}">
+      <div class="flex h-1.5 rounded overflow-hidden bg-gray-100 mt-2" title="${vpos.v}/${pos.v}/${neu.v}/${neg.v}/${vneg.v}">
         ${vpos.v ? `<div style="width:${vpos.pct}%;background:${SENTIMENT_COLORS.very_positive}"></div>` : ''}
         ${pos.v ? `<div style="width:${pos.pct}%;background:${SENTIMENT_COLORS.positive}"></div>` : ''}
         ${neu.v ? `<div style="width:${neu.pct}%;background:${SENTIMENT_COLORS.neutral}"></div>` : ''}
@@ -895,29 +972,50 @@ function renderAutoCatsGrid() {
     return `
       <button type="button"
               onclick="openAutoCatModal(${c.id})"
-              class="text-left lift tile-in ripple-target press-feedback border border-gray-200 rounded p-3 hover:border-blue-400 bg-white">
-        <div class="flex items-baseline justify-between gap-2">
-          <div class="font-medium text-sm truncate" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
-          <div class="text-xs text-gray-500 shrink-0">${total.toLocaleString()}</div>
-        </div>
-        ${c.description ? `<div class="text-[11px] text-gray-500 mt-0.5 line-clamp-2">${escapeHtml(c.description)}</div>` : ''}
-        ${bar}
-        <div class="flex justify-between text-[10px] text-gray-500 mt-1">
-          <span title="${escapeHtml(SENTIMENT_LABELS.very_positive)} + ${escapeHtml(SENTIMENT_LABELS.positive)}">
-            +${(vpos.v + pos.v).toLocaleString()}
-          </span>
-          <span title="${escapeHtml(SENTIMENT_LABELS.neutral)}">·${neu.v.toLocaleString()}</span>
-          <span title="${escapeHtml(SENTIMENT_LABELS.negative)} + ${escapeHtml(SENTIMENT_LABELS.very_negative)}">
-            −${(neg.v + vneg.v).toLocaleString()}
-          </span>
+              data-fill-pct="${sharePct.toFixed(2)}"
+              class="auto-cat-tile text-left lift tile-in ripple-target press-feedback border border-gray-200 rounded p-3 hover:border-blue-400 bg-white">
+        <div class="auto-cat-stripe" style="background:${color}"></div>
+        <div class="auto-cat-fill" style="background:${color}"></div>
+        <div class="auto-cat-content">
+          <div class="flex items-baseline justify-between gap-2">
+            <div class="font-medium text-sm truncate" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
+            <div class="text-right shrink-0">
+              <div class="text-base font-bold leading-none tabular-nums">${total.toLocaleString()}</div>
+              <div class="text-[10px] text-gray-500 mt-0.5">${sharePct.toFixed(1)}%</div>
+            </div>
+          </div>
+          ${c.description ? `<div class="text-[11px] text-gray-500 mt-0.5 line-clamp-2">${escapeHtml(c.description)}</div>` : ''}
+          ${bar}
+          <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+            <span title="${escapeHtml(SENTIMENT_LABELS.very_positive)} + ${escapeHtml(SENTIMENT_LABELS.positive)}">
+              +${(vpos.v + pos.v).toLocaleString()}
+            </span>
+            <span title="${escapeHtml(SENTIMENT_LABELS.neutral)}">·${neu.v.toLocaleString()}</span>
+            <span title="${escapeHtml(SENTIMENT_LABELS.negative)} + ${escapeHtml(SENTIMENT_LABELS.very_negative)}">
+              −${(neg.v + vneg.v).toLocaleString()}
+            </span>
+          </div>
         </div>
       </button>`;
   }).join('');
 
   attachRipples(grid);
+  // Animate fills from 0 → tile's share-of-total percentage. RAF + double
+  // offset read so the browser commits the 0-width frame first, then
+  // applies the target width on the next frame for a smooth transition.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      grid.querySelectorAll('.auto-cat-tile').forEach(t => {
+        const fill = t.querySelector('.auto-cat-fill');
+        if (fill) fill.style.width = (t.dataset.fillPct || '0') + '%';
+      });
+    });
+  });
   // Append the "Other" tile when there are any uncategorized reviews in scope.
   const ob = otherBucket();
   if (ob.total > 0) {
+    const otherSharePct = grandTotal ? (ob.total / grandTotal * 100) : 0;
+    const otherColor = '#94a3b8';
     const seg = (key) => {
       const v = (ob.sentiments && ob.sentiments[key]) || 0;
       const pct = ob.total ? (v / ob.total * 100).toFixed(1) : '0.0';
@@ -926,7 +1024,7 @@ function renderAutoCatsGrid() {
     const vpos = seg('very_positive'), pos = seg('positive'), neu = seg('neutral'),
           neg = seg('negative'), vneg = seg('very_negative');
     const bar = `
-      <div class="flex h-2 rounded overflow-hidden bg-gray-100 mt-2" title="${vpos.v}/${pos.v}/${neu.v}/${neg.v}/${vneg.v}">
+      <div class="flex h-1.5 rounded overflow-hidden bg-gray-100 mt-2" title="${vpos.v}/${pos.v}/${neu.v}/${neg.v}/${vneg.v}">
         ${vpos.v ? `<div style="width:${vpos.pct}%;background:${SENTIMENT_COLORS.very_positive}"></div>` : ''}
         ${pos.v ? `<div style="width:${pos.pct}%;background:${SENTIMENT_COLORS.positive}"></div>` : ''}
         ${neu.v ? `<div style="width:${neu.pct}%;background:${SENTIMENT_COLORS.neutral}"></div>` : ''}
@@ -940,20 +1038,36 @@ function renderAutoCatsGrid() {
     grid.insertAdjacentHTML('beforeend', `
       <button type="button"
               onclick="openAutoCatModal('other')"
-              class="text-left lift tile-in border border-dashed border-gray-300 rounded p-3 hover:border-gray-500 bg-gray-50">
-        <div class="flex items-baseline justify-between gap-2">
-          <div class="font-medium text-sm text-gray-700">{{ t('dashboard.auto_cats_other_name') }}</div>
-          <div class="text-xs text-gray-500 shrink-0">${ob.total.toLocaleString()}</div>
+              data-fill-pct="${otherSharePct.toFixed(2)}"
+              class="auto-cat-tile text-left lift tile-in border border-dashed border-gray-300 rounded p-3 hover:border-gray-500 bg-gray-50">
+        <div class="auto-cat-stripe" style="background:${otherColor}"></div>
+        <div class="auto-cat-fill" style="background:${otherColor}"></div>
+        <div class="auto-cat-content">
+          <div class="flex items-baseline justify-between gap-2">
+            <div class="font-medium text-sm text-gray-700">{{ t('dashboard.auto_cats_other_name') }}</div>
+            <div class="text-right shrink-0">
+              <div class="text-base font-bold leading-none tabular-nums">${ob.total.toLocaleString()}</div>
+              <div class="text-[10px] text-gray-500 mt-0.5">${otherSharePct.toFixed(1)}%</div>
+            </div>
+          </div>
+          <div class="text-[11px] text-gray-500 mt-0.5">{{ t('dashboard.auto_cats_other_desc') }}</div>
+          ${bar}
+          <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+            <span>+${(vpos.v + pos.v).toLocaleString()}</span>
+            <span>·${neu.v.toLocaleString()}</span>
+            <span>−${(neg.v + vneg.v).toLocaleString()}</span>
+          </div>
+          ${unanalyzedNote}
         </div>
-        <div class="text-[11px] text-gray-500 mt-0.5">{{ t('dashboard.auto_cats_other_desc') }}</div>
-        ${bar}
-        <div class="flex justify-between text-[10px] text-gray-500 mt-1">
-          <span>+${(vpos.v + pos.v).toLocaleString()}</span>
-          <span>·${neu.v.toLocaleString()}</span>
-          <span>−${(neg.v + vneg.v).toLocaleString()}</span>
-        </div>
-        ${unanalyzedNote}
       </button>`);
+    // Re-trigger fill animation for the just-added Other tile.
+    requestAnimationFrame(() => {
+      const otherTile = grid.querySelector('.auto-cat-tile:last-child');
+      if (otherTile) {
+        const fill = otherTile.querySelector('.auto-cat-fill');
+        if (fill) fill.style.width = (otherTile.dataset.fillPct || '0') + '%';
+      }
+    });
   }
 }
 
@@ -1230,8 +1344,13 @@ function renderSource(data) {
       // width and ignores our w-36 h-36 lock, blowing the doughnut up.
       responsive: true,
       maintainAspectRatio: false,
+      cutout: '62%',
       plugins: {
         legend: { display: false },  // we render our own rich legend below
+        centerLabel: {
+          value: totalAcross.toLocaleString(),
+          title: '{{ t("dashboard.total_label") }}',
+        },
         tooltip: {
           callbacks: {
             label: (ctx) => {

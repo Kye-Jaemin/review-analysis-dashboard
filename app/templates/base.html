@@ -223,24 +223,40 @@
     .dot-loader > span:nth-child(2) { animation-delay: 0.16s; }
     .dot-loader > span:nth-child(3) { animation-delay: 0.32s; }
 
-    /* --- Continuous wave shimmer over active investigation card --- */
-    @keyframes waveSweep {
-      0%   { transform: translateX(-110%); }
-      100% { transform: translateX(110%); }
-    }
-    .investigation-card.border-blue-500 {
+    /* --- Investigation card 3D tilt + aurora glow ---
+       Tilt is driven by JS (see attachCardTilt in dashboard.html); the CSS
+       just sets up the transform stack and the spring back. Aurora is a
+       slow rotating conic gradient on the active card's ::after layer —
+       replaces the older linear wave sweep so the highlight feels alive
+       all the way around the card border. */
+    .investigation-card {
       position: relative;
+      transform-style: preserve-3d;
+      transition: transform 220ms cubic-bezier(.22,.61,.36,1),
+                  box-shadow 220ms ease-out;
+      will-change: transform;
     }
+    .investigation-card.is-tilting { transition: transform 80ms ease-out; }
+
+    @keyframes auroraSpin { to { transform: rotate(360deg); } }
+    .investigation-card.border-blue-500 { overflow: hidden; }
     .investigation-card.border-blue-500::after {
-      content: ''; position: absolute; inset: 0; pointer-events: none;
-      background: linear-gradient(120deg,
-        transparent 30%,
-        rgba(59, 130, 246, 0.08) 50%,
-        transparent 70%);
-      transform: translateX(-110%);
-      animation: waveSweep 3.6s ease-in-out infinite;
+      content: ''; position: absolute; inset: -2px; pointer-events: none;
+      z-index: 0;
+      background: conic-gradient(from 0deg,
+        rgba(59, 130, 246, 0.0)  0deg,
+        rgba(99, 102, 241, 0.35) 60deg,
+        rgba(56, 189, 248, 0.25) 130deg,
+        rgba(34, 211, 238, 0.0)  200deg,
+        rgba(96, 165, 250, 0.30) 280deg,
+        rgba(59, 130, 246, 0.0)  360deg
+      );
+      animation: auroraSpin 6.5s linear infinite;
+      filter: blur(14px);
       border-radius: inherit;
+      opacity: 0.9;
     }
+    .investigation-card.border-blue-500 > * { position: relative; z-index: 1; }
 
     /* --- Page main content fade-up on initial load --- */
     main > div { animation: panelIn 0.42s cubic-bezier(.22,.61,.36,1) both; }
@@ -271,6 +287,29 @@
       transition: font-weight 120ms ease-out;
     }
 
+    /* --- Auto-category progress-bar tile --- */
+    .auto-cat-tile {
+      position: relative; overflow: hidden;
+      transition: transform 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out;
+    }
+    .auto-cat-tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 14px -8px rgba(15, 23, 42, 0.25);
+    }
+    .auto-cat-tile .auto-cat-fill {
+      position: absolute; inset: 0 auto 0 0;
+      width: 0;
+      opacity: 0.14;
+      transition: width 680ms cubic-bezier(.22,.61,.36,1);
+      pointer-events: none;
+    }
+    .auto-cat-tile .auto-cat-stripe {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      width: 3px;
+      border-radius: inherit;
+    }
+    .auto-cat-tile .auto-cat-content { position: relative; z-index: 1; padding-left: 8px; }
+
     /* --- Investigation card pulse on apply --- */
     @keyframes applyPulse {
       0%   { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
@@ -295,16 +334,18 @@
     @media (prefers-reduced-motion: reduce) {
       .panel-in, .tile-in, .modal-in > div, .lift,
       .tab-pop, .fade-soft, .num-flash, .theme-sent-tab, .auto-tier-btn,
-      .skeleton::before, .investigation-card.border-blue-500,
+      .skeleton::before, .investigation-card, .investigation-card.border-blue-500,
       .press-feedback, .ripple-target .ripple-dot, .progress-fill-animated,
       .pulse-soft, #themes-mindmap svg, .grid-swap,
       .toast-in, .toast-out,
       .platform-icon, .dot-loader > span,
       .investigation-card.border-blue-500::after,
       .number-pop, .source-chip, .root-chip, .theme-cat-chip,
-      .investigation-card.apply-pulse, main > div {
+      .investigation-card.apply-pulse, main > div,
+      .auto-cat-tile, .auto-cat-tile .auto-cat-fill {
         animation: none !important; transition: none !important;
       }
+      .investigation-card { transform: none !important; }
     }
   </style>
 </head>
@@ -430,6 +471,70 @@
             setTimeout(() => t.remove(), 280);
           }, dur);
         }
+      };
+
+      // --- Confetti burst on success (loaded lazily so the celebration
+      // doesn't drag in the library for every page load). Falls back to a
+      // tiny inline DOM-element burst if the CDN is blocked / offline so
+      // the user still gets a moment of joy when their analysis lands. ---
+      const _reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let _confettiLoading = false;
+      function _loadConfetti() {
+        return new Promise((resolve) => {
+          if (window.confetti) return resolve(window.confetti);
+          if (_confettiLoading) {
+            const iv = setInterval(() => {
+              if (window.confetti) { clearInterval(iv); resolve(window.confetti); }
+            }, 50);
+            setTimeout(() => { clearInterval(iv); resolve(null); }, 1500);
+            return;
+          }
+          _confettiLoading = true;
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
+          s.async = true;
+          s.onload = () => resolve(window.confetti || null);
+          s.onerror = () => resolve(null);
+          document.head.appendChild(s);
+        });
+      }
+      function _fallbackBurst() {
+        // Cheap CSS-only confetti for environments where the CDN fails.
+        // 24 coloured dots radiate from the centre, then fade.
+        const layer = document.createElement('div');
+        layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9999;';
+        document.body.appendChild(layer);
+        const colors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#a855f7','#22d3ee'];
+        for (let i = 0; i < 28; i++) {
+          const d = document.createElement('span');
+          const angle = (Math.PI * 2 * i) / 28 + (Math.random() - 0.5) * 0.3;
+          const dist = 140 + Math.random() * 140;
+          const tx = Math.cos(angle) * dist;
+          const ty = Math.sin(angle) * dist;
+          d.style.cssText =
+            'position:absolute;left:50%;top:55%;width:8px;height:8px;border-radius:50%;' +
+            `background:${colors[i % colors.length]};` +
+            'transition:transform 900ms cubic-bezier(.2,.7,.3,1),opacity 900ms ease-out;opacity:1;';
+          layer.appendChild(d);
+          requestAnimationFrame(() => {
+            d.style.transform = `translate(${tx}px, ${ty}px) scale(0.6)`;
+            d.style.opacity = '0';
+          });
+        }
+        setTimeout(() => layer.remove(), 1100);
+      }
+      window.fireCelebration = async function () {
+        if (_reducedMotion) return;
+        const c = await _loadConfetti();
+        if (!c) { _fallbackBurst(); return; }
+        // Two-side burst feels more "from the page" than a single centre pop.
+        const baseOpts = { spread: 70, startVelocity: 45, ticks: 220, scalar: 0.9 };
+        c({ ...baseOpts, particleCount: 70, angle: 60,  origin: { x: 0.1, y: 0.8 } });
+        c({ ...baseOpts, particleCount: 70, angle: 120, origin: { x: 0.9, y: 0.8 } });
+        // Trailing centre burst for emphasis.
+        setTimeout(() => {
+          c({ ...baseOpts, particleCount: 80, spread: 90, origin: { x: 0.5, y: 0.6 } });
+        }, 180);
       };
     })();
   </script>
