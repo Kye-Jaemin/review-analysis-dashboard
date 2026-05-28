@@ -975,10 +975,23 @@ document.querySelectorAll('.auto-tier-btn').forEach(btn => {
 let _autoCatModalCatId = null;
 let _autoCatModalSentiment = null;
 
+// The page's main content wrapper has a CSS transform (panelIn animation
+// retained via animation-fill-mode: both). Per the CSS spec that makes it
+// the containing block for any `position: fixed` descendants — so a modal
+// rendered inline ends up positioned against the *content div* (often
+// taller than the viewport) instead of the viewport itself, which is why
+// it used to appear far below the click. Re-parenting the modal to <body>
+// on first open puts it outside the transformed ancestor.
+function _portalToBody(id) {
+  const el = document.getElementById(id);
+  if (el && el.parentElement !== document.body) document.body.appendChild(el);
+  return el;
+}
+
 async function openAutoCatModal(catId) {
   _autoCatModalCatId = catId;  // number for normal cats, 'other' for the bucket
   _autoCatModalSentiment = null;
-  document.getElementById('auto-cat-modal').classList.remove('hidden');
+  _portalToBody('auto-cat-modal').classList.remove('hidden');
   await renderAutoCatModal();
 }
 
@@ -1643,7 +1656,7 @@ async function openThemesManage() {
     return;
   }
   await refreshThemesManageList();
-  document.getElementById('themes-manage-modal').classList.remove('hidden');
+  _portalToBody('themes-manage-modal').classList.remove('hidden');
 }
 
 function closeThemesManage() {
