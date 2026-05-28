@@ -27,7 +27,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -229,11 +229,28 @@ async def run_auto_analysis_job(
                 return
 
             # ---- Phase 1: extract TopN categories from a sample ----
+            # IMPORTANT: sample from the FULL in-scope corpus, not just the
+            # mode-selected ids. `_select_review_ids` orders by Review.id
+            # ascending, so slicing `ids[:200]` always picked the earliest
+            # collected reviews (mostly the first source). That made the
+            # derived Top 10 a stale reflection of source #1 even after the
+            # user added 1000 reviews from new sources. Randomising over
+            # the whole scope gives every source a fair chance to surface
+            # its themes.
             job.message = "extracting categories"
-            sample_ids = ids[: SAMPLE_SIZE_FOR_EXTRACTION]
-            sample = (
-                await session.execute(select(Review).where(Review.id.in_(sample_ids)))
-            ).scalars().all()
+            scope_stmt = select(Review)
+            if source_ids:
+                scope_stmt = scope_stmt.where(Review.source_id.in_(source_ids))
+            scope_stmt = scope_stmt.order_by(func.random()).limit(SAMPLE_SIZE_FOR_EXTRACTION)
+            sample = (await session.execute(scope_stmt)).scalars().all()
+            if not sample:
+                # Fall back to mode-selected ids if the source filter yielded
+                # nothing (shouldn't happen in practice, but defensive).
+                sample = (
+                    await session.execute(
+                        select(Review).where(Review.id.in_(ids[:SAMPLE_SIZE_FOR_EXTRACTION]))
+                    )
+                ).scalars().all()
             cat_defs = await _extract_top_categories(sample, model, summary_lang)
             if not cat_defs:
                 raise RuntimeError("LLM did not return any categories")
