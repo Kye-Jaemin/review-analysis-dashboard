@@ -53,6 +53,9 @@ class Analysis(Base):
     )
     sentiment: Mapped[Optional[Sentiment]] = mapped_column(SAEnum(Sentiment), nullable=True)
     sentiment_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # "paid" | "free" | "unknown" | None — only populated when the user
+    # opts into the beta "separate paid/free" option during auto analysis.
+    user_tier: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

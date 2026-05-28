@@ -32,44 +32,79 @@ async def list_auto_categories(
     if not cats:
         return {"investigation_id": investigation_id, "categories": []}
 
-    # Sentiment distribution per auto category
+    # Sentiment × user_tier distribution per auto category.
     rows = (
         await session.execute(
-            select(Analysis.auto_category_id, Analysis.sentiment, func.count(Analysis.id))
+            select(
+                Analysis.auto_category_id,
+                Analysis.sentiment,
+                Analysis.user_tier,
+                func.count(Analysis.id),
+            )
             .where(Analysis.auto_category_id.in_([c.id for c in cats]))
-            .group_by(Analysis.auto_category_id, Analysis.sentiment)
+            .group_by(Analysis.auto_category_id, Analysis.sentiment, Analysis.user_tier)
         )
     ).all()
-    dist: dict[int, dict[str, int]] = {c.id: {s: 0 for s in SENTIMENT_ORDER} for c in cats}
-    totals: dict[int, int] = {c.id: 0 for c in cats}
-    for cid, sent, cnt in rows:
-        key = sent.value if hasattr(sent, "value") else str(sent) if sent else None
-        if key and key in dist[cid]:
-            dist[cid][key] = cnt
-        totals[cid] += cnt
+
+    def _empty_tier_dict() -> dict:
+        return {s: 0 for s in SENTIMENT_ORDER}
+
+    dist_all: dict[int, dict[str, int]] = {c.id: _empty_tier_dict() for c in cats}
+    dist_by_tier: dict[int, dict[str, dict[str, int]]] = {
+        c.id: {"paid": _empty_tier_dict(), "free": _empty_tier_dict(), "unknown": _empty_tier_dict()}
+        for c in cats
+    }
+    totals_all: dict[int, int] = {c.id: 0 for c in cats}
+    totals_by_tier: dict[int, dict[str, int]] = {
+        c.id: {"paid": 0, "free": 0, "unknown": 0} for c in cats
+    }
+    has_tier_data = False
+
+    for cid, sent, tier, cnt in rows:
+        s_key = sent.value if hasattr(sent, "value") else (sent if sent else None)
+        if s_key and s_key in dist_all[cid]:
+            dist_all[cid][s_key] += cnt
+        totals_all[cid] += cnt
+
+        tier_key = tier if tier in ("paid", "free", "unknown") else None
+        if tier_key is not None:
+            has_tier_data = True
+            if s_key and s_key in dist_by_tier[cid][tier_key]:
+                dist_by_tier[cid][tier_key][s_key] += cnt
+            totals_by_tier[cid][tier_key] += cnt
 
     out = []
     for c in cats:
-        d = dist[c.id]
         out.append({
             "id": c.id,
             "name": c.name,
             "description": c.description,
             "display_order": c.display_order,
-            "review_count": totals[c.id],
-            "sentiments": d,
+            "review_count": totals_all[c.id],
+            "sentiments": dist_all[c.id],
+            "by_tier": {
+                "paid": {"count": totals_by_tier[c.id]["paid"], "sentiments": dist_by_tier[c.id]["paid"]},
+                "free": {"count": totals_by_tier[c.id]["free"], "sentiments": dist_by_tier[c.id]["free"]},
+                "unknown": {"count": totals_by_tier[c.id]["unknown"], "sentiments": dist_by_tier[c.id]["unknown"]},
+            },
         })
-    return {"investigation_id": investigation_id, "categories": out}
+    return {
+        "investigation_id": investigation_id,
+        "categories": out,
+        "has_tier_data": has_tier_data,
+    }
 
 
 @router.get("/api/auto-categories/{cat_id}/reviews")
 async def reviews_for_auto_category(
     cat_id: int,
     sentiment: Optional[str] = Query(None),
+    user_tier: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
 ):
-    """Return reviews tagged with this auto category, optionally filtered by sentiment band."""
+    """Return reviews tagged with this auto category, optionally filtered by
+    sentiment band and/or beta paid/free user_tier."""
     cat = await session.get(AutoCategory, cat_id)
     if not cat:
         raise HTTPException(404, "auto category not found")
@@ -84,6 +119,8 @@ async def reviews_for_auto_category(
             stmt = stmt.where(Analysis.sentiment == Sentiment(sentiment))
         except ValueError:
             pass
+    if user_tier in ("paid", "free", "unknown"):
+        stmt = stmt.where(Analysis.user_tier == user_tier)
     stmt = stmt.order_by(Review.collected_at.desc()).limit(limit)
 
     rows = (await session.execute(stmt)).all()
@@ -97,6 +134,7 @@ async def reviews_for_auto_category(
             "text": (r.text or "")[:500],
             "sentiment": a.sentiment.value if a.sentiment else None,
             "sentiment_score": a.sentiment_score,
+            "user_tier": a.user_tier,
             "summary": a.summary,
             "source_id": r.source_id,
         })

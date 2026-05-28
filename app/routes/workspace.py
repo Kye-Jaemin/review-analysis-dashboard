@@ -47,7 +47,7 @@ REVIEW_COLS = [
 ]
 ANALYSIS_COLS = [
     "id", "review_id", "category_id", "auto_category_id", "sentiment", "sentiment_score",
-    "confidence", "summary", "model", "analyzed_at", "status", "error",
+    "user_tier", "confidence", "summary", "model", "analyzed_at", "status", "error",
 ]
 AUTO_CATEGORY_COLS = [
     "id", "investigation_id", "name", "description", "review_count", "display_order", "created_at",
@@ -285,6 +285,7 @@ async def import_workspace(
                 auto_category_id=row.get("auto_category_id"),
                 sentiment=sent,
                 sentiment_score=row.get("sentiment_score"),
+                user_tier=row.get("user_tier"),
                 confidence=row.get("confidence"),
                 summary=row.get("summary"),
                 model=row.get("model"),

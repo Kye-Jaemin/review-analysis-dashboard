@@ -92,6 +92,7 @@ async def start_analysis(
     investigation_label: str = Form(""),
     min_confidence: float = Form(0.0),
     classification_mode: str = Form("auto"),
+    separate_user_tier: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
     model = model or settings.ANTHROPIC_MODEL
@@ -136,6 +137,7 @@ async def start_analysis(
             session.add(inv)
             await session.commit()
             await session.refresh(inv)
+        tier_flag = (separate_user_tier or "").lower() in ("on", "true", "1", "yes")
         background_tasks.add_task(
             run_auto_analysis_job,
             job.id,
@@ -146,6 +148,7 @@ async def start_analysis(
             summary_lang,
             parsed_sources or None,
             clamped_conf,
+            tier_flag,
         )
     else:
         background_tasks.add_task(

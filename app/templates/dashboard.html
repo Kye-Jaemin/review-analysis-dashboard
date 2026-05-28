@@ -86,9 +86,19 @@
 </div>
 
 <div id="auto-cats-panel" class="bg-white p-4 rounded shadow-sm mb-6 hidden">
-  <div class="flex items-baseline justify-between mb-3">
+  <div class="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
     <div class="text-sm font-medium">{{ t('dashboard.auto_cats_title') }}</div>
-    <div class="text-xs text-gray-500">{{ t('dashboard.auto_cats_hint') }}</div>
+    <div class="flex items-center gap-3 text-xs">
+      <div id="auto-cats-tier-toggle" class="hidden items-center gap-1">
+        <span class="text-gray-500 mr-1">{{ t('dashboard.user_tier_label') }}</span>
+        <button type="button" data-tier="all" class="auto-tier-btn px-2 py-0.5 rounded bg-blue-600 text-white">{{ t('common.all') }}</button>
+        <button type="button" data-tier="paid" class="auto-tier-btn px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200">{{ t('dashboard.tier_paid') }}</button>
+        <button type="button" data-tier="free" class="auto-tier-btn px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200">{{ t('dashboard.tier_free') }}</button>
+        <button type="button" data-tier="unknown" class="auto-tier-btn px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200">{{ t('dashboard.tier_unknown') }}</button>
+        <span class="text-[10px] uppercase tracking-wider bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1">BETA</span>
+      </div>
+      <div class="text-gray-500">{{ t('dashboard.auto_cats_hint') }}</div>
+    </div>
   </div>
   <div id="auto-cats-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
 </div>
@@ -498,9 +508,11 @@ async function loadStats() {
   loadAutoCategories();
 }
 
+let _lastAutoCatsData = null;
+let _autoCatsTier = 'all';  // 'all' | 'paid' | 'free' | 'unknown'
+
 async function loadAutoCategories() {
   const panel = document.getElementById('auto-cats-panel');
-  const grid = document.getElementById('auto-cats-grid');
   if (!activeInvestigationId) { panel.classList.add('hidden'); return; }
   try {
     const res = await fetch('/api/auto-categories?investigation_id=' + activeInvestigationId);
@@ -508,48 +520,83 @@ async function loadAutoCategories() {
     const cats = data.categories || [];
     if (cats.length === 0) { panel.classList.add('hidden'); return; }
     panel.classList.remove('hidden');
-    grid.innerHTML = cats.map(c => {
-      const total = c.review_count || 0;
-      const seg = (key) => {
-        const v = (c.sentiments && c.sentiments[key]) || 0;
-        const pct = total ? (v / total * 100).toFixed(1) : '0.0';
-        return { v, pct };
-      };
-      const vpos = seg('very_positive'), pos = seg('positive'), neu = seg('neutral'),
-            neg = seg('negative'), vneg = seg('very_negative');
-      const bar = `
-        <div class="flex h-2 rounded overflow-hidden bg-gray-100 mt-2" title="${vpos.v}/${pos.v}/${neu.v}/${neg.v}/${vneg.v}">
-          ${vpos.v ? `<div style="width:${vpos.pct}%;background:${SENTIMENT_COLORS.very_positive}"></div>` : ''}
-          ${pos.v ? `<div style="width:${pos.pct}%;background:${SENTIMENT_COLORS.positive}"></div>` : ''}
-          ${neu.v ? `<div style="width:${neu.pct}%;background:${SENTIMENT_COLORS.neutral}"></div>` : ''}
-          ${neg.v ? `<div style="width:${neg.pct}%;background:${SENTIMENT_COLORS.negative}"></div>` : ''}
-          ${vneg.v ? `<div style="width:${vneg.pct}%;background:${SENTIMENT_COLORS.very_negative}"></div>` : ''}
-        </div>`;
-      return `
-        <button type="button"
-                onclick="openAutoCatModal(${c.id})"
-                class="text-left border border-gray-200 rounded p-3 hover:border-blue-400 hover:shadow-sm transition bg-white">
-          <div class="flex items-baseline justify-between gap-2">
-            <div class="font-medium text-sm truncate" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
-            <div class="text-xs text-gray-500 shrink-0">${total.toLocaleString()}</div>
-          </div>
-          ${c.description ? `<div class="text-[11px] text-gray-500 mt-0.5 line-clamp-2">${escapeHtml(c.description)}</div>` : ''}
-          ${bar}
-          <div class="flex justify-between text-[10px] text-gray-500 mt-1">
-            <span title="${escapeHtml(SENTIMENT_LABELS.very_positive)} + ${escapeHtml(SENTIMENT_LABELS.positive)}">
-              +${(vpos.v + pos.v).toLocaleString()}
-            </span>
-            <span title="${escapeHtml(SENTIMENT_LABELS.neutral)}">·${neu.v.toLocaleString()}</span>
-            <span title="${escapeHtml(SENTIMENT_LABELS.negative)} + ${escapeHtml(SENTIMENT_LABELS.very_negative)}">
-              −${(neg.v + vneg.v).toLocaleString()}
-            </span>
-          </div>
-        </button>`;
-    }).join('');
+    _lastAutoCatsData = data;
+    // Show the tier toggle only when at least one review carries tier data.
+    const toggle = document.getElementById('auto-cats-tier-toggle');
+    if (data.has_tier_data) toggle.classList.replace('hidden', 'inline-flex');
+    else toggle.classList.replace('inline-flex', 'hidden');
+    renderAutoCatsGrid();
   } catch (e) {
     panel.classList.add('hidden');
   }
 }
+
+function renderAutoCatsGrid() {
+  const grid = document.getElementById('auto-cats-grid');
+  if (!_lastAutoCatsData) { grid.innerHTML = ''; return; }
+  const cats = _lastAutoCatsData.categories || [];
+
+  function bucket(c) {
+    if (_autoCatsTier === 'all') {
+      return { total: c.review_count || 0, sentiments: c.sentiments || {} };
+    }
+    const b = (c.by_tier || {})[_autoCatsTier] || { count: 0, sentiments: {} };
+    return { total: b.count || 0, sentiments: b.sentiments || {} };
+  }
+
+  grid.innerHTML = cats.map(c => {
+    const b = bucket(c);
+    const total = b.total;
+    const seg = (key) => {
+      const v = (b.sentiments && b.sentiments[key]) || 0;
+      const pct = total ? (v / total * 100).toFixed(1) : '0.0';
+      return { v, pct };
+    };
+    const vpos = seg('very_positive'), pos = seg('positive'), neu = seg('neutral'),
+          neg = seg('negative'), vneg = seg('very_negative');
+    const bar = `
+      <div class="flex h-2 rounded overflow-hidden bg-gray-100 mt-2" title="${vpos.v}/${pos.v}/${neu.v}/${neg.v}/${vneg.v}">
+        ${vpos.v ? `<div style="width:${vpos.pct}%;background:${SENTIMENT_COLORS.very_positive}"></div>` : ''}
+        ${pos.v ? `<div style="width:${pos.pct}%;background:${SENTIMENT_COLORS.positive}"></div>` : ''}
+        ${neu.v ? `<div style="width:${neu.pct}%;background:${SENTIMENT_COLORS.neutral}"></div>` : ''}
+        ${neg.v ? `<div style="width:${neg.pct}%;background:${SENTIMENT_COLORS.negative}"></div>` : ''}
+        ${vneg.v ? `<div style="width:${vneg.pct}%;background:${SENTIMENT_COLORS.very_negative}"></div>` : ''}
+      </div>`;
+    return `
+      <button type="button"
+              onclick="openAutoCatModal(${c.id})"
+              class="text-left border border-gray-200 rounded p-3 hover:border-blue-400 hover:shadow-sm transition bg-white">
+        <div class="flex items-baseline justify-between gap-2">
+          <div class="font-medium text-sm truncate" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
+          <div class="text-xs text-gray-500 shrink-0">${total.toLocaleString()}</div>
+        </div>
+        ${c.description ? `<div class="text-[11px] text-gray-500 mt-0.5 line-clamp-2">${escapeHtml(c.description)}</div>` : ''}
+        ${bar}
+        <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+          <span title="${escapeHtml(SENTIMENT_LABELS.very_positive)} + ${escapeHtml(SENTIMENT_LABELS.positive)}">
+            +${(vpos.v + pos.v).toLocaleString()}
+          </span>
+          <span title="${escapeHtml(SENTIMENT_LABELS.neutral)}">·${neu.v.toLocaleString()}</span>
+          <span title="${escapeHtml(SENTIMENT_LABELS.negative)} + ${escapeHtml(SENTIMENT_LABELS.very_negative)}">
+            −${(neg.v + vneg.v).toLocaleString()}
+          </span>
+        </div>
+      </button>`;
+  }).join('');
+}
+
+// Tier toggle button handlers.
+document.querySelectorAll('.auto-tier-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    _autoCatsTier = btn.dataset.tier;
+    document.querySelectorAll('.auto-tier-btn').forEach(b => {
+      const active = b.dataset.tier === _autoCatsTier;
+      b.className = 'auto-tier-btn px-2 py-0.5 rounded ' +
+        (active ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200');
+    });
+    renderAutoCatsGrid();
+  });
+});
 
 let _autoCatModalCatId = null;
 let _autoCatModalSentiment = null;
@@ -573,6 +620,7 @@ async function renderAutoCatModal() {
   const qs = new URLSearchParams();
   qs.append('limit', '100');
   if (_autoCatModalSentiment) qs.append('sentiment', _autoCatModalSentiment);
+  if (_autoCatsTier && _autoCatsTier !== 'all') qs.append('user_tier', _autoCatsTier);
   const res = await fetch(`/api/auto-categories/${_autoCatModalCatId}/reviews?` + qs.toString());
   if (!res.ok) { body.innerHTML = '<div class="text-red-600 text-sm py-4">load failed</div>'; return; }
   const data = await res.json();
@@ -599,12 +647,18 @@ async function renderAutoCatModal() {
     body.innerHTML = `<div class="text-gray-400 text-sm py-8 text-center">{{ t('common.no_data') }}</div>`;
     return;
   }
+  const tierLabel = {
+    paid: '💳 {{ t("dashboard.tier_paid") }}',
+    free: '🆓 {{ t("dashboard.tier_free") }}',
+    unknown: '? {{ t("dashboard.tier_unknown") }}',
+  };
   body.innerHTML = reviews.map(r => `
     <div class="border-b border-gray-100 pb-2">
-      <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
+      <div class="flex items-center gap-2 text-xs text-gray-500 mb-1 flex-wrap">
         ${r.author ? escapeHtml(r.author) : '—'}
         ${r.posted_at ? '· ' + r.posted_at.slice(0,10) : ''}
         ${r.rating != null ? '· ' + r.rating.toFixed(1) + '★' : ''}
+        ${r.user_tier ? `<span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]">${tierLabel[r.user_tier] || r.user_tier}</span>` : ''}
         ${r.sentiment ? `<span class="ml-auto px-1.5 py-0.5 rounded text-xs sentiment-${r.sentiment}">${SENTIMENT_LABELS[r.sentiment]}</span>` : ''}
       </div>
       <div class="text-gray-800 text-sm">${escapeHtml(r.text)}</div>

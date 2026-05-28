@@ -47,6 +47,19 @@
       </div>
     </div>
 
+    <div id="auto-extras" class="border-l-4 border-blue-100 pl-3">
+      <label class="flex items-start gap-2 cursor-pointer">
+        <input type="checkbox" name="separate_user_tier" value="on" class="mt-1 accent-blue-600" />
+        <div>
+          <div class="text-sm font-medium flex items-center gap-1.5">
+            {{ t('analyze.separate_user_tier_title') }}
+            <span class="text-[10px] uppercase tracking-wider bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">BETA</span>
+          </div>
+          <div class="text-xs text-gray-500">{{ t('analyze.separate_user_tier_hint') }}</div>
+        </div>
+      </label>
+    </div>
+
     <div>
       <label class="text-sm font-medium block mb-1">{{ t('analyze.source_scope') }}</label>
       <div class="text-xs text-gray-500 mb-2">{{ t('analyze.source_scope_hint') }}</div>
@@ -220,15 +233,20 @@
 
   refreshAutoLabel();
 
-  // -------- Classification mode → toggle root-scope visibility --------
+  // -------- Classification mode → toggle root-scope + auto extras --------
   const rootWrap = document.getElementById('root-scope-wrap');
+  const autoExtras = document.getElementById('auto-extras');
   function syncModeUI() {
     const mode = form.querySelector('input[name="classification_mode"]:checked')?.value || 'auto';
     if (mode === 'manual') {
       rootWrap.classList.remove('hidden');
+      autoExtras.classList.add('hidden');
+      // Don't submit beta tier flag when manual mode is active.
+      const tierCb = form.querySelector('input[name="separate_user_tier"]');
+      if (tierCb) tierCb.checked = false;
     } else {
       rootWrap.classList.add('hidden');
-      // Uncheck any root_ids so they don't get submitted accidentally.
+      autoExtras.classList.remove('hidden');
       form.querySelectorAll('input[name="root_ids"]:checked').forEach(cb => { cb.checked = false; });
       refreshAutoLabel();
     }

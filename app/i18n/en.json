@@ -99,7 +99,11 @@
     "themes_pick_card_to_save": "Select an investigation card to enable saving / loading mind maps.",
     "empty_state": "Select an investigation card above to see its analytics. If you don't have one yet, head to the Analyze page and give your next run a name to save it as a card.",
     "auto_cats_title": "Auto categories (LLM-derived top 10)",
-    "auto_cats_hint": "Click a tile to see the reviews tagged with that category."
+    "auto_cats_hint": "Click a tile to see the reviews tagged with that category.",
+    "user_tier_label": "User tier",
+    "tier_paid": "Paid",
+    "tier_free": "Free",
+    "tier_unknown": "Unknown"
   },
   "source_type": {
     "google_play": "Google Play",
@@ -200,7 +204,9 @@
     "classification_mode_auto_title": "Auto — derive top 10 categories from the data (default)",
     "classification_mode_auto_hint": "Reads the in-scope reviews, distils 10 distinct themes, then classifies each review into one of them. Saved on the active investigation card.",
     "classification_mode_manual_title": "Manual — use my category tree",
-    "classification_mode_manual_hint": "Classifies into the leaf categories you defined under Categories, restricted to the root scope you check below."
+    "classification_mode_manual_hint": "Classifies into the leaf categories you defined under Categories, restricted to the root scope you check below.",
+    "separate_user_tier_title": "Separate paid / free users",
+    "separate_user_tier_hint": "The LLM also infers whether each review comes from a paid or free user from the review text (Premium / subscription mentions vs. ads / free-tier mentions). On the dashboard you'll get a Paid / Free / Unknown toggle on the auto-category tiles. This is a BETA — results can be noisy when reviews don't mention plan status."
   },
   "reviews": {
     "title": "Reviews",

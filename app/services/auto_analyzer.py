@@ -108,7 +108,11 @@ async def _extract_top_categories(
 
 
 async def _classify_batch(
-    categories: list[AutoCategory], reviews: list[Review], model: str, summary_lang: str
+    categories: list[AutoCategory],
+    reviews: list[Review],
+    model: str,
+    summary_lang: str,
+    separate_user_tier: bool = False,
 ) -> list[dict]:
     if not settings.ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
@@ -118,17 +122,36 @@ async def _classify_batch(
     cat_block = "\n".join(
         f"{i}. {c.name} — {c.description or ''}" for i, c in enumerate(categories)
     )
+
+    tier_field = ""
+    tier_instruction = ""
+    if separate_user_tier:
+        tier_field = (
+            '   "user_tier": "paid"|"free"|"unknown",\n'
+        )
+        tier_instruction = (
+            "\nAlso infer user_tier from review content:\n"
+            "  - paid: mentions Premium / subscription / paid features / they\n"
+            "    explicitly already paid (e.g. 'I subscribed', 'as a Premium user').\n"
+            "  - free: mentions ads, the free tier limitations, upgrade prompts,\n"
+            "    'free version', 'won't pay', etc.\n"
+            "  - unknown: no clear signal; do NOT guess from sentiment alone.\n"
+            "(BETA — uncertain values should fall back to 'unknown'.)\n"
+        )
+
     system = (
         f"Below are exactly {len(categories)} categories.\n\n"
         f"{cat_block}\n\n"
         f"For each review, pick the index (0..{len(categories)-1}) of the BEST fitting\n"
-        f"category. Also rate sentiment + confidence.\n\n"
+        f"category. Also rate sentiment + confidence.\n"
+        f"{tier_instruction}\n"
         f"For each review respond with:\n"
         f'  {{"id": <input id>,\n'
         f'   "category_index": <int 0..{len(categories)-1}>,\n'
         f'   "sentiment": "very_positive"|"positive"|"neutral"|"negative"|"very_negative",\n'
         f'   "sentiment_score": <1..5 consistent with sentiment>,\n'
         f'   "confidence": <0..1>,\n'
+        f"{tier_field}"
         f'   "summary": "<one short sentence in {lang_label}>"}}\n\n'
         f"Reply with ONLY a JSON array, no prose, no fences."
     )
@@ -160,6 +183,7 @@ async def run_auto_analysis_job(
     summary_lang: str,
     source_ids: list[int] | None = None,
     min_confidence: float = 0.0,
+    separate_user_tier: bool = False,
 ) -> None:
     job = registry.get(job_id)
     if not job:
@@ -233,7 +257,10 @@ async def run_auto_analysis_job(
                             await s2.execute(select(Review).where(Review.id.in_(batch_ids)))
                         ).scalars().all()
                         try:
-                            outs = await _classify_batch(auto_cats, rows, model, summary_lang)
+                            outs = await _classify_batch(
+                                auto_cats, rows, model, summary_lang,
+                                separate_user_tier=separate_user_tier,
+                            )
                         except Exception:
                             outs = []
                         valid_ids = {r.id for r in rows}
@@ -272,6 +299,16 @@ async def run_auto_analysis_job(
                             ):
                                 ac_id_to_store = None
 
+                            tier_val = None
+                            if separate_user_tier:
+                                tier_raw = item.get("user_tier")
+                                if isinstance(tier_raw, str):
+                                    tier_norm = tier_raw.strip().lower()
+                                    if tier_norm in ("paid", "free", "unknown"):
+                                        tier_val = tier_norm
+                                if tier_val is None:
+                                    tier_val = "unknown"
+
                             existing = (
                                 await s2.execute(
                                     select(Analysis).where(Analysis.review_id == rid)
@@ -287,6 +324,8 @@ async def run_auto_analysis_job(
                                     existing.confidence = conf
                                 if item.get("summary"):
                                     existing.summary = item.get("summary")
+                                if separate_user_tier:
+                                    existing.user_tier = tier_val
                                 existing.model = model
                                 existing.status = (
                                     AnalysisStatus.succeeded if success else AnalysisStatus.failed
@@ -301,6 +340,7 @@ async def run_auto_analysis_job(
                                         sentiment_score=score,
                                         confidence=conf,
                                         summary=item.get("summary"),
+                                        user_tier=tier_val,
                                         model=model,
                                         status=AnalysisStatus.succeeded if success else AnalysisStatus.failed,
                                     )
