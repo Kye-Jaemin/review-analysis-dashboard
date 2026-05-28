@@ -101,6 +101,7 @@
         <button type="button" data-tier="unknown" class="auto-tier-btn px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200">{{ t('dashboard.tier_unknown') }}</button>
         <span class="text-[10px] uppercase tracking-wider bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded ml-1">BETA</span>
       </div>
+      <div id="auto-cats-total" class="text-gray-600 font-medium"></div>
       <div class="text-gray-500">{{ t('dashboard.auto_cats_hint') }}</div>
     </div>
   </div>
@@ -580,6 +581,7 @@ async function loadAutoCategories() {
 
     renderAutoCatsGrid();
     renderAutoCatsDoughnut();
+    updateAutoCatsTotal();
     renderThemesAutoCatChips();
   } catch (e) {
     panel.classList.add('hidden');
@@ -588,18 +590,52 @@ async function loadAutoCategories() {
   }
 }
 
+function bucketTotalFor(c) {
+  if (_autoCatsTier === 'all') return c.review_count || 0;
+  return ((c.by_tier || {})[_autoCatsTier] || {}).count || 0;
+}
+
+function otherBucketTotal() {
+  const o = (_lastAutoCatsData && _lastAutoCatsData.other) || null;
+  if (!o) return 0;
+  if (_autoCatsTier === 'all') return o.count || 0;
+  return ((o.by_tier || {})[_autoCatsTier] || {}).count || 0;
+}
+
+function updateAutoCatsTotal() {
+  if (!_lastAutoCatsData) return;
+  const t = _lastAutoCatsData.totals || {};
+  const sel = _autoCatsTier;
+  const grand = t.all || 0;
+  const sub = (sel === 'all') ? grand : (t[sel] || 0);
+  const el = document.getElementById('auto-cats-total');
+  if (!el) return;
+  if (sel === 'all') {
+    el.textContent = '{{ t("dashboard.total_label") }}: ' + grand.toLocaleString();
+  } else {
+    const tierLbl = ({ paid: '{{ t("dashboard.tier_paid") }}',
+                      free: '{{ t("dashboard.tier_free") }}',
+                      unknown: '{{ t("dashboard.tier_unknown") }}' })[sel] || sel;
+    el.textContent = `${tierLbl}: ${sub.toLocaleString()} / {{ t('dashboard.total_label') }}: ${grand.toLocaleString()}`;
+  }
+}
+
 function renderAutoCatsDoughnut() {
   if (!_lastAutoCatsData) return;
   const cats = _lastAutoCatsData.categories || [];
 
-  function bucketTotal(c) {
-    if (_autoCatsTier === 'all') return c.review_count || 0;
-    return ((c.by_tier || {})[_autoCatsTier] || {}).count || 0;
+  const labels = cats.map(c => c.name);
+  const values = cats.map(bucketTotalFor);
+  const colors = cats.map((_, i) => AUTO_CAT_COLORS[i % AUTO_CAT_COLORS.length]);
+
+  // Include the "Other" slice when it has any reviews so the doughnut is honest.
+  const otherTotal = otherBucketTotal();
+  if (otherTotal > 0) {
+    labels.push('{{ t("dashboard.auto_cats_other_name") }}');
+    values.push(otherTotal);
+    colors.push('#94a3b8');
   }
 
-  const labels = cats.map(c => c.name);
-  const values = cats.map(bucketTotal);
-  const colors = cats.map((_, i) => AUTO_CAT_COLORS[i % AUTO_CAT_COLORS.length]);
   const total = values.reduce((a, b) => a + b, 0);
 
   destroyChart('auto_cats');
@@ -623,13 +659,15 @@ function renderAutoCatsDoughnut() {
   });
 
   // Custom legend with counts + percent, easier to read than Chart.js's default.
-  document.getElementById('auto-cats-legend').innerHTML = cats.map((c, i) => {
+  // (Iterates the same labels/values/colors arrays so "Other" is included
+  // automatically when present.)
+  document.getElementById('auto-cats-legend').innerHTML = labels.map((label, i) => {
     const v = values[i];
     const pct = total ? (v / total * 100).toFixed(1) : '0.0';
     return `
       <div class="flex items-center gap-1.5">
         <span class="inline-block w-3 h-3 rounded-sm shrink-0" style="background:${colors[i]}"></span>
-        <span class="truncate flex-1" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>
+        <span class="truncate flex-1" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
         <span class="text-gray-500 shrink-0">${v.toLocaleString()} (${pct}%)</span>
       </div>`;
   }).join('');
@@ -674,6 +712,12 @@ function renderAutoCatsGrid() {
     const b = (c.by_tier || {})[_autoCatsTier] || { count: 0, sentiments: {} };
     return { total: b.count || 0, sentiments: b.sentiments || {} };
   }
+  function otherBucket() {
+    const o = _lastAutoCatsData.other || { count: 0, sentiments: {}, by_tier: {} };
+    if (_autoCatsTier === 'all') return { total: o.count || 0, sentiments: o.sentiments || {} };
+    const b = (o.by_tier || {})[_autoCatsTier] || { count: 0, sentiments: {} };
+    return { total: b.count || 0, sentiments: b.sentiments || {} };
+  }
 
   grid.innerHTML = cats.map(c => {
     const b = bucket(c);
@@ -714,6 +758,42 @@ function renderAutoCatsGrid() {
         </div>
       </button>`;
   }).join('');
+
+  // Append the "Other" tile when there are any uncategorized reviews in scope.
+  const ob = otherBucket();
+  if (ob.total > 0) {
+    const seg = (key) => {
+      const v = (ob.sentiments && ob.sentiments[key]) || 0;
+      const pct = ob.total ? (v / ob.total * 100).toFixed(1) : '0.0';
+      return { v, pct };
+    };
+    const vpos = seg('very_positive'), pos = seg('positive'), neu = seg('neutral'),
+          neg = seg('negative'), vneg = seg('very_negative');
+    const bar = `
+      <div class="flex h-2 rounded overflow-hidden bg-gray-100 mt-2" title="${vpos.v}/${pos.v}/${neu.v}/${neg.v}/${vneg.v}">
+        ${vpos.v ? `<div style="width:${vpos.pct}%;background:${SENTIMENT_COLORS.very_positive}"></div>` : ''}
+        ${pos.v ? `<div style="width:${pos.pct}%;background:${SENTIMENT_COLORS.positive}"></div>` : ''}
+        ${neu.v ? `<div style="width:${neu.pct}%;background:${SENTIMENT_COLORS.neutral}"></div>` : ''}
+        ${neg.v ? `<div style="width:${neg.pct}%;background:${SENTIMENT_COLORS.negative}"></div>` : ''}
+        ${vneg.v ? `<div style="width:${vneg.pct}%;background:${SENTIMENT_COLORS.very_negative}"></div>` : ''}
+      </div>`;
+    grid.insertAdjacentHTML('beforeend', `
+      <button type="button"
+              onclick="openAutoCatModal('other')"
+              class="text-left lift tile-in border border-dashed border-gray-300 rounded p-3 hover:border-gray-500 bg-gray-50">
+        <div class="flex items-baseline justify-between gap-2">
+          <div class="font-medium text-sm text-gray-700">{{ t('dashboard.auto_cats_other_name') }}</div>
+          <div class="text-xs text-gray-500 shrink-0">${ob.total.toLocaleString()}</div>
+        </div>
+        <div class="text-[11px] text-gray-500 mt-0.5">{{ t('dashboard.auto_cats_other_desc') }}</div>
+        ${bar}
+        <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+          <span>+${(vpos.v + pos.v).toLocaleString()}</span>
+          <span>·${neu.v.toLocaleString()}</span>
+          <span>−${(neg.v + vneg.v).toLocaleString()}</span>
+        </div>
+      </button>`);
+  }
 }
 
 // Tier toggle button handlers.
@@ -727,6 +807,7 @@ document.querySelectorAll('.auto-tier-btn').forEach(btn => {
     });
     renderAutoCatsGrid();
     renderAutoCatsDoughnut();
+    updateAutoCatsTotal();
   });
 });
 
@@ -734,7 +815,7 @@ let _autoCatModalCatId = null;
 let _autoCatModalSentiment = null;
 
 async function openAutoCatModal(catId) {
-  _autoCatModalCatId = catId;
+  _autoCatModalCatId = catId;  // number for normal cats, 'other' for the bucket
   _autoCatModalSentiment = null;
   document.getElementById('auto-cat-modal').classList.remove('hidden');
   await renderAutoCatModal();
@@ -753,7 +834,14 @@ async function renderAutoCatModal() {
   qs.append('limit', '100');
   if (_autoCatModalSentiment) qs.append('sentiment', _autoCatModalSentiment);
   if (_autoCatsTier && _autoCatsTier !== 'all') qs.append('user_tier', _autoCatsTier);
-  const res = await fetch(`/api/auto-categories/${_autoCatModalCatId}/reviews?` + qs.toString());
+  let url;
+  if (_autoCatModalCatId === 'other') {
+    qs.append('investigation_id', activeInvestigationId);
+    url = '/api/auto-categories/other/reviews?' + qs.toString();
+  } else {
+    url = `/api/auto-categories/${_autoCatModalCatId}/reviews?` + qs.toString();
+  }
+  const res = await fetch(url);
   if (!res.ok) { body.innerHTML = '<div class="text-red-600 text-sm py-4">load failed</div>'; return; }
   const data = await res.json();
 

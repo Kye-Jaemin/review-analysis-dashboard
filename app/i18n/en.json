@@ -100,6 +100,8 @@
     "empty_state": "Select an investigation card above to see its analytics. If you don't have one yet, head to the Analyze page and give your next run a name to save it as a card.",
     "auto_cats_title": "Auto categories (LLM-derived top 10)",
     "auto_cats_hint": "Click a tile to see the reviews tagged with that category.",
+    "auto_cats_other_name": "Other",
+    "auto_cats_other_desc": "Reviews that didn't fit any of the Top 10 categories (below confidence threshold or LLM skipped).",
     "user_tier_label": "User tier",
     "tier_paid": "Paid",
     "tier_free": "Free",
