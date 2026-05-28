@@ -206,7 +206,8 @@
     "classification_mode_manual_title": "수동 — 내가 정의한 카테고리 트리 사용",
     "classification_mode_manual_hint": "Categories 메뉴에서 만든 트리의 leaf로 분류합니다. 아래의 루트 범위 선택이 적용됩니다.",
     "separate_user_tier_title": "유료/무료 사용자 분리",
-    "separate_user_tier_hint": "리뷰 본문에서 Premium·구독 언급(유료) vs 광고·무료 버전 언급(무료)을 단서로 작성자의 유무료 여부를 LLM이 추정합니다. 대시보드 자동 카테고리 타일에 유료/무료/미상 토글이 표시됩니다. 베타 기능 — 리뷰에 단서가 없으면 정확도가 떨어질 수 있습니다."
+    "separate_user_tier_hint": "리뷰 본문에서 Premium·구독 언급(유료) vs 광고·무료 버전 언급(무료)을 단서로 작성자의 유무료 여부를 LLM이 추정합니다. 대시보드 자동 카테고리 타일에 유료/무료/미상 토글이 표시됩니다. 베타 기능 — 리뷰에 단서가 없으면 정확도가 떨어질 수 있습니다.",
+    "separate_user_tier_criteria_toggle": "▸ 분류 기준 자세히 보기"
   },
   "reviews": {
     "title": "리뷰",

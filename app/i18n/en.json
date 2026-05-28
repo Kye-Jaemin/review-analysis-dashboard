@@ -206,7 +206,8 @@
     "classification_mode_manual_title": "Manual — use my category tree",
     "classification_mode_manual_hint": "Classifies into the leaf categories you defined under Categories, restricted to the root scope you check below.",
     "separate_user_tier_title": "Separate paid / free users",
-    "separate_user_tier_hint": "The LLM also infers whether each review comes from a paid or free user from the review text (Premium / subscription mentions vs. ads / free-tier mentions). On the dashboard you'll get a Paid / Free / Unknown toggle on the auto-category tiles. This is a BETA — results can be noisy when reviews don't mention plan status."
+    "separate_user_tier_hint": "The LLM also infers whether each review comes from a paid or free user from the review text (Premium / subscription mentions vs. ads / free-tier mentions). On the dashboard you'll get a Paid / Free / Unknown toggle on the auto-category tiles. This is a BETA — results can be noisy when reviews don't mention plan status.",
+    "separate_user_tier_criteria_toggle": "▸ Show classification criteria"
   },
   "reviews": {
     "title": "Reviews",

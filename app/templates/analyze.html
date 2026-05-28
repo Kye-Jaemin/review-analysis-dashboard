@@ -50,12 +50,103 @@
     <div id="auto-extras" class="border-l-4 border-blue-100 pl-3">
       <label class="flex items-start gap-2 cursor-pointer">
         <input type="checkbox" name="separate_user_tier" value="on" class="mt-1 accent-blue-600" />
-        <div>
+        <div class="flex-1">
           <div class="text-sm font-medium flex items-center gap-1.5">
             {{ t('analyze.separate_user_tier_title') }}
             <span class="text-[10px] uppercase tracking-wider bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">BETA</span>
           </div>
           <div class="text-xs text-gray-500">{{ t('analyze.separate_user_tier_hint') }}</div>
+
+          <details class="mt-2 text-xs">
+            <summary class="cursor-pointer text-blue-600 hover:underline select-none">
+              {{ t('analyze.separate_user_tier_criteria_toggle') }}
+            </summary>
+            <div class="mt-2 border border-gray-200 rounded p-2.5 bg-gray-50 space-y-2">
+              {% if lang == 'ko' %}
+                <div>
+                  <span class="inline-block bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-[11px] font-medium">💳 유료 (paid)</span>
+                  <div class="text-gray-700 mt-1">
+                    리뷰에 본인이 <strong>유료 사용자임을 시사</strong>하는 명시적 표현이 있을 때.
+                  </div>
+                  <ul class="ml-4 mt-1 list-disc text-gray-600">
+                    <li>"프리미엄/Premium/Plus/Pro" 등 멤버십 언급</li>
+                    <li>"구독 중", "subscribed", "월 ~원 내고"</li>
+                    <li>"결제했는데", "as a Premium user"</li>
+                    <li>"환불", "구독 취소" 등 유료 사용자 액션</li>
+                  </ul>
+                </div>
+                <div>
+                  <span class="inline-block bg-green-100 text-green-800 px-1.5 py-0.5 rounded text-[11px] font-medium">🆓 무료 (free)</span>
+                  <div class="text-gray-700 mt-1">
+                    <strong>무료 사용자임을 시사</strong>하는 표현이 있을 때.
+                  </div>
+                  <ul class="ml-4 mt-1 list-disc text-gray-600">
+                    <li>"광고가 많다", "ads", "ad-supported"</li>
+                    <li>"무료 버전", "free version" 의 한계 언급</li>
+                    <li>"업그레이드 안내가 자꾸 뜬다", "paywall"</li>
+                    <li>"결제까진 안 가도", "won't pay"</li>
+                  </ul>
+                </div>
+                <div>
+                  <span class="inline-block bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[11px] font-medium">? 미상 (unknown)</span>
+                  <div class="text-gray-700 mt-1">
+                    위 단서가 <strong>전혀 없을 때</strong>.
+                    가장 중요한 규칙: <strong>감성만으로 추측 금지</strong>.
+                  </div>
+                  <ul class="ml-4 mt-1 list-disc text-gray-600">
+                    <li>"최악!" → 부정 감정이지만 단서 없음 → <em>unknown</em></li>
+                    <li>"정말 좋아요!" → 긍정이지만 단서 없음 → <em>unknown</em></li>
+                  </ul>
+                </div>
+                <div class="text-[11px] text-gray-500 pt-2 border-t border-gray-200">
+                  ⚠ 베타: 리뷰에 단서가 없는 경우가 많으므로 <strong>미상 비중이 클 수 있습니다</strong>.
+                  앱이 Premium/구독 모델일수록 정확도가 높고, Reddit/일반 웹 리뷰는 단서가 적어 미상이 많아집니다.
+                  기준 자체는 <code>app/services/auto_analyzer.py</code>의 <code>tier_instruction</code>에서 수정 가능.
+                </div>
+              {% else %}
+                <div>
+                  <span class="inline-block bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-[11px] font-medium">💳 Paid</span>
+                  <div class="text-gray-700 mt-1">
+                    Review explicitly signals <strong>the author is a paying user</strong>.
+                  </div>
+                  <ul class="ml-4 mt-1 list-disc text-gray-600">
+                    <li>"Premium / Plus / Pro" or other membership mentions</li>
+                    <li>"subscribed", "I'm a Premium user", paid plan reference</li>
+                    <li>"I paid for…", price / billing mentions</li>
+                    <li>"refund", "cancel my subscription" — paid-user actions</li>
+                  </ul>
+                </div>
+                <div>
+                  <span class="inline-block bg-green-100 text-green-800 px-1.5 py-0.5 rounded text-[11px] font-medium">🆓 Free</span>
+                  <div class="text-gray-700 mt-1">
+                    Signals the author is on the <strong>free tier</strong>.
+                  </div>
+                  <ul class="ml-4 mt-1 list-disc text-gray-600">
+                    <li>"too many ads", "ad-supported"</li>
+                    <li>"free version", limits of the free tier</li>
+                    <li>upgrade prompts / "paywall" mentions</li>
+                    <li>"won't pay", "not worth paying for"</li>
+                  </ul>
+                </div>
+                <div>
+                  <span class="inline-block bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[11px] font-medium">? Unknown</span>
+                  <div class="text-gray-700 mt-1">
+                    When <strong>none of the above</strong> appears in the text.
+                    Key rule: <strong>don't guess from sentiment alone</strong>.
+                  </div>
+                  <ul class="ml-4 mt-1 list-disc text-gray-600">
+                    <li>"Worst app ever!" → negative but no plan cue → <em>unknown</em></li>
+                    <li>"Absolutely love it!" → positive but no cue → <em>unknown</em></li>
+                  </ul>
+                </div>
+                <div class="text-[11px] text-gray-500 pt-2 border-t border-gray-200">
+                  ⚠ Beta: many reviews never mention plan status, so the <strong>Unknown bucket can be large</strong>.
+                  Subscription-style apps (Spotify, Netflix) classify best; Reddit / general web reviews have fewer cues.
+                  Edit the criteria in <code>app/services/auto_analyzer.py</code> → <code>tier_instruction</code>.
+                </div>
+              {% endif %}
+            </div>
+          </details>
         </div>
       </label>
     </div>
