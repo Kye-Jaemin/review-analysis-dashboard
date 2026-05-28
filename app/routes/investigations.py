@@ -1,14 +1,79 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import Category, Investigation, Source
+from app.models import (
+    Analysis,
+    AnalysisStatus,
+    Category,
+    Investigation,
+    Review,
+    Sentiment,
+    Source,
+    SourceType,
+    ThemeSnapshot,
+)
+from app.services.stats import _descendants_of
 
 router = APIRouter()
+
+
+# ---------- shared serialization helpers ----------
+
+EXPORT_VERSION = 1
+
+CATEGORY_COLS = ["id", "parent_id", "name", "description", "path"]
+SOURCE_COLS = ["id", "type", "label", "display_name", "icon_url", "config", "created_at"]
+REVIEW_COLS = [
+    "id", "source_id", "external_id", "author", "posted_at", "rating",
+    "text", "url", "raw", "collected_at",
+]
+ANALYSIS_COLS = [
+    "id", "review_id", "category_id", "sentiment", "sentiment_score",
+    "confidence", "summary", "model", "analyzed_at", "status", "error",
+]
+SNAPSHOT_COLS = [
+    "id", "investigation_id", "label", "sentiment", "source_ids", "root_ids",
+    "summary_lang", "sample_size", "model", "themes", "created_at",
+]
+INVESTIGATION_COLS = [
+    "id", "label", "description", "source_ids", "root_ids", "created_at", "updated_at",
+]
+
+
+def _serialize(v):
+    if isinstance(v, datetime):
+        return v.isoformat()
+    if hasattr(v, "value"):
+        return v.value
+    return v
+
+
+def _dump(obj, cols):
+    return {c: _serialize(getattr(obj, c)) for c in cols}
+
+
+def _parse_dt(s):
+    if not s:
+        return None
+    if isinstance(s, datetime):
+        return s
+    try:
+        return datetime.fromisoformat(str(s).rstrip("Z"))
+    except Exception:
+        return None
+
+
+# ---------- CRUD ----------
 
 
 class InvestigationIn(BaseModel):
@@ -122,3 +187,287 @@ async def delete_investigation(
     await session.delete(inv)
     await session.commit()
     return {"ok": True}
+
+
+# ---------- Export ONE investigation card ----------
+
+
+@router.get("/api/investigations/{inv_id}/export")
+async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_session)):
+    inv = await session.get(Investigation, inv_id)
+    if not inv:
+        raise HTTPException(404)
+
+    src_ids = list(inv.source_ids or [])
+    root_ids = list(inv.root_ids or [])
+
+    # Sources referenced by the card.
+    sources_payload = []
+    if src_ids:
+        rows = (await session.execute(select(Source).where(Source.id.in_(src_ids)))).scalars().all()
+        sources_payload = [_dump(s, SOURCE_COLS) for s in rows]
+
+    # Categories: every root + all descendants (so the imported subtree is complete).
+    all_cats = (await session.execute(select(Category))).scalars().all()
+    parent_by_id = {c.id: c.parent_id for c in all_cats}
+    descendants: set[int] = set()
+    if root_ids:
+        descendants = _descendants_of(parent_by_id, root_ids)
+    # Also include any ancestor paths so parent_id chains are insertable.
+    # The descendant set already contains the roots themselves (cycle-safe loop).
+    cats_to_include = {c.id: c for c in all_cats if c.id in descendants}
+    categories_payload = [_dump(c, CATEGORY_COLS) for c in cats_to_include.values()]
+
+    # Reviews in scope: source_id IN src_ids. If root_ids set, also limited to
+    # reviews whose Analysis falls in the descendant set.
+    reviews_payload = []
+    analyses_payload = []
+    if src_ids:
+        review_rows = (
+            await session.execute(select(Review).where(Review.source_id.in_(src_ids)))
+        ).scalars().all()
+        if descendants:
+            in_scope_ids = (
+                await session.execute(
+                    select(Analysis.review_id)
+                    .where(Analysis.review_id.in_([r.id for r in review_rows]))
+                    .where(Analysis.category_id.in_(descendants))
+                )
+            ).scalars().all()
+            scoped = set(in_scope_ids)
+            review_rows = [r for r in review_rows if r.id in scoped]
+        reviews_payload = [_dump(r, REVIEW_COLS) for r in review_rows]
+        ids = [r.id for r in review_rows]
+        if ids:
+            analysis_rows = (
+                await session.execute(select(Analysis).where(Analysis.review_id.in_(ids)))
+            ).scalars().all()
+            analyses_payload = [_dump(a, ANALYSIS_COLS) for a in analysis_rows]
+
+    # Theme snapshots saved under this card.
+    snap_rows = (
+        await session.execute(
+            select(ThemeSnapshot).where(ThemeSnapshot.investigation_id == inv_id)
+        )
+    ).scalars().all()
+    snapshots_payload = [_dump(s, SNAPSHOT_COLS) for s in snap_rows]
+
+    payload = {
+        "version": EXPORT_VERSION,
+        "type": "investigation",
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "investigation": _dump(inv, INVESTIGATION_COLS),
+        "sources": sources_payload,
+        "categories": categories_payload,
+        "reviews": reviews_payload,
+        "analyses": analyses_payload,
+        "theme_snapshots": snapshots_payload,
+    }
+
+    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in inv.label)[:60] or "card"
+    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="card-{safe_name}-{ts}.json"'},
+    )
+
+
+# ---------- Import ONE investigation card (merge into current workspace) ----------
+
+
+@router.post("/api/investigations/import")
+async def import_investigation(
+    file: UploadFile = File(...), session: AsyncSession = Depends(get_session)
+):
+    raw = await file.read()
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(400, f"invalid json: {e}")
+    if not isinstance(data, dict) or data.get("type") != "investigation":
+        raise HTTPException(400, "not an investigation card export")
+
+    inv_data = data.get("investigation") or {}
+    if not inv_data:
+        raise HTTPException(400, "missing investigation block")
+
+    # ---- Categories: dedupe by path; topologically insert so parents land first ----
+    existing_cats = (await session.execute(select(Category))).scalars().all()
+    existing_by_path: dict[str, Category] = {c.path: c for c in existing_cats}
+    cat_id_map: dict[int, int] = {}
+
+    pending = list(data.get("categories") or [])
+    # We loop until no progress to handle children before parents arrive.
+    safety_iters = len(pending) + 2
+    while pending and safety_iters > 0:
+        safety_iters -= 1
+        progress = False
+        for cat in list(pending):
+            old_parent = cat.get("parent_id")
+            if old_parent is not None and old_parent not in cat_id_map:
+                # Parent not mapped yet; check whether the parent is in `pending`
+                # at all — if not (orphan), treat as root.
+                if any(c["id"] == old_parent for c in pending):
+                    continue
+                old_parent = None  # orphan promoted to root
+
+            new_parent_id = cat_id_map.get(old_parent) if old_parent else None
+            name = (cat.get("name") or "").strip() or "(unnamed)"
+            if new_parent_id:
+                parent_row = await session.get(Category, new_parent_id)
+                new_path = f"{parent_row.path} > {name}"
+            else:
+                new_path = name
+
+            if new_path in existing_by_path:
+                cat_id_map[cat["id"]] = existing_by_path[new_path].id
+            else:
+                new_cat = Category(
+                    parent_id=new_parent_id,
+                    name=name,
+                    description=cat.get("description") or "",
+                    path=new_path,
+                )
+                session.add(new_cat)
+                await session.flush()
+                cat_id_map[cat["id"]] = new_cat.id
+                existing_by_path[new_path] = new_cat
+            pending.remove(cat)
+            progress = True
+        if not progress:
+            break
+
+    # ---- Sources: always insert new (no de-dup so identity stays explicit) ----
+    src_id_map: dict[int, int] = {}
+    for src in data.get("sources") or []:
+        try:
+            stype = SourceType(src["type"])
+        except (ValueError, KeyError):
+            stype = SourceType.web
+        new_src = Source(
+            type=stype,
+            label=src.get("label") or src["type"],
+            display_name=src.get("display_name"),
+            icon_url=src.get("icon_url"),
+            config=src.get("config") or {},
+            created_at=_parse_dt(src.get("created_at")) or datetime.utcnow(),
+        )
+        session.add(new_src)
+        await session.flush()
+        src_id_map[src["id"]] = new_src.id
+
+    # ---- Reviews: dedupe by (new_source_id, external_id) ----
+    rev_id_map: dict[int, int] = {}
+    for r in data.get("reviews") or []:
+        new_src_id = src_id_map.get(r.get("source_id"))
+        if not new_src_id:
+            continue
+        ext = r.get("external_id")
+        existing_rev = (
+            await session.execute(
+                select(Review).where(
+                    Review.source_id == new_src_id, Review.external_id == ext
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_rev:
+            rev_id_map[r["id"]] = existing_rev.id
+            continue
+        posted = _parse_dt(r.get("posted_at"))
+        if posted is not None and posted.tzinfo is not None:
+            from datetime import timezone
+            posted = posted.astimezone(timezone.utc).replace(tzinfo=None)
+        new_rev = Review(
+            source_id=new_src_id,
+            external_id=ext,
+            author=r.get("author"),
+            posted_at=posted,
+            rating=r.get("rating"),
+            text=r.get("text") or "",
+            url=r.get("url"),
+            raw=r.get("raw") or {},
+            collected_at=_parse_dt(r.get("collected_at")) or datetime.utcnow(),
+        )
+        session.add(new_rev)
+        await session.flush()
+        rev_id_map[r["id"]] = new_rev.id
+
+    # ---- Analyses: insert iff no analysis already exists for that review ----
+    for a in data.get("analyses") or []:
+        new_rev_id = rev_id_map.get(a.get("review_id"))
+        if not new_rev_id:
+            continue
+        existing_a = (
+            await session.execute(select(Analysis).where(Analysis.review_id == new_rev_id))
+        ).scalar_one_or_none()
+        if existing_a:
+            continue
+        new_cat_id = cat_id_map.get(a.get("category_id"))
+        try:
+            sent = Sentiment(a["sentiment"]) if a.get("sentiment") else None
+        except (ValueError, KeyError):
+            sent = None
+        try:
+            astatus = (
+                AnalysisStatus(a["status"]) if a.get("status") else AnalysisStatus.succeeded
+            )
+        except (ValueError, KeyError):
+            astatus = AnalysisStatus.succeeded
+        session.add(
+            Analysis(
+                review_id=new_rev_id,
+                category_id=new_cat_id,
+                sentiment=sent,
+                sentiment_score=a.get("sentiment_score"),
+                confidence=a.get("confidence"),
+                summary=a.get("summary"),
+                model=a.get("model"),
+                analyzed_at=_parse_dt(a.get("analyzed_at")) or datetime.utcnow(),
+                status=astatus,
+                error=a.get("error"),
+            )
+        )
+    await session.flush()
+
+    # ---- Investigation: insert new with remapped source/root ids ----
+    new_inv = Investigation(
+        label=(inv_data.get("label") or "").strip()[:200] or "(imported)",
+        description=inv_data.get("description"),
+        source_ids=[src_id_map[s] for s in (inv_data.get("source_ids") or []) if s in src_id_map],
+        root_ids=[cat_id_map[c] for c in (inv_data.get("root_ids") or []) if c in cat_id_map],
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    session.add(new_inv)
+    await session.flush()
+
+    # ---- Theme snapshots: link to the new investigation ----
+    for snap in data.get("theme_snapshots") or []:
+        session.add(
+            ThemeSnapshot(
+                investigation_id=new_inv.id,
+                label=snap.get("label") or "(unnamed)",
+                sentiment=snap.get("sentiment") or "neutral",
+                source_ids=[src_id_map[x] for x in (snap.get("source_ids") or []) if x in src_id_map],
+                root_ids=[cat_id_map[x] for x in (snap.get("root_ids") or []) if x in cat_id_map],
+                summary_lang=snap.get("summary_lang") or "en",
+                sample_size=snap.get("sample_size") or 0,
+                model=snap.get("model"),
+                themes=snap.get("themes") or [],
+                created_at=_parse_dt(snap.get("created_at")) or datetime.utcnow(),
+            )
+        )
+
+    await session.commit()
+    return {
+        "id": new_inv.id,
+        "label": new_inv.label,
+        "summary": {
+            "sources_inserted": len(src_id_map),
+            "categories_resolved": len(cat_id_map),
+            "reviews_resolved": len(rev_id_map),
+            "snapshots": len(data.get("theme_snapshots") or []),
+        },
+    }

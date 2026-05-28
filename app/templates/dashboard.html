@@ -9,6 +9,13 @@
   <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
     <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
     <div class="flex items-center gap-3">
+      <form id="inv-import-form" enctype="multipart/form-data" class="inline-flex">
+        <label class="text-xs text-blue-600 hover:underline cursor-pointer">
+          📥 {{ t('dashboard.investigations_import') }}
+          <input type="file" name="file" accept="application/json,.json" class="hidden"
+                 onchange="importInvestigation(this)">
+        </label>
+      </form>
       <button type="button" id="investigations-clear-btn" onclick="clearActiveInvestigation()"
               class="text-xs text-blue-600 hover:underline hidden">
         ✕ {{ t('dashboard.investigations_clear') }}
@@ -337,7 +344,10 @@ function renderInvestigations(items) {
         <div class="text-[11px] text-gray-500 mb-2">${date}</div>
         <div class="flex flex-wrap gap-1 mb-1">${srcChips || '<span class="text-[11px] text-gray-400">— no sources —</span>'}</div>
         <div class="flex flex-wrap gap-1 mb-2">${catChips || '<span class="text-[11px] text-gray-400">— no categories —</span>'}</div>
-        <div class="flex justify-end">
+        <div class="flex justify-end items-center gap-3">
+          <a href="/api/investigations/${inv.id}/export"
+             onclick="event.stopPropagation()"
+             class="text-[11px] text-gray-600 hover:underline">📤 ${escapeHtml('{{ t("dashboard.investigations_export") }}')}</a>
           <button type="button"
                   onclick="event.stopPropagation(); deleteInvestigation(${inv.id})"
                   class="text-[11px] text-red-600 hover:underline">${escapeHtml('{{ t("common.delete") }}')}</button>
@@ -365,6 +375,35 @@ async function applyInvestigation(id) {
   setDashboardVisibility(true);
   await refreshSavedSnapshots();
   await reload();
+}
+
+async function importInvestigation(input) {
+  if (!input.files || input.files.length === 0) return;
+  const file = input.files[0];
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/investigations/import', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      alert((data && data.detail) || 'import failed');
+      input.value = '';
+      return;
+    }
+    input.value = '';
+    // Refresh + auto-activate the freshly imported card.
+    const r = await fetch('/api/investigations');
+    const d = await r.json();
+    _lastInvestigations = d.investigations || [];
+    if (data && data.id) {
+      await applyInvestigation(data.id);
+    } else {
+      renderInvestigations(_lastInvestigations);
+    }
+  } catch (e) {
+    alert(String(e));
+    input.value = '';
+  }
 }
 
 async function deleteInvestigation(id) {

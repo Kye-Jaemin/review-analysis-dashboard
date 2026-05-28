@@ -87,6 +87,8 @@
     "investigations_empty": "저장된 조사가 없습니다. 분석 페이지에서 실행 시 이름을 입력하면 여기에 카드로 추가됩니다.",
     "investigations_active": "활성",
     "investigations_clear": "필터 해제",
+    "investigations_export": "카드 내보내기",
+    "investigations_import": "카드 불러오기",
     "active_filter_label": "현재 보기:",
     "active_filter_none": "전체 데이터 (조사 카드 미선택)",
     "active_filter_sources": "소스",

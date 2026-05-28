@@ -87,6 +87,8 @@
     "investigations_empty": "No investigations saved yet. On the Analyze page, give your run a name to save it here.",
     "investigations_active": "Active",
     "investigations_clear": "Clear filter",
+    "investigations_export": "Export card",
+    "investigations_import": "Import card",
     "active_filter_label": "Currently viewing:",
     "active_filter_none": "All data (no investigation selected)",
     "active_filter_sources": "Sources",

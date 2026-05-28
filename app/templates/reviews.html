@@ -18,6 +18,13 @@
   <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
     <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
     <div class="flex items-center gap-3">
+      <form id="inv-import-form-reviews" enctype="multipart/form-data" class="inline-flex">
+        <label class="text-xs text-blue-600 hover:underline cursor-pointer">
+          📥 {{ t('dashboard.investigations_import') }}
+          <input type="file" name="file" accept="application/json,.json" class="hidden"
+                 onchange="importInvReviews(this)">
+        </label>
+      </form>
       {% if active_investigation_id %}
         <a href="/reviews" class="text-xs text-blue-600 hover:underline">✕ {{ t('dashboard.investigations_clear') }}</a>
       {% endif %}
@@ -54,10 +61,37 @@
             <span class="text-[11px] text-gray-400">— no categories —</span>
           {% endfor %}
         </div>
+        <div class="flex justify-end mt-2">
+          <a href="/api/investigations/{{ inv.id }}/export"
+             onclick="event.stopPropagation()"
+             class="text-[11px] text-gray-600 hover:underline">📤 {{ t('dashboard.investigations_export') }}</a>
+        </div>
       </a>
     {% endfor %}
   </div>
 </div>
+
+<script>
+async function importInvReviews(input) {
+  if (!input.files || input.files.length === 0) return;
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  try {
+    const res = await fetch('/api/investigations/import', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      alert((data && data.detail) || 'import failed');
+      input.value = '';
+      return;
+    }
+    // Navigate to the freshly imported card so the user sees the result.
+    window.location.href = '/reviews?investigation_id=' + data.id;
+  } catch (e) {
+    alert(String(e));
+    input.value = '';
+  }
+}
+</script>
 {% endif %}
 
 <div class="flex gap-6">
