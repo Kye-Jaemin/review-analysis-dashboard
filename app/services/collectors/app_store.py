@@ -33,14 +33,38 @@ def _label(node, key: str = "label") -> str:
 class AppStoreCollector(CollectorBase):
     @classmethod
     async def search(cls, query: str, country: str = "us", **kwargs) -> list[dict]:
+        # Two passes:
+        #   1. default search — iTunes matches across name/developer/description
+        #      but title hits dominate the top of the list.
+        #   2. explicit `attribute=softwareDeveloper` — forces a developer-name
+        #      match. Merged + dedup'd by trackId so apps from the searched
+        #      company show up even when the query isn't part of the app name.
+        merged: dict = {}
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+            resp_default = await client.get(
                 "https://itunes.apple.com/search",
-                params={"term": query, "country": country, "media": "software", "limit": 10},
+                params={"term": query, "country": country, "media": "software", "limit": 12},
             )
-            data = resp.json()
+            for r in (resp_default.json().get("results") or []):
+                tid = r.get("trackId")
+                if tid and tid not in merged:
+                    merged[tid] = r
+
+            resp_dev = await client.get(
+                "https://itunes.apple.com/search",
+                params={
+                    "term": query, "country": country, "media": "software",
+                    "limit": 8, "attribute": "softwareDeveloper",
+                },
+            )
+            for r in (resp_dev.json().get("results") or []):
+                tid = r.get("trackId")
+                if tid and tid not in merged:
+                    r["_via_developer"] = True
+                    merged[tid] = r
+
         out = []
-        for r in data.get("results", []) or []:
+        for r in merged.values():
             track_id = r.get("trackId")
             if not track_id:
                 continue
@@ -55,10 +79,13 @@ class AppStoreCollector(CollectorBase):
                     slug = tail.split("/id", 1)[0]
             if not slug:
                 slug = (r.get("trackName") or "").strip().lower().replace(" ", "-")
+            subtitle = (r.get("artistName") or "") + (f" · {rating:.1f}★" if rating else "")
+            if r.get("_via_developer"):
+                subtitle = "📛 " + subtitle
             out.append({
                 "id": str(track_id),
                 "title": r.get("trackName") or "",
-                "subtitle": (r.get("artistName") or "") + (f" · {rating:.1f}★" if rating else ""),
+                "subtitle": subtitle,
                 "icon_url": r.get("artworkUrl100"),
                 "config": {
                     "app_id": int(track_id),
@@ -76,7 +103,7 @@ class AppStoreCollector(CollectorBase):
                 "App Store source config is missing app_id. "
                 "Delete and re-add the source."
             )
-        max_count = int(self.config.get("max_count", 100))
+        max_count = int(self.config.get("max_count", 500))
 
         emitted = 0
         async with httpx.AsyncClient(

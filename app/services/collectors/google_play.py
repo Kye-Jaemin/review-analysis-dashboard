@@ -12,21 +12,31 @@ class GooglePlayCollector(CollectorBase):
     async def search(cls, query: str, country: str = "us", lang: str = "en", **kwargs) -> list[dict]:
         from google_play_scraper import search as gp_search
 
+        # Bump n_hits so developer-name matches (which the scraper ranks lower
+        # than title hits) still surface in the candidate list.
         def _run():
-            return gp_search(query, lang=lang, country=country, n_hits=10)
+            return gp_search(query, lang=lang, country=country, n_hits=25)
 
         results = await asyncio.to_thread(_run)
+        q_lower = (query or "").lower().strip()
+
         out = []
         for r in results or []:
             app_id = r.get("appId")
             if not app_id:
-                # google-play-scraper occasionally returns promoted entries with no appId.
-                # Skip them — they can't be collected from.
+                # Promoted entries occasionally appear with no appId — skip.
                 continue
+            title = r.get("title") or app_id
+            developer = r.get("developer") or ""
+            # Mark whether the developer name matched, so the UI can hint at it.
+            dev_match = q_lower and q_lower not in title.lower() and q_lower in developer.lower()
+            subtitle = developer + (f" · {r.get('score'):.1f}★" if r.get("score") else "")
+            if dev_match:
+                subtitle = "📛 " + subtitle  # subtle indicator the hit came from developer name
             out.append({
                 "id": app_id,
-                "title": r.get("title") or app_id,
-                "subtitle": (r.get("developer") or "") + (f" · {r.get('score'):.1f}★" if r.get("score") else ""),
+                "title": title,
+                "subtitle": subtitle,
                 "icon_url": r.get("icon"),
                 "config": {
                     "app_id": app_id,
@@ -34,7 +44,7 @@ class GooglePlayCollector(CollectorBase):
                     "lang": lang,
                 },
             })
-        return out
+        return out[:15]
 
     async def collect(self) -> AsyncIterator[CollectedItem]:
         from google_play_scraper import Sort, reviews as gp_reviews
@@ -47,7 +57,7 @@ class GooglePlayCollector(CollectorBase):
             )
         country = self.config.get("country", "us")
         lang = self.config.get("lang", "en")
-        max_count = int(self.config.get("max_count", 100))
+        max_count = int(self.config.get("max_count", 500))
 
         def _run():
             result, _ = gp_reviews(

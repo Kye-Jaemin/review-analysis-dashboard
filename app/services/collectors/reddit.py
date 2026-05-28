@@ -45,9 +45,9 @@ class RedditCollector(CollectorBase):
                     "config": {
                         "subreddit": sr.display_name,
                         "sort": "new",
-                        "time_filter": "month",
+                        "time_filter": "year",
                         "include_comments": True,
-                        "max_submissions": 50,
+                        "max_submissions": 500,
                         "max_comments_per_submission": 20,
                     },
                 })
@@ -61,9 +61,9 @@ class RedditCollector(CollectorBase):
     async def collect(self) -> AsyncIterator[CollectedItem]:
         subreddit_name = self.config["subreddit"]
         sort = self.config.get("sort", "new")
-        time_filter = self.config.get("time_filter", "month")
+        time_filter = self.config.get("time_filter", "year")
         search_query = (self.config.get("search_query") or "").strip()
-        max_submissions = int(self.config.get("max_submissions") or self.config.get("max_count") or 50)
+        max_submissions = int(self.config.get("max_submissions") or self.config.get("max_count") or 500)
         include_comments = bool(self.config.get("include_comments", True))
         max_comments = int(self.config.get("max_comments_per_submission", 20))
 
