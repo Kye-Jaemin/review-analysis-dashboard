@@ -40,9 +40,14 @@
     } %}
     {% for inv in investigations %}
       {% set is_active = (active_investigation_id == inv.id) %}
-      <a href="/reviews?investigation_id={{ inv.id }}"
-         class="block border rounded p-3 transition flex flex-col gap-2
-                {{ 'border-blue-500 bg-blue-50' if is_active else 'border-gray-200 hover:border-blue-300 bg-white' }}">
+      {# Use a <div> here (not <a>) so we can nest a real <a> for the
+         "export card" link without browsers rewriting the DOM to escape
+         the nested anchor. Click anywhere on the card → navigates via JS. #}
+      <div role="link" tabindex="0"
+           onclick="location.href='/reviews?investigation_id={{ inv.id }}'"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/reviews?investigation_id={{ inv.id }}'}"
+           class="block border rounded p-3 transition flex flex-col gap-2 cursor-pointer
+                  {{ 'border-blue-500 bg-blue-50' if is_active else 'border-gray-200 hover:border-blue-300 bg-white' }}">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
             <div class="font-semibold text-sm truncate" title="{{ inv.label }}">{{ inv.label }}</div>
@@ -126,7 +131,7 @@
              onclick="event.stopPropagation()"
              class="text-[11px] text-gray-600 hover:underline">{{ t('dashboard.investigations_export') }}</a>
         </div>
-      </a>
+      </div>
     {% endfor %}
   </div>
 </div>
