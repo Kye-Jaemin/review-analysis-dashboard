@@ -6,18 +6,31 @@
 <h1 class="text-2xl font-semibold mb-6">{{ t('analyze.title') }}</h1>
 
 <div class="bg-white p-5 rounded shadow-sm mb-6 max-w-2xl">
-  <div class="grid grid-cols-3 gap-3 text-center mb-5">
-    <div class="border rounded p-3">
-      <div class="text-xs text-gray-500">{{ t('analyze.unanalyzed', count='') }}</div>
-      <div class="text-2xl font-semibold mt-1">{{ counts.unanalyzed }}</div>
+  <!-- Prominent live count: how many reviews the current form selection will hit -->
+  <div class="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
+    <div class="text-xs uppercase tracking-wide text-blue-700 mb-1">
+      {{ t('analyze.live_count_label') }}
     </div>
-    <div class="border rounded p-3">
-      <div class="text-xs text-gray-500">{{ t('analyze.failed', count='') }}</div>
-      <div class="text-2xl font-semibold mt-1">{{ counts.failed }}</div>
+    <div class="flex items-baseline gap-2">
+      <span id="analyze-count" class="text-4xl font-bold text-blue-700">—</span>
+      <span class="text-base text-blue-700 font-normal">{{ t('analyze.live_count_unit') }}</span>
     </div>
-    <div class="border rounded p-3">
-      <div class="text-xs text-gray-500">{{ t('analyze.total', count='') }}</div>
-      <div class="text-2xl font-semibold mt-1">{{ counts.total }}</div>
+    <div class="text-xs text-gray-600 mt-1">{{ t('analyze.live_count_help') }}</div>
+  </div>
+
+  <!-- Smaller static dataset overview -->
+  <div class="grid grid-cols-3 gap-2 text-center mb-5 text-xs">
+    <div class="border border-gray-200 rounded p-2">
+      <div class="text-gray-500">{{ t('analyze.unanalyzed', count='') }}</div>
+      <div class="text-base font-medium text-gray-700 mt-0.5">{{ counts.unanalyzed }}</div>
+    </div>
+    <div class="border border-gray-200 rounded p-2">
+      <div class="text-gray-500">{{ t('analyze.failed', count='') }}</div>
+      <div class="text-base font-medium text-gray-700 mt-0.5">{{ counts.failed }}</div>
+    </div>
+    <div class="border border-gray-200 rounded p-2">
+      <div class="text-gray-500">{{ t('analyze.total', count='') }}</div>
+      <div class="text-base font-medium text-gray-700 mt-0.5">{{ counts.total }}</div>
     </div>
   </div>
 
@@ -236,10 +249,6 @@
       <input type="text" id="investigation-label-input" name="investigation_label" maxlength="200"
              placeholder="{{ t('analyze.investigation_label_placeholder') }}"
              class="w-full border rounded px-3 py-2 text-sm" />
-    </div>
-    <div class="border-t pt-3 flex items-center gap-2 text-sm">
-      <span class="text-gray-500">{{ t('analyze.live_count_label') }}</span>
-      <span id="analyze-count" class="font-semibold text-blue-700">—</span>
     </div>
     <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
       {{ t('analyze.run') }}

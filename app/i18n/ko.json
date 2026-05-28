@@ -6,7 +6,7 @@
   "nav": {
     "dashboard": "대시보드",
     "sources": "소스",
-    "categories": "카테고리",
+    "categories": "수동 카테고리",
     "analyze": "분석",
     "reviews": "리뷰",
     "howto": "사용법"
@@ -193,8 +193,9 @@
     "investigation_label": "조사 카드로 저장 (선택)",
     "investigation_label_hint": "이름을 적으면 (소스, 카테고리) 조합이 대시보드에 카드로 추가됩니다. 다음에 그 카드를 클릭해 같은 필터로 한 번에 화면을 좁힐 수 있습니다.",
     "investigation_label_placeholder": "예: Cal AI · UX 피드백",
-    "live_count_label": "현재 조건에 해당하는 리뷰:",
+    "live_count_label": "이번 분석 대상 리뷰",
     "live_count_unit": "건",
+    "live_count_help": "모드·소스 체크박스를 바꾸면 자동으로 갱신됩니다.",
     "min_confidence": "분류 민감도 (최소 신뢰도)",
     "min_confidence_hint": "LLM 신뢰도가 이 임계값 미만이면 카테고리 분류를 저장하지 않고 미분류로 처리합니다 (감성 점수는 그대로 저장). 임계값이 높을수록 카테고리에 들어가는 리뷰가 줄어들지만 정확도는 올라갑니다.",
     "min_confidence_loose": "0.0 — 모두 허용",

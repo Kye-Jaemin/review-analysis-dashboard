@@ -6,7 +6,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "sources": "Sources",
-    "categories": "Categories",
+    "categories": "Manual categories",
     "analyze": "Analyze",
     "reviews": "Reviews",
     "howto": "How to use"
@@ -193,8 +193,9 @@
     "investigation_label": "Save as investigation card (optional)",
     "investigation_label_hint": "If you give this run a name, the (sources, categories) pair will appear as a card on the dashboard so you can click it to refilter everything later.",
     "investigation_label_placeholder": "e.g. Cal AI · UX feedback",
-    "live_count_label": "Reviews matching the current selection:",
+    "live_count_label": "Reviews this run will analyze",
     "live_count_unit": "reviews",
+    "live_count_help": "Updates automatically as you toggle mode and source checkboxes.",
     "min_confidence": "Classification sensitivity (min confidence)",
     "min_confidence_hint": "When the LLM's confidence falls below this threshold, the review is stored without a category instead of being forced into the nearest leaf. Sentiment is still recorded.",
     "min_confidence_loose": "0.0 — accept everything",
