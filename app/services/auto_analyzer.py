@@ -231,6 +231,8 @@ async def run_auto_analysis_job(
                     description=c.get("description"),
                     review_count=0,
                     display_order=idx,
+                    language=summary_lang or "en",
+                    translations={},
                 )
                 session.add(ac)
                 auto_cats.append(ac)

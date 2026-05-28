@@ -50,7 +50,8 @@ ANALYSIS_COLS = [
     "user_tier", "confidence", "summary", "model", "analyzed_at", "status", "error",
 ]
 AUTO_CATEGORY_COLS = [
-    "id", "investigation_id", "name", "description", "review_count", "display_order", "created_at",
+    "id", "investigation_id", "name", "description", "review_count", "display_order",
+    "language", "translations", "created_at",
 ]
 SNAPSHOT_COLS = [
     "id", "investigation_id", "label", "sentiment", "source_ids", "root_ids",
@@ -264,6 +265,8 @@ async def import_workspace(
                 description=row.get("description"),
                 review_count=row.get("review_count") or 0,
                 display_order=row.get("display_order") or 0,
+                language=row.get("language") or "en",
+                translations=row.get("translations") or {},
                 created_at=_parse_dt(row.get("created_at")) or datetime.utcnow(),
             )
         )

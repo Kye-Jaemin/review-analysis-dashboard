@@ -1,13 +1,20 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.models import Analysis, AutoCategory, Investigation, Review, Sentiment
+from app.services.translator import translate_auto_categories, translate_text
 
 router = APIRouter()
+
+
+class TranslateReviewRequest(BaseModel):
+    text: str
+    lang: str
 
 SENTIMENT_ORDER = ["very_negative", "negative", "neutral", "positive", "very_positive"]
 
@@ -15,9 +22,15 @@ SENTIMENT_ORDER = ["very_negative", "negative", "neutral", "positive", "very_pos
 @router.get("/api/auto-categories")
 async def list_auto_categories(
     investigation_id: int = Query(...),
+    lang: Optional[str] = Query(None),
     session: AsyncSession = Depends(get_session),
 ):
-    """Per-card list of auto categories with sentiment breakdown."""
+    """Per-card list of auto categories with sentiment breakdown.
+
+    `lang` is the UI language the caller wants names/descriptions in.
+    Categories stored in another language are translated via Claude on
+    first request and cached on the row's `translations` JSON column,
+    so subsequent fetches for the same UI language are free."""
     inv = await session.get(Investigation, investigation_id)
     if not inv:
         raise HTTPException(404, "investigation not found")
@@ -31,6 +44,12 @@ async def list_auto_categories(
     ).scalars().all()
     if not cats:
         return {"investigation_id": investigation_id, "categories": []}
+
+    # Translate (or pull from cache) before building the response. If lang
+    # is missing or matches each row's stored language, this is a no-op.
+    translated_by_id: dict[int, dict] = {}
+    if lang:
+        translated_by_id = await translate_auto_categories(session, cats, lang)
 
     # Sentiment × user_tier distribution per auto category.
     rows = (
@@ -75,10 +94,13 @@ async def list_auto_categories(
 
     out = []
     for c in cats:
+        t = translated_by_id.get(c.id)
+        name = t["name"] if t else c.name
+        description = t["description"] if t else c.description
         out.append({
             "id": c.id,
-            "name": c.name,
-            "description": c.description,
+            "name": name,
+            "description": description,
             "display_order": c.display_order,
             "review_count": totals_all[c.id],
             "sentiments": dist_all[c.id],
@@ -303,3 +325,15 @@ async def reviews_for_auto_category(
         "category": {"id": cat.id, "name": cat.name, "description": cat.description},
         "reviews": out,
     }
+
+
+@router.post("/api/translate-review")
+async def translate_review(body: TranslateReviewRequest):
+    """Translate a single review text into the requested UI language.
+
+    Stateless on purpose — reviews are user content and we don't persist
+    translations row-by-row. The dashboard caches the result in the DOM
+    once the user clicks 'translate'. Falls back to the original text on
+    any error so the UI never breaks."""
+    translated = await translate_text(body.text or "", body.lang or "en")
+    return {"text": translated}

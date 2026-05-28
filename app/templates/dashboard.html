@@ -105,9 +105,9 @@
       <div class="text-gray-500">{{ t('dashboard.auto_cats_hint') }}</div>
     </div>
   </div>
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 fade-soft">
-    <div>
-      <canvas id="chart-auto-cats" height="200"></canvas>
+  <div class="grid grid-cols-[8rem,1fr] gap-4 mb-4 fade-soft items-center">
+    <div class="w-32 h-32">
+      <canvas id="chart-auto-cats"></canvas>
     </div>
     <div id="auto-cats-legend" class="text-xs space-y-1"></div>
   </div>
@@ -128,29 +128,6 @@
     <div id="auto-cat-modal-filters" class="flex flex-wrap gap-1.5 text-xs mb-3"></div>
     <div id="auto-cat-modal-body" class="overflow-y-auto flex-1 space-y-2 text-sm"></div>
   </div>
-</div>
-
-<div class="bg-white p-4 rounded shadow-sm mb-6"
-     x-data="{ mode: 'distribution', period: 'week' }">
-  <div class="flex items-center justify-between mb-3">
-    <div class="text-sm font-medium">{{ t('dashboard.trend') }}</div>
-    <div class="flex gap-2 text-xs">
-      <button @click="mode = 'distribution'; renderTrend(mode, period)"
-              :class="mode === 'distribution' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
-              class="px-2 py-1 rounded">{{ t('dashboard.mode_distribution') }}</button>
-      <button @click="mode = 'avg'; renderTrend(mode, period)"
-              :class="mode === 'avg' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
-              class="px-2 py-1 rounded">{{ t('dashboard.mode_avg') }}</button>
-      <span class="mx-2 text-gray-300">|</span>
-      <button @click="period = 'week'; renderTrend(mode, period)"
-              :class="period === 'week' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
-              class="px-2 py-1 rounded">{{ t('dashboard.weekly') }}</button>
-      <button @click="period = 'month'; renderTrend(mode, period)"
-              :class="period === 'month' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
-              class="px-2 py-1 rounded">{{ t('dashboard.monthly') }}</button>
-    </div>
-  </div>
-  <canvas id="chart-trend" height="140"></canvas>
 </div>
 
 <div class="bg-white p-4 rounded shadow-sm mb-6">
@@ -217,6 +194,29 @@
     <div id="themes-breakdown" class="space-y-1.5"></div>
     <div class="text-[11px] text-gray-400 mt-2">{{ t('dashboard.themes_count_caveat') }}</div>
   </div>
+</div>
+
+<div class="bg-white p-4 rounded shadow-sm mb-6"
+     x-data="{ mode: 'distribution', period: 'week' }">
+  <div class="flex items-center justify-between mb-3">
+    <div class="text-sm font-medium">{{ t('dashboard.trend') }}</div>
+    <div class="flex gap-2 text-xs">
+      <button @click="mode = 'distribution'; renderTrend(mode, period)"
+              :class="mode === 'distribution' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.mode_distribution') }}</button>
+      <button @click="mode = 'avg'; renderTrend(mode, period)"
+              :class="mode === 'avg' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.mode_avg') }}</button>
+      <span class="mx-2 text-gray-300">|</span>
+      <button @click="period = 'week'; renderTrend(mode, period)"
+              :class="period === 'week' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.weekly') }}</button>
+      <button @click="period = 'month'; renderTrend(mode, period)"
+              :class="period === 'month' ? 'bg-blue-600 text-white' : 'bg-gray-100'"
+              class="px-2 py-1 rounded">{{ t('dashboard.monthly') }}</button>
+    </div>
+  </div>
+  <canvas id="chart-trend" height="140"></canvas>
 </div>
 
 <div class="bg-white p-4 rounded shadow-sm">
@@ -706,7 +706,7 @@ async function loadAutoCategories() {
     return;
   }
   try {
-    const res = await fetch('/api/auto-categories?investigation_id=' + activeInvestigationId);
+    const res = await fetch('/api/auto-categories?investigation_id=' + activeInvestigationId + '&lang={{ lang }}');
     const data = await res.json();
     const cats = data.categories || [];
     if (cats.length === 0) {
@@ -795,6 +795,8 @@ function renderAutoCatsDoughnut() {
     type: 'doughnut',
     data: { labels, datasets: [{ data: values, backgroundColor: colors }] },
     options: {
+      responsive: true,
+      maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1031,7 +1033,7 @@ async function renderAutoCatModal() {
     free: '{{ t("dashboard.tier_free") }}',
     unknown: '{{ t("dashboard.tier_unknown") }}',
   };
-  body.innerHTML = reviews.map(r => `
+  body.innerHTML = reviews.map((r, i) => `
     <div class="border-b border-gray-100 pb-2 ${r.unanalyzed ? 'opacity-70' : ''}">
       <div class="flex items-center gap-2 text-xs text-gray-500 mb-1 flex-wrap">
         ${r.author ? escapeHtml(r.author) : '—'}
@@ -1042,10 +1044,58 @@ async function renderAutoCatModal() {
           ? `<span class="ml-auto px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px]">{{ t('dashboard.auto_cats_unanalyzed_chip') }}</span>`
           : (r.sentiment ? `<span class="ml-auto px-1.5 py-0.5 rounded text-xs sentiment-${r.sentiment}">${SENTIMENT_LABELS[r.sentiment]}</span>` : '')}
       </div>
-      <div class="text-gray-800 text-sm">${escapeHtml(r.text)}</div>
+      <div id="rev-text-${i}" class="text-gray-800 text-sm" data-original="${escapeHtml(r.text)}">${escapeHtml(r.text)}</div>
+      <div class="mt-1 flex items-center gap-2">
+        <button type="button"
+                class="text-[11px] text-blue-600 hover:underline"
+                onclick="toggleReviewTranslation(${i}, this)"
+                data-original-label="🌐 {{ t('common.language') }}"
+                data-show-original-label="↺ {{ t('common.back') }}">🌐 {{ t('common.language') }}</button>
+      </div>
       ${r.summary ? `<div class="text-xs text-gray-500 mt-1 italic">— ${escapeHtml(r.summary)}</div>` : ''}
     </div>
   `).join('');
+}
+
+async function toggleReviewTranslation(idx, btn) {
+  const el = document.getElementById('rev-text-' + idx);
+  if (!el) return;
+  const original = el.getAttribute('data-original') || '';
+  const cached = el.getAttribute('data-translated');
+  const showingTranslation = el.getAttribute('data-mode') === 'translated';
+  if (showingTranslation) {
+    el.textContent = original;
+    el.setAttribute('data-mode', 'original');
+    btn.textContent = btn.getAttribute('data-original-label');
+    return;
+  }
+  if (cached) {
+    el.textContent = cached;
+    el.setAttribute('data-mode', 'translated');
+    btn.textContent = btn.getAttribute('data-show-original-label');
+    return;
+  }
+  const prev = btn.textContent;
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/translate-review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: original, lang: '{{ lang }}' }),
+    });
+    if (!res.ok) throw new Error('translate failed');
+    const data = await res.json();
+    const translated = (data && data.text) ? data.text : original;
+    el.setAttribute('data-translated', translated);
+    el.textContent = translated;
+    el.setAttribute('data-mode', 'translated');
+    btn.textContent = btn.getAttribute('data-show-original-label');
+  } catch (e) {
+    btn.textContent = prev;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function setAutoCatModalSent(sent) {
