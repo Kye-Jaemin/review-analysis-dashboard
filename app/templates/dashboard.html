@@ -380,6 +380,45 @@ function attachCardTilt(scope) {
   });
 }
 
+// ----- Replay doughnut entry animation on panel click -----
+// Clicking empty space inside a chart panel destroys and recreates the
+// chart with its data, which re-runs Chart.js's reveal animation. We
+// bind once on the document and check whether the click target sits
+// inside one of the known panels but NOT on an interactive element
+// (button, link, legend row, tooltip, control). Tooltips and the chart
+// canvas itself are ignored so the user's existing hover-to-inspect
+// flow is undisturbed.
+const _replayMap = {
+  'sentiment-by-root-panel': () => _lastStats && renderSentiment(_lastStats),
+  'by-category-panel':      () => _lastStats && renderCategory(_lastStats),
+  'auto-cats-panel':        () => _lastAutoCatsData && renderAutoCatsDoughnut(),
+};
+function _bindReplayClicks() {
+  // The "by source" panel doesn't have an id; tag it once so the
+  // replay map can find it.
+  const sentPanel = document.getElementById('sentiment-by-root-panel');
+  const sourcePanel = sentPanel && sentPanel.parentElement && sentPanel.parentElement.children[1];
+  if (sourcePanel && !sourcePanel.id) sourcePanel.id = 'by-source-panel';
+  _replayMap['by-source-panel'] = () => _lastStats && renderSource(_lastStats);
+
+  document.addEventListener('click', (e) => {
+    // Ignore clicks on truly interactive things — buttons, links, the
+    // chart canvas (Chart.js handles those), select boxes, inputs.
+    if (e.target.closest('button, a, select, input, textarea, label, canvas, [role="link"]')) return;
+    const panel = e.target.closest('#sentiment-by-root-panel, #by-source-panel, #by-category-panel, #auto-cats-panel');
+    if (!panel) return;
+    const fn = _replayMap[panel.id];
+    if (!fn) return;
+    // Quick "pulse" on the panel so the click feels acknowledged even
+    // if the chart entry animation is subtle.
+    panel.classList.remove('panel-in'); void panel.offsetWidth; panel.classList.add('panel-in');
+    try { fn(); } catch (_) {}
+  });
+}
+// Run once after the page is wired up. Idempotent — repeated calls
+// just rebind the handler (no-op since the listener is on document).
+document.addEventListener('DOMContentLoaded', _bindReplayClicks);
+
 // ----- Investigation card drag-and-drop reorder -----
 // Native HTML5 drag API. The whole card is draggable; on dragover we
 // figure out whether the cursor is in the LEFT half (insert before
@@ -774,10 +813,12 @@ function formatAnalyzed(analyzed, total) {
     .replace('__T__', total.toLocaleString());
 }
 
+let _lastStats = null;
 async function loadStats() {
   const qs = filterQuery();
   const res = await fetch('/api/stats' + (qs ? '?' + qs : ''));
   const data = await res.json();
+  _lastStats = data;
   // Animated counters where it makes sense.
   function popReplay(id) {
     const el = document.getElementById(id);
@@ -1547,26 +1588,61 @@ function renderCategory(data) {
     },
   });
 
-  // Side legend with colour swatch + name + count + share.
+  // Side legend with colour swatch + name + count + share + sentiment mini-bar.
+  // The mini-bar restores per-category positive/negative breakdown that
+  // the doughnut alone can't show (the doughnut slices by total).
+  function sentMiniBar(sentiments, total) {
+    if (!total) return '';
+    const segs = SENTIMENT_ORDER.map(s => {
+      const v = (sentiments && sentiments[s]) || 0;
+      return v > 0 ? `<div style="width:${(v / total * 100).toFixed(2)}%;background:${SENTIMENT_COLORS[s]}"></div>` : '';
+    }).join('');
+    return `<div class="flex h-1.5 rounded overflow-hidden bg-gray-100 mt-1">${segs}</div>`;
+  }
   const catLegend = document.getElementById('category-legend');
   if (catLegend) {
     catLegend.innerHTML = cats.map((c, i) => {
       const v = c.total || 0;
       const color = AUTO_CAT_COLORS[i % AUTO_CAT_COLORS.length];
+      const sents = c.sentiments || {};
+      const posSum = (sents.very_positive || 0) + (sents.positive || 0);
+      const negSum = (sents.negative || 0) + (sents.very_negative || 0);
+      const neuSum = (sents.neutral || 0);
       return `
-        <div class="flex items-center gap-1.5 leading-tight">
-          <span class="inline-block w-3 h-3 rounded-sm shrink-0" style="background:${color}"></span>
-          <span class="truncate flex-1 text-gray-700" title="${escapeHtml(c.path || '—')}">${escapeHtml(c.path || '—')}</span>
-          <span class="text-gray-500 shrink-0 tabular-nums">${v.toLocaleString()} (${pct(v, categoryTotal)})</span>
+        <div class="leading-tight">
+          <div class="flex items-center gap-1.5">
+            <span class="inline-block w-3 h-3 rounded-sm shrink-0" style="background:${color}"></span>
+            <span class="truncate flex-1 text-gray-700" title="${escapeHtml(c.path || '—')}">${escapeHtml(c.path || '—')}</span>
+            <span class="text-gray-500 shrink-0 tabular-nums">${v.toLocaleString()} (${pct(v, categoryTotal)})</span>
+          </div>
+          ${sentMiniBar(sents, v)}
+          <div class="flex justify-end gap-2 text-[10px] text-gray-500 mt-0.5"
+               title="${escapeHtml(SENTIMENT_LABELS.very_positive)}+${escapeHtml(SENTIMENT_LABELS.positive)} / ${escapeHtml(SENTIMENT_LABELS.neutral)} / ${escapeHtml(SENTIMENT_LABELS.negative)}+${escapeHtml(SENTIMENT_LABELS.very_negative)}">
+            <span class="text-green-700">+${posSum.toLocaleString()}</span>
+            <span>·${neuSum.toLocaleString()}</span>
+            <span class="text-red-700">−${negSum.toLocaleString()}</span>
+          </div>
         </div>`;
     }).join('') || `<div class="text-gray-400">{{ t('common.no_data') }}</div>`;
   }
+
+  // Table below: bring back the 5-band sentiment columns so users can read
+  // exact counts per leaf category, not just the visual share.
+  const sentBandCells = (sents, total) => SENTIMENT_ORDER.map(s => {
+    const c = (sents && sents[s]) || 0;
+    return `<td class="text-right py-1">${c.toLocaleString()}<span class="text-gray-400 ml-1">(${pct(c, total)})</span></td>`;
+  }).join('');
+  const grandBand = SENTIMENT_ORDER.map(s => {
+    const sum = cats.reduce((a, c) => a + ((c.sentiments && c.sentiments[s]) || 0), 0);
+    return `<td class="text-right py-1">${sum.toLocaleString()}<span class="text-gray-400 ml-1">(${pct(sum, categoryTotal)})</span></td>`;
+  }).join('');
 
   document.getElementById('category-table').innerHTML = `
     <table class="w-full text-xs">
       <thead class="text-gray-500">
         <tr>
           <th class="text-left py-1">${escapeHtml('{{ t('reviews.table.category') }}')}</th>
+          ${SENTIMENT_ORDER.map(s => `<th class="text-right py-1"><span class="inline-block w-2 h-2 rounded-full mr-1 align-middle" style="background:${SENTIMENT_COLORS[s]}"></span>${escapeHtml(SENTIMENT_LABELS[s])}</th>`).join('')}
           <th class="text-right py-1">${escapeHtml('{{ t('dashboard.count_label') }}')}</th>
           <th class="text-right py-1">${escapeHtml('{{ t('dashboard.percent_label') }}')}</th>
         </tr>
@@ -1575,12 +1651,14 @@ function renderCategory(data) {
         ${data.by_category.map(c => `
           <tr class="border-t border-gray-100">
             <td class="py-1">${escapeHtml(c.path || '—')}</td>
+            ${sentBandCells(c.sentiments, c.total || 0)}
             <td class="text-right">${(c.total || 0).toLocaleString()}</td>
             <td class="text-right">${pct(c.total || 0, categoryTotal)}</td>
           </tr>
         `).join('')}
         <tr class="border-t border-gray-200 font-medium">
           <td class="py-1">{{ t('dashboard.total_label') }}</td>
+          ${grandBand}
           <td class="text-right">${categoryTotal.toLocaleString()}</td>
           <td class="text-right">100.0%</td>
         </tr>
