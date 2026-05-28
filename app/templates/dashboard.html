@@ -361,6 +361,9 @@ function attachCardTilt(scope) {
     if (el.dataset._tiltBound) return;
     el.dataset._tiltBound = '1';
     el.addEventListener('pointermove', (e) => {
+      // Suppress tilt while a card is being dragged — the transform fights
+      // the browser's drag preview and makes the operation feel jittery.
+      if (el.dataset._dragging === '1') return;
       const r = el.getBoundingClientRect();
       const px = (e.clientX - r.left) / r.width;   // 0..1
       const py = (e.clientY - r.top) / r.height;   // 0..1
@@ -374,6 +377,90 @@ function attachCardTilt(scope) {
       el.classList.remove('is-tilting');
       el.style.transform = '';
     });
+  });
+}
+
+// ----- Investigation card drag-and-drop reorder -----
+// Native HTML5 drag API. The whole card is draggable; on dragover we
+// figure out whether the cursor is in the LEFT half (insert before
+// target) or RIGHT half (insert after), so a single moving placeholder
+// gives crisp position feedback. On drop we POST the new ordering and
+// re-fetch so the server's display_order is the canonical state.
+let _dragSrcEl = null;
+function attachCardDrag(grid) {
+  if (!grid || grid.dataset._dragBound) return;
+  grid.dataset._dragBound = '1';
+
+  grid.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.investigation-card');
+    if (!card) return;
+    _dragSrcEl = card;
+    card.dataset._dragging = '1';
+    card.classList.add('is-dragging');
+    // Suppress the active-card click navigation when the user finishes
+    // a drag — onclick fires on dragend in some browsers.
+    try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+    try { e.dataTransfer.setData('text/plain', card.dataset.invId || ''); } catch (_) {}
+  });
+
+  grid.addEventListener('dragend', (e) => {
+    const card = e.target.closest('.investigation-card');
+    if (card) {
+      card.dataset._dragging = '';
+      card.classList.remove('is-dragging');
+      card.style.transform = '';
+    }
+    grid.querySelectorAll('.drop-before, .drop-after').forEach(el =>
+      el.classList.remove('drop-before', 'drop-after')
+    );
+    _dragSrcEl = null;
+  });
+
+  grid.addEventListener('dragover', (e) => {
+    if (!_dragSrcEl) return;
+    const target = e.target.closest('.investigation-card');
+    if (!target || target === _dragSrcEl) return;
+    e.preventDefault();  // permit drop
+    const r = target.getBoundingClientRect();
+    const before = (e.clientX - r.left) < r.width / 2;
+    grid.querySelectorAll('.drop-before, .drop-after').forEach(el =>
+      el.classList.remove('drop-before', 'drop-after')
+    );
+    target.classList.add(before ? 'drop-before' : 'drop-after');
+  });
+
+  grid.addEventListener('drop', async (e) => {
+    if (!_dragSrcEl) return;
+    const target = e.target.closest('.investigation-card');
+    if (!target || target === _dragSrcEl) return;
+    e.preventDefault();
+    const before = target.classList.contains('drop-before');
+    // Reorder in the DOM immediately so the user sees the result instantly.
+    if (before) target.parentNode.insertBefore(_dragSrcEl, target);
+    else target.parentNode.insertBefore(_dragSrcEl, target.nextSibling);
+    grid.querySelectorAll('.drop-before, .drop-after').forEach(el =>
+      el.classList.remove('drop-before', 'drop-after')
+    );
+    // Capture the new order, POST it, and refresh from server so any
+    // concurrent edit reconciles cleanly. We swallow errors — the visual
+    // order is already correct in the DOM, and the next refresh will
+    // resync if the POST failed.
+    const ids = [...grid.querySelectorAll('.investigation-card')]
+      .map(c => parseInt(c.dataset.invId, 10))
+      .filter(n => !isNaN(n));
+    try {
+      await fetch('/api/investigations/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+    } catch (_) {}
+    // Reload investigations so display_order on the server is the source
+    // of truth for the next render. Local in-memory state is updated to
+    // match the new order.
+    if (typeof loadInvestigations === 'function') {
+      try { await loadInvestigations(); } catch (_) {}
+    }
   });
 }
 
@@ -546,13 +633,16 @@ function renderInvestigations(items) {
     const totalReviews = (inv.review_count || 0).toLocaleString();
 
     return `
-      <div data-inv-id="${inv.id}"
+      <div data-inv-id="${inv.id}" draggable="true"
            class="investigation-card lift tile-in ripple-target press-feedback border rounded p-3 cursor-pointer flex flex-col gap-2
                   ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300 bg-white'}"
            onclick="applyInvestigation(${inv.id})">
         <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="font-semibold text-sm truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <span class="card-drag-handle text-gray-300 text-base leading-none select-none cursor-grab" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+              <div class="font-semibold text-sm truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</div>
+            </div>
             <div class="text-[10px] text-gray-500 mt-0.5">${date}</div>
           </div>
           <div class="text-right shrink-0">
@@ -587,6 +677,7 @@ function renderInvestigations(items) {
   }
   attachRipples(grid);
   attachCardTilt(grid);
+  attachCardDrag(grid);
   // Brief swap-in animation on the wrapper so changes (delete, reorder) feel
   // continuous rather than abrupt.
   grid.classList.remove('grid-swap'); void grid.offsetWidth; grid.classList.add('grid-swap');

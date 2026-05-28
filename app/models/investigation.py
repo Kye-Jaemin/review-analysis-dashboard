@@ -20,6 +20,12 @@ class Investigation(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     source_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     root_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # User-controlled card order on the dashboard. Lower = earlier. The
+    # /api/investigations endpoint sorts by this primarily, falling back
+    # to updated_at desc when display_order matches. New rows get the
+    # next available value so they land at the end of the grid; the user
+    # can then drag them anywhere.
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

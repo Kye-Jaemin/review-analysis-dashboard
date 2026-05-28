@@ -287,6 +287,21 @@
       transition: font-weight 120ms ease-out;
     }
 
+    /* --- Investigation card drag-and-drop --- */
+    .investigation-card.is-dragging {
+      opacity: 0.55;
+      transform: scale(0.98) rotate(-0.6deg);
+      cursor: grabbing !important;
+    }
+    /* Drop target indicators — vertical bar on whichever side the card
+       will be inserted, drawn as a coloured pseudo-element so we don't
+       affect layout. */
+    .investigation-card.drop-before { box-shadow: -4px 0 0 0 #3b82f6 inset, -10px 0 18px -6px rgba(59,130,246,0.4); }
+    .investigation-card.drop-after  { box-shadow:  4px 0 0 0 #3b82f6 inset,  10px 0 18px -6px rgba(59,130,246,0.4); }
+    /* Drag handle hover affordance — slightly darker when the card is hovered. */
+    .investigation-card:hover .card-drag-handle { color: #9ca3af; }
+    .card-drag-handle:active { cursor: grabbing; }
+
     /* --- Auto-category progress-bar tile --- */
     .auto-cat-tile {
       position: relative; overflow: hidden;
@@ -342,7 +357,8 @@
       .investigation-card.border-blue-500::after,
       .number-pop, .source-chip, .root-chip, .theme-cat-chip,
       .investigation-card.apply-pulse, main > div,
-      .auto-cat-tile, .auto-cat-tile .auto-cat-fill {
+      .auto-cat-tile, .auto-cat-tile .auto-cat-fill,
+      .investigation-card.is-dragging {
         animation: none !important; transition: none !important;
       }
       .investigation-card { transform: none !important; }

@@ -46,7 +46,8 @@ SNAPSHOT_COLS = [
     "summary_lang", "sample_size", "model", "themes", "created_at",
 ]
 INVESTIGATION_COLS = [
-    "id", "label", "description", "source_ids", "root_ids", "created_at", "updated_at",
+    "id", "label", "description", "source_ids", "root_ids",
+    "display_order", "created_at", "updated_at",
 ]
 
 
@@ -92,9 +93,16 @@ class InvestigationPatch(BaseModel):
 
 @router.get("/api/investigations")
 async def list_investigations(session: AsyncSession = Depends(get_session)):
+    # display_order is the primary sort key (user-controlled via drag).
+    # updated_at desc is the stable tiebreaker so two rows with the same
+    # display_order — e.g. before backfill or on a fresh DB — still come
+    # back deterministically.
     rows = (
         await session.execute(
-            select(Investigation).order_by(Investigation.updated_at.desc())
+            select(Investigation).order_by(
+                Investigation.display_order.asc(),
+                Investigation.updated_at.desc(),
+            )
         )
     ).scalars().all()
 
@@ -160,11 +168,17 @@ async def create_investigation(
     label = (payload.label or "").strip()
     if not label:
         raise HTTPException(400, "label is required")
+    # New cards land at the end of the user's order. Default = max + 1 so
+    # they don't shove existing positions around.
+    max_order = (
+        await session.execute(select(func.max(Investigation.display_order)))
+    ).scalar() or 0
     inv = Investigation(
         label=label[:200],
         description=(payload.description or "").strip()[:1000] or None,
         source_ids=payload.source_ids or [],
         root_ids=payload.root_ids or [],
+        display_order=int(max_order) + 1,
     )
     session.add(inv)
     await session.commit()
@@ -202,6 +216,38 @@ async def delete_investigation(
     await session.delete(inv)
     await session.commit()
     return {"ok": True}
+
+
+class ReorderPayload(BaseModel):
+    ids: list[int]
+
+
+@router.post("/api/investigations/reorder")
+async def reorder_investigations(
+    payload: ReorderPayload,
+    session: AsyncSession = Depends(get_session),
+):
+    """Persist the new card order. Client sends the full ordered id list;
+    the server assigns display_order = index + 1 to each row that exists.
+    Unknown ids are silently dropped (the client may be looking at a
+    stale list when another tab deleted a card).
+
+    Atomicity matters here: when two users drag at the same time the
+    last write wins, but each call must commit a consistent assignment
+    rather than half-renumber on failure."""
+    seen: set[int] = set()
+    order_idx = 0
+    for inv_id in payload.ids:
+        if inv_id in seen:
+            continue
+        seen.add(inv_id)
+        inv = await session.get(Investigation, inv_id)
+        if not inv:
+            continue
+        order_idx += 1
+        inv.display_order = order_idx
+    await session.commit()
+    return {"ok": True, "count": order_idx}
 
 
 # ---------- Export ONE investigation card ----------
@@ -447,11 +493,17 @@ async def import_investigation(
     await session.flush()
 
     # ---- Investigation: insert new with remapped source/root ids ----
+    # Imported cards land at the end of the user's current order so they
+    # don't jostle existing positions.
+    max_order = (
+        await session.execute(select(func.max(Investigation.display_order)))
+    ).scalar() or 0
     new_inv = Investigation(
         label=(inv_data.get("label") or "").strip()[:200] or "(imported)",
         description=inv_data.get("description"),
         source_ids=[src_id_map[s] for s in (inv_data.get("source_ids") or []) if s in src_id_map],
         root_ids=[cat_id_map[c] for c in (inv_data.get("root_ids") or []) if c in cat_id_map],
+        display_order=int(max_order) + 1,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
