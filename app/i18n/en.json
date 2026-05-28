@@ -93,6 +93,7 @@
     "investigations_clear": "Clear filter",
     "investigations_export": "Export card",
     "card_total_reviews": "reviews",
+    "auto_category_badge": "Auto category",
     "investigations_import": "Import card",
     "active_filter_label": "Currently viewing:",
     "active_filter_none": "All data (no investigation selected)",

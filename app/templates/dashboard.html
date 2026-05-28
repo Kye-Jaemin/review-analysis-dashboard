@@ -437,27 +437,37 @@ function renderInvestigations(items) {
     const isActive = arraysEq(curSrc, inv.source_ids) && arraysEq(curRoot, inv.root_ids) && curSrc.length + curRoot.length > 0;
     if (isActive) activeInvestigationId = inv.id;
 
-    // Source rows: each one shows app name + platform label clearly stacked.
+    // Source rows: app icon + app name + platform name + platform mark + count.
     const srcRows = (inv.sources || []).map(s => {
       const platform = SOURCE_TYPE_LABELS[s.type] || s.type;
-      const icon = s.icon_url
+      const appIcon = s.icon_url
         ? `<img src="${escapeHtml(s.icon_url)}" class="w-5 h-5 rounded shrink-0" alt="">`
         : `<span class="w-5 h-5 rounded bg-gray-200 shrink-0 inline-block"></span>`;
+      const platMark = platformIcon(s.type);
       const count = (s.review_count || 0).toLocaleString();
       return `
         <div class="flex items-center gap-2 text-[11px]">
-          ${icon}
+          ${appIcon}
           <div class="flex-1 min-w-0 leading-tight">
             <div class="font-medium text-gray-800 truncate" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</div>
-            <div class="text-[10px] text-gray-500">${escapeHtml(platform)}</div>
+            <div class="text-[10px] text-gray-500 flex items-center gap-1">
+              ${platMark}
+              <span>${escapeHtml(platform)}</span>
+            </div>
           </div>
           <div class="text-gray-500 tabular-nums shrink-0">${count}</div>
         </div>`;
     }).join('');
 
-    const catChips = (inv.roots || []).map(c =>
-      `<span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[11px]">${escapeHtml(c.name)}</span>`
-    ).join(' ');
+    // Manual root chips, or a single "Auto category" badge when none.
+    const catChips = (inv.roots && inv.roots.length > 0)
+      ? inv.roots.map(c =>
+          `<span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[11px]">${escapeHtml(c.name)}</span>`
+        ).join(' ')
+      : `<span class="inline-flex items-center gap-1 bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded text-[11px]">
+           <span class="inline-block w-1.5 h-1.5 rounded-full bg-violet-400"></span>
+           {{ t('dashboard.auto_category_badge') }}
+         </span>`;
 
     const date = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
     const totalReviews = (inv.review_count || 0).toLocaleString();
@@ -485,7 +495,7 @@ function renderInvestigations(items) {
         </div>
 
         <div class="flex flex-wrap gap-1">
-          ${catChips || `<span class="text-[11px] text-gray-400">— no categories —</span>`}
+          ${catChips}
         </div>
 
         <div class="flex justify-end items-center gap-3 mt-auto">
@@ -511,7 +521,15 @@ function renderInvestigations(items) {
 async function applyInvestigation(id) {
   const inv = _lastInvestigations.find(x => x.id === id);
   if (!inv) return;
-  // Replace selected sets atomically.
+  // Briefly pulse the clicked card so the user gets feedback before the
+  // dashboard re-paints with the new scope.
+  const clicked = document.querySelector(`[data-inv-id="${id}"]`);
+  if (clicked) {
+    clicked.classList.remove('apply-pulse'); void clicked.offsetWidth;
+    clicked.classList.add('apply-pulse');
+    setTimeout(() => clicked.classList.remove('apply-pulse'), 700);
+  }
+
   selectedSources.clear();
   (inv.source_ids || []).forEach(s => selectedSources.add(s));
   selectedRoots.clear();
@@ -596,18 +614,27 @@ async function loadStats() {
   const res = await fetch('/api/stats' + (qs ? '?' + qs : ''));
   const data = await res.json();
   // Animated counters where it makes sense.
+  function popReplay(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('number-pop'); void el.offsetWidth; el.classList.add('number-pop');
+  }
   animateCount(document.getElementById('card-total'), data.total);
+  popReplay('card-total');
   if (data.avg_sentiment != null) {
     animateCount(document.getElementById('card-avg-sent'), data.avg_sentiment, { formatter: v => v.toFixed(2) });
+    popReplay('card-avg-sent');
   } else {
     document.getElementById('card-avg-sent').textContent = '—';
   }
   if (data.avg_rating != null) {
     animateCount(document.getElementById('card-avg-rating'), data.avg_rating, { formatter: v => v.toFixed(2) + ' ★' });
+    popReplay('card-avg-rating');
   } else {
     document.getElementById('card-avg-rating').textContent = '—';
   }
   document.getElementById('card-last').textContent = data.last_collected ? data.last_collected.slice(0,16).replace('T',' ') : '—';
+  popReplay('card-last');
 
   renderSentiment(data);
   renderSource(data);
@@ -626,6 +653,35 @@ const AUTO_CAT_COLORS = [
   '#ec4899', '#0ea5e9', '#a855f7', '#f97316', '#14b8a6',
   '#84cc16', '#22d3ee',
 ];
+
+// Inline SVG platform marks — recognizable, brand-coloured, no external assets.
+const PLATFORM_ICON = {
+  google_play: `<svg viewBox="0 0 24 24" class="platform-icon w-4 h-4 inline-block" aria-label="Google Play">
+    <path d="M3 2.5v19c0 .5.3 1 .7 1.3l9.5-10L3.7 1.2c-.4.3-.7.8-.7 1.3z" fill="#34A853"/>
+    <path d="M3.7 1.2L13.2 11.3v1.4L3.7 22.8c-.4-.3-.7-.8-.7-1.3v-19c0-.5.3-1 .7-1.3z" fill="#4285F4"/>
+    <path d="M16.4 12.5l-3.2-3.2L4.5 1.2c.3-.1.6 0 .9.2L18.1 9c.7.4.7 1.5 0 1.9l-1.7 1.6z" fill="#FBBC04"/>
+    <path d="M13.2 9.3l3.2 3.2L18.1 15c.7-.4.7-1.5 0-1.9l-1.7-1.6-3.2-3.2L4.5 22.6c.3.1.6 0 .9-.2L13.2 15v-5.7z" fill="#EA4335"/>
+  </svg>`,
+  app_store: `<svg viewBox="0 0 24 24" class="platform-icon w-4 h-4 inline-block" aria-label="App Store">
+    <circle cx="12" cy="12" r="11" fill="#000"/>
+    <path d="M14.5 7.8c.5-.6.8-1.4.7-2.2-.7.1-1.5.5-2 1.1-.4.5-.8 1.3-.7 2.1.8.1 1.5-.4 2-1zm.7 1.2c-1.1-.1-2 .6-2.5.6-.5 0-1.3-.6-2.2-.6-1.1 0-2.2.7-2.7 1.7-1.2 2 0 5 1.2 6.6.6.8 1.2 1.7 2.1 1.7.8 0 1.2-.5 2.2-.5s1.3.5 2.2.5c.9 0 1.5-.8 2.1-1.7.6-.9.9-1.8.9-1.8s-1.8-.7-1.8-2.7c0-1.7 1.4-2.5 1.4-2.5-.8-1.1-2-1.3-2.4-1.3z" fill="white"/>
+  </svg>`,
+  reddit: `<svg viewBox="0 0 24 24" class="platform-icon w-4 h-4 inline-block" aria-label="Reddit">
+    <circle cx="12" cy="12" r="11" fill="#FF4500"/>
+    <circle cx="18.5" cy="6.5" r="1.5" fill="white"/>
+    <path d="M12 9V5l3.5-1.2" stroke="white" stroke-width="0.9" fill="none" stroke-linecap="round"/>
+    <ellipse cx="12" cy="13.5" rx="7" ry="5" fill="white"/>
+    <circle cx="9" cy="13" r="1.2" fill="#FF4500"/>
+    <circle cx="15" cy="13" r="1.2" fill="#FF4500"/>
+    <path d="M9 16c1 .8 2 1 3 1s2-.2 3-1" stroke="#FF4500" stroke-width="0.8" fill="none" stroke-linecap="round"/>
+  </svg>`,
+  web: `<svg viewBox="0 0 24 24" class="platform-icon w-4 h-4 inline-block" aria-label="Web">
+    <circle cx="12" cy="12" r="10" fill="none" stroke="#6B7280" stroke-width="1.5"/>
+    <ellipse cx="12" cy="12" rx="4" ry="10" fill="none" stroke="#6B7280" stroke-width="1.2"/>
+    <line x1="2" y1="12" x2="22" y2="12" stroke="#6B7280" stroke-width="1.2"/>
+  </svg>`,
+};
+function platformIcon(type) { return PLATFORM_ICON[type] || PLATFORM_ICON.web; }
 
 function setManualPanelsVisible(visible) {
   document.getElementById('sentiment-by-root-panel').classList.toggle('hidden', !visible);
@@ -1715,7 +1771,7 @@ async function generateThemes(force) {
   document.getElementById('themes-delete-btn').classList.add('hidden');
   document.getElementById('themes-saved-select').value = '';
 
-  statusEl.innerHTML = '<span class="pulse-soft">{{ t("common.loading") }}</span>';
+  statusEl.innerHTML = `<span class="inline-flex items-center gap-1.5 text-blue-600"><span class="dot-loader"><span></span><span></span><span></span></span><span>{{ t("common.loading") }}</span></span>`;
   // Keep the skeleton visible if one is already there (set by loadOrGenerate),
   // otherwise drop one in.
   if (!container.querySelector('.skeleton')) {
@@ -1833,7 +1889,7 @@ async function loadOrGenerateCurrentScope() {
   const acList = _isAutoMode ? [..._selectedAutoCats] : [];
   const statusEl = document.getElementById('themes-status');
   const container = document.getElementById('themes-mindmap');
-  statusEl.innerHTML = '<span class="pulse-soft">{{ t("common.loading") }}</span>';
+  statusEl.innerHTML = `<span class="inline-flex items-center gap-1.5 text-blue-600"><span class="dot-loader"><span></span><span></span><span></span></span><span>{{ t("common.loading") }}</span></span>`;
   // Skeleton shimmer fills the mindmap area while we resolve the cache or wait
   // for the LLM, so the layout doesn't jump.
   container.style.height = '520px';
