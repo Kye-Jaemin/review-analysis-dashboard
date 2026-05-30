@@ -629,11 +629,27 @@ function renderInvestigations(items) {
   const curSrc = [...selectedSources];
   const curRoot = [...selectedRoots];
 
-  // Reset active id; the loop below sets it if a card matches the current filter.
+  // Active-card resolution:
+  //  - If applyInvestigation already set activeInvestigationId explicitly
+  //    (user clicked a specific card), that id wins. This matters when two
+  //    cards share the same (source_ids, root_ids) — e.g. duplicate manual
+  //    cards over the same app/source — because the filter-match below
+  //    would otherwise flag BOTH cards as active and let the second one
+  //    silently win, breaking the first card's auto-categories / theme
+  //    snapshots / mind-map saves on the dashboard.
+  //  - On a fresh page load (no explicit click yet) fall back to
+  //    filter-matching so a bookmarked URL with ?source_ids=... still
+  //    auto-activates the matching card.
+  const explicitActive = activeInvestigationId;
   activeInvestigationId = null;
 
   grid.innerHTML = items.map(inv => {
-    const isActive = arraysEq(curSrc, inv.source_ids) && arraysEq(curRoot, inv.root_ids) && curSrc.length + curRoot.length > 0;
+    let isActive;
+    if (explicitActive != null) {
+      isActive = (inv.id === explicitActive);
+    } else {
+      isActive = arraysEq(curSrc, inv.source_ids) && arraysEq(curRoot, inv.root_ids) && curSrc.length + curRoot.length > 0;
+    }
     if (isActive) activeInvestigationId = inv.id;
 
     // Source rows: app icon + app name + platform name + platform mark + count.
