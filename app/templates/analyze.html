@@ -271,6 +271,42 @@
   const countEl = document.getElementById('analyze-count');
   let debounce;
 
+  // ----- Prefill from URL params -----
+  // Dashboard empty-state CTAs (and any deep link) land here with the
+  // intended source_ids / root_ids / mode / classification_mode encoded
+  // in the query string. We tick the matching checkboxes and select the
+  // right options BEFORE anything else fires, so the count card, the
+  // auto-label, and the mode-driven UI sync render the user's intent
+  // exactly. Anything missing from the URL is left alone (uses the
+  // form's defaults).
+  (function prefillFromQuery() {
+    try {
+      const qs = new URLSearchParams(window.location.search);
+      const srcSet = new Set(qs.getAll('source_ids'));
+      if (srcSet.size) {
+        form.querySelectorAll('input[name="source_ids"]').forEach(cb => {
+          cb.checked = srcSet.has(cb.value);
+        });
+      }
+      const rootSet = new Set(qs.getAll('root_ids'));
+      if (rootSet.size) {
+        form.querySelectorAll('input[name="root_ids"]').forEach(cb => {
+          cb.checked = rootSet.has(cb.value);
+        });
+      }
+      const m = qs.get('mode');
+      if (m) {
+        const sel = form.querySelector('[name="mode"]');
+        if (sel) sel.value = m;
+      }
+      const cm = qs.get('classification_mode');
+      if (cm === 'manual' || cm === 'auto') {
+        const radio = form.querySelector(`input[name="classification_mode"][value="${cm}"]`);
+        if (radio) radio.checked = true;
+      }
+    } catch (_) {}
+  })();
+
   function updateCount() {
     clearTimeout(debounce);
     debounce = setTimeout(async () => {
