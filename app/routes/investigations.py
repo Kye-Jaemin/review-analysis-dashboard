@@ -93,10 +93,11 @@ class InvestigationPatch(BaseModel):
 
 @router.get("/api/investigations")
 async def list_investigations(session: AsyncSession = Depends(get_session)):
-    # display_order is the primary sort key (user-controlled via drag).
-    # updated_at desc is the stable tiebreaker so two rows with the same
-    # display_order — e.g. before backfill or on a fresh DB — still come
-    # back deterministically.
+    # Pull rows in a stable base order. The final ordering is computed in
+    # Python below because the grouping key depends on the related Source
+    # rows (display_name / label) — there's no single SQL column we can
+    # ORDER BY that produces vendor-grouped + auto-first + drag-sticky
+    # output cleanly. display_order remains the within-group tiebreaker.
     rows = (
         await session.execute(
             select(Investigation).order_by(
@@ -154,10 +155,57 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
                 "sources": src_items,
                 "roots": cat_items,
                 "review_count": total_reviews,
+                "display_order": inv.display_order or 0,
                 "created_at": inv.created_at.isoformat() if inv.created_at else None,
                 "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
             }
         )
+
+    # ---- Final ordering: group by vendor, auto-first inside each group --
+    # "Vendor" here means the app/service the card is investigating.
+    # Multiple Source rows may exist for the same app across stores
+    # (Google Play MyFitnessPal, App Store MyFitnessPal, Reddit MFP), so
+    # we group on a signature derived from each source's `display_name`
+    # (the human app title from the store API), falling back to `label`
+    # when display_name is empty.
+    #
+    # Sort key tuple per card:
+    #   (vendor_signature, vendor_first_seen_index, is_manual, display_order)
+    #
+    # - vendor_signature pulls same-app cards together
+    # - vendor_first_seen_index keeps vendors in the order their *first*
+    #   card was originally drag-sorted, so a vendor block doesn't jump
+    #   when a new card lands in it
+    # - is_manual: 0 for auto (root_ids empty) -> shows first, 1 for
+    #   manual -> shows after
+    # - display_order: user's drag order within the (vendor, type) group
+    def _vendor_sig(item: dict) -> str:
+        names = []
+        for s in item.get("sources") or []:
+            n = (s.get("display_name") or s.get("label") or "").strip().lower()
+            if n:
+                names.append(n)
+        names.sort()
+        return "|".join(names) or "(no-sources)"
+
+    vendor_first_seen: dict[str, int] = {}
+    for idx, item in enumerate(out):
+        sig = _vendor_sig(item)
+        if sig not in vendor_first_seen:
+            vendor_first_seen[sig] = idx
+
+    def _sort_key(item: dict):
+        sig = _vendor_sig(item)
+        is_manual = 1 if (item.get("root_ids") or []) else 0
+        return (
+            vendor_first_seen.get(sig, 10**9),
+            sig,
+            is_manual,
+            item.get("display_order") or 0,
+            item.get("id") or 0,
+        )
+
+    out.sort(key=_sort_key)
     return {"investigations": out}
 
 

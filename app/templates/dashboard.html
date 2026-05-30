@@ -998,11 +998,21 @@ function renderAutoCatsDoughnut() {
   if (!_lastAutoCatsData) return;
   const cats = _lastAutoCatsData.categories || [];
 
-  const labels = cats.map(c => c.name);
-  const values = cats.map(bucketTotalFor);
-  const colors = cats.map((_, i) => AUTO_CAT_COLORS[i % AUTO_CAT_COLORS.length]);
+  // Sort by current bucket total descending so the legend reads
+  // "biggest topic first". Colour is assigned AFTER the sort so the
+  // largest slice always gets the first palette colour — keeps the
+  // chart visually coherent even when re-running flips the rank order.
+  const ranked = cats
+    .map(c => ({ c, total: bucketTotalFor(c) }))
+    .sort((a, b) => b.total - a.total);
 
-  // Include the "Other" slice when it has any reviews so the doughnut is honest.
+  const labels = ranked.map(r => r.c.name);
+  const values = ranked.map(r => r.total);
+  const colors = ranked.map((_, i) => AUTO_CAT_COLORS[i % AUTO_CAT_COLORS.length]);
+
+  // Include the "Other" slice when it has any reviews so the doughnut is
+  // honest. "Other" is pinned to the end of the legend regardless of size
+  // because it represents the residual bucket, not a real category.
   const otherTotal = otherBucketTotal();
   if (otherTotal > 0) {
     labels.push('{{ t("dashboard.auto_cats_other_name") }}');
@@ -1085,7 +1095,19 @@ function renderThemesAutoCatChips() {
 function renderAutoCatsGrid() {
   const grid = document.getElementById('auto-cats-grid');
   if (!_lastAutoCatsData) { grid.innerHTML = ''; return; }
-  const cats = _lastAutoCatsData.categories || [];
+  // Sort biggest first so the tile grid reads in the same order as the
+  // doughnut + side legend (rank 1 → rank 10). "Other" is appended at
+  // the end below.
+  const cats = [...(_lastAutoCatsData.categories || [])]
+    .sort((a, b) => {
+      const at = (_autoCatsTier === 'all')
+        ? (a.review_count || 0)
+        : ((a.by_tier || {})[_autoCatsTier] || {}).count || 0;
+      const bt = (_autoCatsTier === 'all')
+        ? (b.review_count || 0)
+        : ((b.by_tier || {})[_autoCatsTier] || {}).count || 0;
+      return bt - at;
+    });
 
   function bucket(c) {
     if (_autoCatsTier === 'all') {
@@ -1503,7 +1525,10 @@ function renderSentiment(data) {
 }
 
 function renderSource(data) {
-  const totalAcross = data.by_source.reduce((sum, s) => sum + (s.count || 0), 0);
+  // Sort biggest source first so the legend matches a "where does most
+  // of my data come from" reading order.
+  const sources = [...(data.by_source || [])].sort((a, b) => (b.count || 0) - (a.count || 0));
+  const totalAcross = sources.reduce((sum, s) => sum + (s.count || 0), 0);
   document.getElementById('source-total').textContent =
     `{{ t('dashboard.total_label') }}: ${totalAcross.toLocaleString()}`;
 
@@ -1511,10 +1536,10 @@ function renderSource(data) {
   charts.source = new Chart(document.getElementById('chart-source'), {
     type: 'doughnut',
     data: {
-      labels: data.by_source.map(s => `${s.label} · ${SOURCE_TYPE_LABELS[s.type] || s.type}`),
+      labels: sources.map(s => `${s.label} · ${SOURCE_TYPE_LABELS[s.type] || s.type}`),
       datasets: [{
-        data: data.by_source.map(s => s.count),
-        backgroundColor: data.by_source.map((_, i) => SOURCE_COLORS[i % SOURCE_COLORS.length]),
+        data: sources.map(s => s.count),
+        backgroundColor: sources.map((_, i) => SOURCE_COLORS[i % SOURCE_COLORS.length]),
       }],
     },
     options: {
@@ -1547,7 +1572,7 @@ function renderSource(data) {
   // type doesn't match a known platform.
   document.getElementById('source-table').innerHTML = `
     <div class="space-y-1">
-      ${data.by_source.map((s, i) => {
+      ${sources.map((s, i) => {
         const ratingTxt = (s.type === 'google_play' || s.type === 'app_store') && s.avg_rating != null
           ? ` · ${s.avg_rating.toFixed(2)}★` : '';
         const icon = platformIcon(s.type);
@@ -1565,14 +1590,16 @@ function renderSource(data) {
 }
 
 function renderCategory(data) {
-  const categoryTotal = data.by_category.reduce((sum, c) => sum + (c.total || 0), 0);
+  // Sort biggest leaf category first so the legend reads top-down by
+  // volume; the doughnut slice order follows.
+  const cats = [...(data.by_category || [])].sort((a, b) => (b.total || 0) - (a.total || 0));
+  const categoryTotal = cats.reduce((sum, c) => sum + (c.total || 0), 0);
   document.getElementById('category-total').textContent =
     `{{ t('dashboard.total_label') }}: ${categoryTotal.toLocaleString()}`;
 
   destroyChart('category');
   // Doughnut where each slice = a leaf-category's total. The 5-band
   // sentiment breakdown stays accessible via the table below the chart.
-  const cats = data.by_category || [];
   charts.category = new Chart(document.getElementById('chart-category'), {
     type: 'doughnut',
     data: {
@@ -1664,7 +1691,7 @@ function renderCategory(data) {
         </tr>
       </thead>
       <tbody>
-        ${data.by_category.map(c => `
+        ${cats.map(c => `
           <tr class="border-t border-gray-100">
             <td class="py-1">${escapeHtml(c.path || '—')}</td>
             ${sentBandCells(c.sentiments, c.total || 0)}

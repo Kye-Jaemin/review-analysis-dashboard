@@ -68,6 +68,22 @@ For each review, assign:
   return null for category_path instead of forcing a wrong assignment.
 - sentiment: exactly one of [very_positive, positive, neutral, negative, very_negative]
 - sentiment_score: integer 1..5 (1=very_negative, 5=very_positive). Must be consistent with sentiment.
+
+  Sentiment intensity calibration (IMPORTANT):
+  * Reserve `very_positive` / `very_negative` for reviews with EXPLICIT
+    strong language: superlatives ("absolutely amazing", "best app I've
+    ever used", "completely useless", "worst experience of my life"),
+    multiple intensifiers, or extended emotional content.
+  * Short generic praise like "great", "awesome", "good", "love it",
+    "👍", "nice app" — even with exclamation marks — is plain
+    `positive`, NOT `very_positive`.
+  * Short generic complaint like "bad", "sucks", "don't like it",
+    "meh", "disappointing" is plain `negative`, NOT `very_negative`.
+  * When the review is too short to convey real intensity (under ~6
+    words and no superlatives), default to plain positive / negative
+    / neutral.
+  * Star rating is a hint, not a rule: a 5★ review saying only "good"
+    is still plain `positive`.
 - confidence: float in [0, 1]. Reflect how well category_path fits the review:
   ~0.9+ when an obvious match, ~0.6–0.8 reasonable fit, ~0.3–0.5 weak/forced,
   ≤0.3 when you basically had to guess. The server may drop low-confidence
