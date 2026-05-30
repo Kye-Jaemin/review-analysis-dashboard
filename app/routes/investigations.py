@@ -121,11 +121,28 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
     ).all()
     src_review_count: dict[int, int] = {sid: int(c) for sid, c in src_count_rows}
 
+    # Some Investigation rows out there carry stale source_ids / root_ids
+    # pointing at sources or categories that have since been deleted — the
+    # JSON columns aren't FKs so cascade-delete doesn't touch them. The
+    # symptom is the dashboard showing review_count = 0 for a card that
+    # actually predates a source rename / re-collect cycle. Self-heal on
+    # read: filter out dead ids and persist back so the row is clean
+    # going forward.
+    dirty = False
     out = []
     for inv in rows:
+        live_src_ids = [sid for sid in (inv.source_ids or []) if sid in sources]
+        live_root_ids = [cid for cid in (inv.root_ids or []) if cid in cats]
+        if live_src_ids != (inv.source_ids or []):
+            inv.source_ids = live_src_ids
+            dirty = True
+        if live_root_ids != (inv.root_ids or []):
+            inv.root_ids = live_root_ids
+            dirty = True
+
         src_items = []
         total_reviews = 0
-        for sid in inv.source_ids or []:
+        for sid in live_src_ids:
             s = sources.get(sid)
             if s:
                 cnt = src_review_count.get(s.id, 0)
@@ -141,7 +158,7 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
                     }
                 )
         cat_items = []
-        for cid in inv.root_ids or []:
+        for cid in live_root_ids:
             c = cats.get(cid)
             if c:
                 cat_items.append({"id": c.id, "name": c.name})
@@ -206,6 +223,14 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
         )
 
     out.sort(key=_sort_key)
+    # Persist any opportunistic cleanups we made above (orphaned source_ids
+    # / root_ids stripped). One commit at the end keeps this off the
+    # request hot path for clean databases.
+    if dirty:
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
     return {"investigations": out}
 
 

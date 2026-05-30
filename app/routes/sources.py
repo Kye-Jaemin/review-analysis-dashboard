@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import AsyncSessionLocal, get_session
 from app.jobs import registry
-from app.models import CollectionJob, CollectionStatus, Review, Source, SourceType
+from app.models import CollectionJob, CollectionStatus, Investigation, Review, Source, SourceType
 from app.services.collectors import COLLECTORS, get_collector
 from app.templating import render
 
@@ -89,10 +89,25 @@ async def create_source(payload: SourceIn, session: AsyncSession = Depends(get_s
     return {"id": src.id}
 
 
+async def _prune_source_from_investigations(session: AsyncSession, src_id: int) -> None:
+    """Investigation.source_ids is a JSON int array, not a FK, so deleting
+    a Source doesn't automatically clean up references. Without this any
+    card that pointed at the deleted source shows review_count = 0 on the
+    dashboard, because the list endpoint can't resolve the dead id back
+    to a Source row and silently drops it. Scrub references here before
+    the Source row goes away."""
+    invs = (await session.execute(select(Investigation))).scalars().all()
+    for inv in invs:
+        ids = list(inv.source_ids or [])
+        if src_id in ids:
+            inv.source_ids = [x for x in ids if x != src_id]
+
+
 @router.post("/sources/{src_id}/delete")
 async def delete_source_form(src_id: int, session: AsyncSession = Depends(get_session)):
     src = await session.get(Source, src_id)
     if src:
+        await _prune_source_from_investigations(session, src_id)
         await session.delete(src)
         await session.commit()
     return RedirectResponse(url="/sources", status_code=303)
@@ -103,6 +118,7 @@ async def delete_source(src_id: int, session: AsyncSession = Depends(get_session
     src = await session.get(Source, src_id)
     if not src:
         raise HTTPException(404)
+    await _prune_source_from_investigations(session, src_id)
     await session.delete(src)
     await session.commit()
     return {"ok": True}
