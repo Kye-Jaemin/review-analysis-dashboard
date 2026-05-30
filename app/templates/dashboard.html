@@ -1410,6 +1410,52 @@ async function setAutoCatModalSent(sent) {
   await renderAutoCatModal();
 }
 
+// Empty state for the manual category panels — built once and reused by
+// renderSentiment and renderCategory. Two distinct messages:
+//   - scope has reviews → the card was set up with a manual root but its
+//     analyses are auto-only, so no Analysis.category_id lands in the
+//     selected subtree. Point the user at the analyze page so they can
+//     re-run in manual mode.
+//   - scope is genuinely empty → just the standard "no data" message.
+// The CTA pre-fills sources / roots through the URL so /analyze opens
+// already scoped to this card.
+function manualEmptyStateHtml(data) {
+  const total = data.total || 0;
+  const analyzed = data.analyzed_total || 0;
+  if (!total) {
+    return `<div class="text-gray-400 text-sm py-4 text-center">{{ t('common.no_data') }}</div>`;
+  }
+  // Build a /analyze deep link with this card's scope.
+  const params = new URLSearchParams();
+  (data.selected_sources || []).forEach(id => params.append('source_ids', id));
+  (data.selected_roots || []).forEach(id => params.append('root_ids', id));
+  params.set('mode', 'unanalyzed');
+  params.set('classification_mode', 'manual');
+  const href = '/analyze?' + params.toString();
+  return `
+    <div class="border border-amber-200 bg-amber-50 rounded p-4 my-2">
+      <div class="flex items-start gap-3">
+        <div class="text-amber-600 text-xl leading-none shrink-0">!</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-amber-900 mb-1">
+            수동 분류 결과가 없습니다
+          </div>
+          <div class="text-xs text-amber-800 leading-relaxed mb-3">
+            이 카드의 ${total.toLocaleString()}건 리뷰 중 수동 카테고리 트리로 분류된 항목이 없습니다.
+            분석은 ${analyzed.toLocaleString()}건 수행됐지만 자동 모드로 실행됐을 가능성이 큽니다.
+            아래 버튼으로 분석 페이지에서 <b>수동 모드</b>로 다시 실행하면
+            이 패널이 채워집니다.
+          </div>
+          <a href="${href}"
+             class="inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-3 py-1.5 rounded">
+            <span>분석 페이지에서 수동 모드로 실행</span>
+            <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderSentiment(data) {
   const analyzed = data.analyzed_total || 0;
   document.getElementById('sentiment-total').textContent =
@@ -1422,8 +1468,11 @@ function renderSentiment(data) {
   if (roots.length === 0) {
     document.getElementById('chart-sentiment').style.display = 'none';
     if (sentimentLegend) sentimentLegend.innerHTML = '';
-    document.getElementById('sentiment-table').innerHTML =
-      `<div class="text-gray-400 text-sm py-4 text-center">{{ t('common.no_data') }}</div>`;
+    // Actionable empty state: when scope has reviews but none are
+    // classified under the manual category tree, point the user at the
+    // analyze page so they can run manual mode on this card. Without
+    // this they only see "데이터 없음" and have no idea why.
+    document.getElementById('sentiment-table').innerHTML = manualEmptyStateHtml(data);
     return;
   }
   document.getElementById('chart-sentiment').style.display = '';
@@ -1598,6 +1647,18 @@ function renderCategory(data) {
     `{{ t('dashboard.total_label') }}: ${categoryTotal.toLocaleString()}`;
 
   destroyChart('category');
+
+  // Same actionable empty state as renderSentiment — when the scope has
+  // reviews but none are categorized under the manual tree, show the
+  // "run manual analysis" CTA instead of the silent doughnut.
+  if (cats.length === 0) {
+    document.getElementById('chart-category').style.display = 'none';
+    const catLegend = document.getElementById('category-legend');
+    if (catLegend) catLegend.innerHTML = '';
+    document.getElementById('category-table').innerHTML = manualEmptyStateHtml(data);
+    return;
+  }
+  document.getElementById('chart-category').style.display = '';
   // Doughnut where each slice = a leaf-category's total. The 5-band
   // sentiment breakdown stays accessible via the table below the chart.
   charts.category = new Chart(document.getElementById('chart-category'), {
