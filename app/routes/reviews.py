@@ -228,11 +228,18 @@ async def list_reviews(
 async def api_stats(
     source_ids: List[str] = Query(default_factory=list),
     root_ids: List[str] = Query(default_factory=list),
+    investigation_id: Optional[str] = Query(None),
     session: AsyncSession = Depends(get_session),
 ):
     s_ids = [v for v in (_parse_int(s) for s in source_ids) if v is not None]
     r_ids = [v for v in (_parse_int(s) for s in root_ids) if v is not None]
-    return await stats_summary(session, source_ids=s_ids or None, root_ids=r_ids or None)
+    inv_id = _parse_int(investigation_id)
+    return await stats_summary(
+        session,
+        source_ids=s_ids or None,
+        root_ids=r_ids or None,
+        investigation_id=inv_id,
+    )
 
 
 @router.get("/api/stats/trend")

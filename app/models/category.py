@@ -2,10 +2,45 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+
+
+# Junction: a review's manual classification is per-card. Two manual
+# investigation cards over the same source set used to fight over
+# Analysis.category_id (single FK) — running manual analysis on the
+# second card wiped the first card's classification. Storing the tag
+# scoped to (review_id, investigation_id) lets every card keep its own
+# breakdown intact, just like ReviewAutoCategoryLink does for auto cats.
+# (review_id, investigation_id) is unique: a card classifies each review
+# exactly once, into one leaf of its root subtree.
+ReviewManualCategoryLink = Table(
+    "review_manual_categories",
+    Base.metadata,
+    Column(
+        "review_id",
+        Integer,
+        ForeignKey("reviews.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    ),
+    Column(
+        "investigation_id",
+        Integer,
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    ),
+    Column(
+        "category_id",
+        Integer,
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+)
 
 
 class Category(Base):

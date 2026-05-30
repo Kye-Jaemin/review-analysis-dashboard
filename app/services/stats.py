@@ -7,7 +7,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Analysis, Category, Review, Source
+from app.models import Analysis, Category, ReviewManualCategoryLink, Review, Source
 
 SENTIMENT_ORDER = ["very_negative", "negative", "neutral", "positive", "very_positive"]
 
@@ -77,6 +77,7 @@ async def summary(
     session: AsyncSession,
     source_ids: Optional[Sequence[int]] = None,
     root_ids: Optional[Sequence[int]] = None,
+    investigation_id: Optional[int] = None,
 ) -> dict:
     src_ids = _normalize_ids(source_ids)
     selected_roots = _normalize_ids(root_ids)
@@ -190,13 +191,36 @@ async def summary(
             cid = parent_by_id[cid]
         return cid
 
-    by_cat_stmt = (
-        select(Category.id, Category.path, Analysis.sentiment, func.count(Analysis.id))
-        .join(Analysis, Analysis.category_id == Category.id)
-        .group_by(Category.id, Category.path, Analysis.sentiment)
-        .order_by(Category.path)
-    )
-    by_cat_stmt = _apply_analysis_filter(by_cat_stmt, src_ids, cat_filter)
+    # Manual category breakdown:
+    #   - If the caller passes `investigation_id`, read tags from the
+    #     review_manual_categories junction scoped to that card. Two cards
+    #     over the same source set keep their own classifications without
+    #     stepping on each other.
+    #   - Else fall back to the legacy Analysis.category_id read path so
+    #     callers that pre-date the junction (or skip it) still see numbers.
+    if investigation_id is not None:
+        link = ReviewManualCategoryLink
+        by_cat_stmt = (
+            select(Category.id, Category.path, Analysis.sentiment, func.count(Analysis.id))
+            .select_from(link)
+            .join(Category, Category.id == link.c.category_id)
+            .join(Analysis, Analysis.review_id == link.c.review_id)
+            .where(link.c.investigation_id == investigation_id)
+            .group_by(Category.id, Category.path, Analysis.sentiment)
+            .order_by(Category.path)
+        )
+        if src_ids:
+            by_cat_stmt = by_cat_stmt.join(Review, Review.id == link.c.review_id).where(
+                Review.source_id.in_(src_ids)
+            )
+    else:
+        by_cat_stmt = (
+            select(Category.id, Category.path, Analysis.sentiment, func.count(Analysis.id))
+            .join(Analysis, Analysis.category_id == Category.id)
+            .group_by(Category.id, Category.path, Analysis.sentiment)
+            .order_by(Category.path)
+        )
+        by_cat_stmt = _apply_analysis_filter(by_cat_stmt, src_ids, cat_filter)
     cat_map: dict[int, dict] = {}
     for cid, path, sent, c in (await session.execute(by_cat_stmt)).all():
         node = cat_map.setdefault(
@@ -208,13 +232,28 @@ async def summary(
             node["total"] += c
     by_category = sorted(cat_map.values(), key=lambda x: x["path"])
 
-    by_root_stmt = (
-        select(Analysis.category_id, Analysis.sentiment, func.count(Analysis.id))
-        .where(Analysis.category_id.is_not(None))
-        .where(Analysis.sentiment.is_not(None))
-        .group_by(Analysis.category_id, Analysis.sentiment)
-    )
-    by_root_stmt = _apply_analysis_filter(by_root_stmt, src_ids, cat_filter)
+    if investigation_id is not None:
+        link = ReviewManualCategoryLink
+        by_root_stmt = (
+            select(link.c.category_id, Analysis.sentiment, func.count(Analysis.id))
+            .select_from(link)
+            .join(Analysis, Analysis.review_id == link.c.review_id)
+            .where(link.c.investigation_id == investigation_id)
+            .where(Analysis.sentiment.is_not(None))
+            .group_by(link.c.category_id, Analysis.sentiment)
+        )
+        if src_ids:
+            by_root_stmt = by_root_stmt.join(Review, Review.id == link.c.review_id).where(
+                Review.source_id.in_(src_ids)
+            )
+    else:
+        by_root_stmt = (
+            select(Analysis.category_id, Analysis.sentiment, func.count(Analysis.id))
+            .where(Analysis.category_id.is_not(None))
+            .where(Analysis.sentiment.is_not(None))
+            .group_by(Analysis.category_id, Analysis.sentiment)
+        )
+        by_root_stmt = _apply_analysis_filter(by_root_stmt, src_ids, cat_filter)
     root_sent: dict[int, dict] = {}
     for cat_id, sent, c in (await session.execute(by_root_stmt)).all():
         root_id = find_root(cat_id)

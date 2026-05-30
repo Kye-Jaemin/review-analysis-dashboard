@@ -152,6 +152,20 @@ async def start_analysis(
             tier_flag,
         )
     else:
+        # Manual mode needs an Investigation row too so the per-card
+        # junction (review_manual_categories) has somewhere to attach.
+        # Otherwise two manual runs over the same source set would
+        # fight over Analysis.category_id (single FK) and the first
+        # would silently lose its breakdown when the second lands.
+        if inv is None:
+            inv = Investigation(
+                label=f"Manual · {datetime.utcnow():%Y-%m-%d %H:%M}",
+                source_ids=parsed_sources,
+                root_ids=parsed_roots,
+            )
+            session.add(inv)
+            await session.commit()
+            await session.refresh(inv)
         background_tasks.add_task(
             run_analysis_job,
             job.id,
@@ -162,6 +176,7 @@ async def start_analysis(
             parsed_roots or None,
             parsed_sources or None,
             clamped_conf,
+            inv.id,
         )
 
     # Once analysis is done, auto-generate the 5 sentiment-band mind maps for

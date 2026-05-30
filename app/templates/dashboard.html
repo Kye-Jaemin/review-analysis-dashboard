@@ -529,6 +529,11 @@ function filterQuery() {
   const params = new URLSearchParams();
   selectedSources.forEach(id => params.append('source_ids', id));
   selectedRoots.forEach(id => params.append('root_ids', id));
+  // Pass the active investigation id so the stats endpoint can read
+  // manual category tags from the per-card junction. Without this two
+  // manual cards over the same source set would share Analysis.category_id
+  // and overwrite each other.
+  if (activeInvestigationId) params.append('investigation_id', activeInvestigationId);
   return params.toString();
 }
 

@@ -29,6 +29,7 @@ from app.models import (
     CollectionJob,
     Investigation,
     ReviewAutoCategoryLink,
+    ReviewManualCategoryLink,
     Review,
     Sentiment,
     Source,
@@ -110,6 +111,15 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
             )
         )
     ).all()
+    manual_links = (
+        await session.execute(
+            select(
+                ReviewManualCategoryLink.c.review_id,
+                ReviewManualCategoryLink.c.investigation_id,
+                ReviewManualCategoryLink.c.category_id,
+            )
+        )
+    ).all()
 
     payload = {
         "version": EXPORT_VERSION,
@@ -123,6 +133,10 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
         "auto_categories": [_dump(a, AUTO_CATEGORY_COLS) for a in auto_cats],
         "review_auto_categories": [
             {"review_id": rid, "auto_category_id": acid} for rid, acid in links
+        ],
+        "review_manual_categories": [
+            {"review_id": rid, "investigation_id": iid, "category_id": cid}
+            for rid, iid, cid in manual_links
         ],
     }
 
@@ -140,6 +154,7 @@ async def _wipe(session: AsyncSession) -> None:
     # ThemeSnapshot and Investigation have no FKs, can be wiped any time.
     # review_auto_categories must go before its two parents.
     await session.execute(delete(ReviewAutoCategoryLink))
+    await session.execute(delete(ReviewManualCategoryLink))
     await session.execute(delete(ThemeSnapshot))
     await session.execute(delete(AutoCategory))
     await session.execute(delete(Investigation))
@@ -344,6 +359,27 @@ async def import_workspace(
         junction_rows.append({"review_id": rid, "auto_category_id": acid})
     if junction_rows:
         await session.execute(ReviewAutoCategoryLink.insert(), junction_rows)
+        await session.flush()
+
+    # Manual category junction round-trip. Old v1 exports won't have this
+    # key; that's fine — it just means manual classification breakdowns
+    # won't survive the round trip for those exports. New exports do.
+    manual_junction: list[dict] = []
+    seen_mp: set[tuple[int, int]] = set()
+    for row in data.get("review_manual_categories") or []:
+        try:
+            rid = int(row["review_id"])
+            iid = int(row["investigation_id"])
+            cid = int(row["category_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        key = (rid, iid)
+        if key in seen_mp:
+            continue
+        seen_mp.add(key)
+        manual_junction.append({"review_id": rid, "investigation_id": iid, "category_id": cid})
+    if manual_junction:
+        await session.execute(ReviewManualCategoryLink.insert(), manual_junction)
         await session.flush()
 
     # Investigations have to land BEFORE theme_snapshots because the latter

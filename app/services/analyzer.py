@@ -7,14 +7,43 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.jobs import registry
-from app.models import Analysis, AnalysisJob, AnalysisStatus, Category, Review, Sentiment
+from app.models import (
+    Analysis,
+    AnalysisJob,
+    AnalysisStatus,
+    Category,
+    ReviewManualCategoryLink,
+    Review,
+    Sentiment,
+)
 from app.models.analysis import SCORE_TO_SENTIMENT, SENTIMENT_TO_SCORE
+
+
+def _manual_link_upsert(values: list[dict]):
+    """Dialect-aware ON CONFLICT DO UPDATE for the manual junction.
+    Same review_id + investigation_id pair re-runs in the same job
+    should overwrite category_id (the user just re-classified)."""
+    if not values:
+        return None
+    if settings.database_url.startswith("postgresql"):
+        stmt = pg_insert(ReviewManualCategoryLink).values(values)
+        return stmt.on_conflict_do_update(
+            index_elements=["review_id", "investigation_id"],
+            set_={"category_id": stmt.excluded.category_id},
+        )
+    stmt = sqlite_insert(ReviewManualCategoryLink).values(values)
+    return stmt.on_conflict_do_update(
+        index_elements=["review_id", "investigation_id"],
+        set_={"category_id": stmt.excluded.category_id},
+    )
 
 
 @dataclass
@@ -284,6 +313,7 @@ async def run_analysis_job(
     root_ids: list[int] | None = None,
     source_ids: list[int] | None = None,
     min_confidence: float = 0.0,
+    investigation_id: int | None = None,
 ) -> None:
     job = registry.get(job_id)
     if not job:
@@ -323,6 +353,7 @@ async def run_analysis_job(
                         rows = (await s2.execute(select(Review).where(Review.id.in_(batch_ids)))).scalars().all()
                         outs = await analyze_batch(model, summary_lang, rows, cat_rows)
                         valid_ids = {r.id for r in rows}
+                        link_rows: list[dict] = []  # (review, inv, cat) for the junction
                         for out in outs:
                             # Defensive: never try to insert against a review_id
                             # that isn't in this batch — would FK-violate.
@@ -346,6 +377,9 @@ async def run_analysis_job(
                                 cat_id_to_store = None
                             success = out.error is None and out.sentiment is not None
                             if existing:
+                                # Keep the legacy single-FK column updated so
+                                # places that still read Analysis.category_id
+                                # (workspace export, etc.) keep functioning.
                                 existing.category_id = cat_id_to_store
                                 existing.sentiment = out.sentiment
                                 existing.sentiment_score = out.sentiment_score
@@ -367,10 +401,24 @@ async def run_analysis_job(
                                     status=AnalysisStatus.succeeded if success else AnalysisStatus.failed,
                                     error=out.error,
                                 ))
+                            # Per-card link goes into the manual junction.
+                            # This is what lets two manual cards over the
+                            # same source set keep each own classification
+                            # alive — Analysis.category_id may flicker on
+                            # re-runs but the junction stays per-card.
+                            if investigation_id is not None and cat_id_to_store is not None:
+                                link_rows.append({
+                                    "review_id": out.review_id,
+                                    "investigation_id": investigation_id,
+                                    "category_id": cat_id_to_store,
+                                })
                             if success:
                                 processed += 1
                             else:
                                 failed += 1
+                        link_stmt = _manual_link_upsert(link_rows)
+                        if link_stmt is not None:
+                            await s2.execute(link_stmt)
                         await s2.commit()
                 job.processed = processed
                 job.failed_count = failed
