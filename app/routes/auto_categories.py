@@ -49,6 +49,38 @@ async def list_auto_categories(
             .order_by(AutoCategory.display_order)
         )
     ).scalars().all()
+
+    # Fallback: this investigation has no auto categories of its own (e.g.
+    # the user created a manual card via the analyze page but actually ran
+    # analysis in auto mode under a sibling investigation that shares the
+    # exact same source set). Borrow the sibling's auto categories so the
+    # dashboard isn't blank for them — the Top 10 themes are about the
+    # underlying review corpus, which is identical for both cards, so the
+    # borrowed view is honest.
+    borrowed_from: Optional[int] = None
+    if not cats and inv.source_ids:
+        sorted_self = sorted(inv.source_ids or [])
+        candidates = (
+            await session.execute(
+                select(Investigation)
+                .where(Investigation.id != investigation_id)
+            )
+        ).scalars().all()
+        for sib in candidates:
+            if sorted(sib.source_ids or []) != sorted_self:
+                continue
+            sib_cats = (
+                await session.execute(
+                    select(AutoCategory)
+                    .where(AutoCategory.investigation_id == sib.id)
+                    .order_by(AutoCategory.display_order)
+                )
+            ).scalars().all()
+            if sib_cats:
+                cats = sib_cats
+                borrowed_from = sib.id
+                break
+
     if not cats:
         return {"investigation_id": investigation_id, "categories": []}
 
@@ -214,6 +246,11 @@ async def list_auto_categories(
             "unknown": grand_total_by_tier["unknown"],
         },
         "has_tier_data": has_tier_data,
+        # When non-null, these categories came from a sibling investigation
+        # that shares the exact same source set — surfaced so the frontend
+        # can show a small "공유 카테고리" hint instead of pretending the
+        # data belongs to this card.
+        "borrowed_from_investigation_id": borrowed_from,
     }
 
 
