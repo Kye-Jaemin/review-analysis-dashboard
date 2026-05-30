@@ -107,21 +107,31 @@ async def summary(
         for sid, label, t, icon in all_sources_rows
     ]
 
+    # IMPORTANT: KPI / scope-level queries below intentionally DO NOT apply
+    # the manual category filter. The category tree is one way of *splitting*
+    # the scope (and gets its own panels: by_category, by_root_sentiment),
+    # but the scope itself is defined by the card's source_ids. Filtering
+    # the KPIs by category made the dashboard show "0 reviews" the moment
+    # the user clicked a manual card whose roots weren't manually classified
+    # — e.g. analysis was run in auto mode so Analysis.category_id is NULL
+    # for every row in scope. The investigation card itself shows
+    # review_count from source_ids only; the dashboard's "총 리뷰" should
+    # match it, not silently disagree.
     total = (
-        await session.execute(_apply_review_filter(select(func.count(Review.id)), src_ids, cat_filter))
+        await session.execute(_apply_review_filter(select(func.count(Review.id)), src_ids, None))
     ).scalar() or 0
     avg_rating = (
-        await session.execute(_apply_review_filter(select(func.avg(Review.rating)), src_ids, cat_filter))
+        await session.execute(_apply_review_filter(select(func.avg(Review.rating)), src_ids, None))
     ).scalar()
     last_collected = (
         await session.execute(
-            _apply_review_filter(select(func.max(Review.collected_at)), src_ids, cat_filter)
+            _apply_review_filter(select(func.max(Review.collected_at)), src_ids, None)
         )
     ).scalar()
 
     avg_sentiment = (
         await session.execute(
-            _apply_analysis_filter(select(func.avg(Analysis.sentiment_score)), src_ids, cat_filter)
+            _apply_analysis_filter(select(func.avg(Analysis.sentiment_score)), src_ids, None)
         )
     ).scalar()
     analyzed_total = (
@@ -129,21 +139,21 @@ async def summary(
             _apply_analysis_filter(
                 select(func.count(Analysis.id)).where(Analysis.sentiment.is_not(None)),
                 src_ids,
-                cat_filter,
+                None,
             )
         )
     ).scalar() or 0
 
     sent_dist: dict[str, int] = {s: 0 for s in SENTIMENT_ORDER}
     sent_stmt = select(Analysis.sentiment, func.count(Analysis.id)).group_by(Analysis.sentiment)
-    sent_stmt = _apply_analysis_filter(sent_stmt, src_ids, cat_filter)
+    sent_stmt = _apply_analysis_filter(sent_stmt, src_ids, None)
     for sent, c in (await session.execute(sent_stmt)).all():
         if sent is None:
             continue
         sent_dist[_enum_str(sent)] = c
 
-    # by source — Source grouped, optionally constrained by source ids,
-    # optionally also constrained to reviews with a matching Analysis.
+    # by source — Source grouped. Also scope-level (no cat_filter), for
+    # the same reason as the KPIs above.
     by_source_stmt = (
         select(
             Source.id,
@@ -160,10 +170,6 @@ async def summary(
     )
     if src_ids:
         by_source_stmt = by_source_stmt.where(Source.id.in_(src_ids))
-    if cat_filter is not None:
-        by_source_stmt = by_source_stmt.join(Analysis, Analysis.review_id == Review.id).where(
-            Analysis.category_id.in_(cat_filter)
-        )
     by_source = [
         {
             "id": sid,
@@ -225,13 +231,16 @@ async def summary(
         node["total"] += c
     by_root_sentiment = sorted(root_sent.values(), key=lambda x: x["name"])
 
+    # Recent reviews follow the scope (source_ids) only — the same reason
+    # as the KPIs above. If the user wants a category-restricted recent
+    # list they can use the Reviews page filters.
     recent_stmt = (
         select(Review)
         .options(selectinload(Review.source), selectinload(Review.analysis))
         .order_by(Review.collected_at.desc())
         .limit(10)
     )
-    recent_stmt = _apply_review_filter(recent_stmt, src_ids, cat_filter)
+    recent_stmt = _apply_review_filter(recent_stmt, src_ids, None)
     recent_rows = (await session.execute(recent_stmt)).scalars().all()
     recent = []
     for r in recent_rows:
@@ -284,14 +293,12 @@ async def trend(
     source_ids: Optional[Sequence[int]] = None,
     root_ids: Optional[Sequence[int]] = None,
 ) -> dict:
+    # Trend follows the scope (source_ids) only. Filtering the time series
+    # by manual category would zero out the chart for cards whose roots
+    # weren't manually classified (the auto-mode case), which is the same
+    # bug the summary() endpoint had. root_ids is accepted for API
+    # compatibility but intentionally ignored here.
     src_ids = _normalize_ids(source_ids)
-    selected_roots = _normalize_ids(root_ids)
-
-    cat_filter: Optional[set[int]] = None
-    if selected_roots:
-        all_cats = (await session.execute(select(Category))).scalars().all()
-        parent_by_id = {c.id: c.parent_id for c in all_cats}
-        cat_filter = _descendants_of(parent_by_id, selected_roots)
 
     stmt = (
         select(Review.posted_at, Analysis.sentiment, Analysis.sentiment_score)
@@ -300,8 +307,6 @@ async def trend(
     )
     if src_ids:
         stmt = stmt.where(Review.source_id.in_(src_ids))
-    if cat_filter is not None:
-        stmt = stmt.where(Analysis.category_id.in_(cat_filter))
     rows = (await session.execute(stmt)).all()
 
     buckets: dict[str, dict] = {}
