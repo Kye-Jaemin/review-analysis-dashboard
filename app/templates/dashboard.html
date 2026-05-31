@@ -742,9 +742,15 @@ function renderInvestigations(items) {
     const date = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
     const totalReviews = (inv.review_count || 0).toLocaleString();
     const extraCls = opts.frontOfStack ? ' is-stack-front' : '';
+    // sig can contain ':', '|', '(', etc. — anything an app name does.
+    // Stuffing it through JSON.stringify into an onclick="" attribute used
+    // to collide with the outer attribute quotes and silently break the
+    // click. Stash on a data attribute (HTML-escaped) and read it back via
+    // dataset in the handler — no quote dance, no parsing surprise.
     const stackBadge = opts.stackSize && opts.stackSize > 1 && opts.frontOfStack
       ? `<button type="button"
-                 onclick="event.stopPropagation(); toggleStack(${JSON.stringify(opts.sig)})"
+                 data-stack-sig="${escapeHtml(opts.sig)}"
+                 onclick="event.stopPropagation(); toggleStack(this.dataset.stackSig)"
                  class="stack-toggle text-[10px] bg-gray-800 text-white px-2 py-0.5 rounded-full shadow"
                  title="${opts.expanded ? '같은 업체 카드 접기' : '같은 업체 카드 모두 보기'}">
            ${opts.expanded ? '▾ 접기' : `+${opts.stackSize - 1} 더`}
