@@ -287,6 +287,26 @@
       transition: font-weight 120ms ease-out;
     }
 
+    /* --- Mind map refresh button spin ---
+       One-shot 0.6s rotation triggered by adding .is-spinning. JS removes
+       and re-adds the class so each click replays the animation. */
+    @keyframes mindmapRefreshSpin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    .mindmap-refresh-icon {
+      display: inline-block;
+      font-size: 14px;
+      line-height: 1;
+      transition: transform 160ms ease-out;
+    }
+    .mindmap-refresh-icon.is-spinning {
+      animation: mindmapRefreshSpin 0.6s cubic-bezier(.22,.61,.36,1) 1;
+    }
+    #themes-refresh-btn:hover .mindmap-refresh-icon {
+      transform: rotate(-30deg);
+    }
+
     /* --- Vendor stack visual ---
        When a vendor has >1 card and the stack is collapsed, the front card
        sits inside .stack-wrap with one or two .stack-peek divs absolutely
@@ -459,7 +479,8 @@
       .auto-cat-tile, .auto-cat-tile .auto-cat-fill,
       .investigation-card.is-dragging,
       .stack-toggle, .stack-toggle.stack-toggle-collapsed,
-      .stack-just-expanded, .stack-wrap .stack-peek {
+      .stack-just-expanded, .stack-wrap .stack-peek,
+      .mindmap-refresh-icon, .mindmap-refresh-icon.is-spinning {
         animation: none !important; transition: none !important;
       }
       .investigation-card { transform: none !important; }

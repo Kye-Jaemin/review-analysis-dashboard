@@ -156,6 +156,12 @@
               class="text-red-600 hover:underline hidden">{{ t('common.delete') }}</button>
       <button id="themes-manage-btn" type="button" onclick="openThemesManage()"
               class="text-gray-600 hover:underline">{{ t('dashboard.themes_manage') }}</button>
+      <button id="themes-refresh-btn" type="button" onclick="refreshMindmap()"
+              title="활성 카드 기준으로 마인드맵 다시 불러오기 (LLM 호출 없음, 캐시 우선)"
+              class="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1 rounded text-xs font-medium border border-blue-200">
+        <span class="mindmap-refresh-icon" aria-hidden="true">⟳</span>
+        <span>새로고침</span>
+      </button>
       <button id="themes-regen-btn" onclick="generateThemes(true)"
               class="text-blue-600 hover:underline hidden">
         {{ t('dashboard.themes_regenerate') }}
@@ -934,6 +940,11 @@ async function applyInvestigation(id) {
   setDashboardVisibility(true);
   await refreshSavedSnapshots();
   await reload();
+  // After the dashboard reload settles (KPIs + source/category panels),
+  // also reload the mind map so it tracks the newly active card. The
+  // user explicitly clicked a card; their intent is "show me everything
+  // for this scope", which includes the mind map.
+  try { await loadOrGenerateCurrentScope(); } catch (_) {}
 }
 
 async function importInvestigation(input) {
@@ -2595,6 +2606,31 @@ async function findCachedSnapshot(sentiment, autoCatIds) {
       s.is_auto !== false  // accept any saved snapshot for that scope
     ) || null;
   } catch (e) { return null; }
+}
+
+// Manual refresh — what the user clicks when they've switched cards or
+// changed filters and the mind map didn't keep up. Spins the icon once
+// to acknowledge the click, then re-runs the standard cache-first
+// loader for the active card. NO LLM call unless no cached snapshot
+// matches the active scope — that case falls through to generateThemes
+// just like an initial load would.
+async function refreshMindmap() {
+  const btn = document.getElementById('themes-refresh-btn');
+  const icon = btn && btn.querySelector('.mindmap-refresh-icon');
+  if (icon) {
+    icon.classList.remove('is-spinning');
+    void icon.offsetWidth;
+    icon.classList.add('is-spinning');
+  }
+  if (!activeInvestigationId) {
+    const statusEl = document.getElementById('themes-status');
+    if (statusEl) statusEl.textContent = '{{ t("dashboard.themes_pick_card_to_save") }}';
+    return;
+  }
+  // Pull the saved-snapshot list fresh in case the user just ran an
+  // analysis on another tab.
+  await refreshSavedSnapshots();
+  await loadOrGenerateCurrentScope();
 }
 
 async function loadOrGenerateCurrentScope() {
