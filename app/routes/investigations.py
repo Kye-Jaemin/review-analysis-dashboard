@@ -14,8 +14,11 @@ from app.db import get_session
 from app.models import (
     Analysis,
     AnalysisStatus,
+    AutoCategory,
     Category,
     Investigation,
+    ReviewAutoCategoryLink,
+    ReviewManualCategoryLink,
     Review,
     Sentiment,
     Source,
@@ -39,15 +42,19 @@ REVIEW_COLS = [
 ]
 ANALYSIS_COLS = [
     "id", "review_id", "category_id", "sentiment", "sentiment_score",
-    "confidence", "summary", "model", "analyzed_at", "status", "error",
+    "user_tier", "confidence", "summary", "model", "analyzed_at", "status", "error",
 ]
 SNAPSHOT_COLS = [
     "id", "investigation_id", "label", "sentiment", "source_ids", "root_ids",
-    "summary_lang", "sample_size", "model", "themes", "created_at",
+    "auto_category_ids", "summary_lang", "sample_size", "model", "themes", "created_at",
 ]
 INVESTIGATION_COLS = [
     "id", "label", "description", "source_ids", "root_ids",
     "display_order", "created_at", "updated_at",
+]
+AUTO_CATEGORY_COLS = [
+    "id", "investigation_id", "name", "description", "review_count",
+    "display_order", "language", "translations", "created_at",
 ]
 
 
@@ -409,6 +416,53 @@ async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_
     ).scalars().all()
     snapshots_payload = [_dump(s, SNAPSHOT_COLS) for s in snap_rows]
 
+    # Auto-category Top-10 + the simple_positive / simple_negative buckets
+    # for this card, plus the per-review junction. Without these, importing
+    # an auto card produced a fresh investigation with no auto categories,
+    # which fell through to "manual mode" on the dashboard and showed the
+    # empty-state CTA even though the card was supposed to be auto.
+    auto_cat_rows = (
+        await session.execute(
+            select(AutoCategory).where(AutoCategory.investigation_id == inv_id)
+        )
+    ).scalars().all()
+    auto_categories_payload = [_dump(ac, AUTO_CATEGORY_COLS) for ac in auto_cat_rows]
+
+    # Junction rows for THIS card's auto categories only — the export is
+    # scoped to one card so we don't drag along siblings.
+    rac_rows: list[tuple[int, int]] = []
+    if auto_cat_rows:
+        rac_rows = list(
+            (await session.execute(
+                select(
+                    ReviewAutoCategoryLink.c.review_id,
+                    ReviewAutoCategoryLink.c.auto_category_id,
+                ).where(
+                    ReviewAutoCategoryLink.c.auto_category_id.in_(
+                        [ac.id for ac in auto_cat_rows]
+                    )
+                )
+            )).all()
+        )
+    review_auto_categories_payload = [
+        {"review_id": rid, "auto_category_id": acid} for rid, acid in rac_rows
+    ]
+
+    # Manual junction scoped to this investigation_id.
+    rmc_rows = list(
+        (await session.execute(
+            select(
+                ReviewManualCategoryLink.c.review_id,
+                ReviewManualCategoryLink.c.investigation_id,
+                ReviewManualCategoryLink.c.category_id,
+            ).where(ReviewManualCategoryLink.c.investigation_id == inv_id)
+        )).all()
+    )
+    review_manual_categories_payload = [
+        {"review_id": rid, "investigation_id": iid, "category_id": cid}
+        for rid, iid, cid in rmc_rows
+    ]
+
     payload = {
         "version": EXPORT_VERSION,
         "type": "investigation",
@@ -418,6 +472,9 @@ async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_
         "categories": categories_payload,
         "reviews": reviews_payload,
         "analyses": analyses_payload,
+        "auto_categories": auto_categories_payload,
+        "review_auto_categories": review_auto_categories_payload,
+        "review_manual_categories": review_manual_categories_payload,
         "theme_snapshots": snapshots_payload,
     }
 
@@ -501,13 +558,39 @@ async def import_investigation(
         if not progress:
             break
 
-    # ---- Sources: always insert new (no de-dup so identity stays explicit) ----
+    # ---- Sources: dedupe against the existing workspace ----
+    # Importing the same auto card twice used to create duplicate Source
+    # rows ("조사가 필요한 업체가 또 생김"), and even on a first import the
+    # new sources broke vendor-stack grouping because the visible
+    # display_name was right but the underlying id wasn't shared with the
+    # already-present BitePal/Cal AI/etc rows the user collected before.
+    # Match on (type, display_name or label) — the natural identity of an
+    # app row in the workspace. Reuse the existing id when we have a
+    # match; otherwise insert.
+    existing_sources = (await session.execute(select(Source))).scalars().all()
+    def _src_key(stype, display_name, label) -> tuple[str, str]:
+        # display_name is the human app title from the store API; label
+        # is what the user typed. display_name wins, label is the
+        # fallback so reddit / web sources still match consistently.
+        return (
+            stype.value if hasattr(stype, "value") else str(stype),
+            ((display_name or label) or "").strip().lower(),
+        )
+    existing_by_src_key: dict[tuple[str, str], Source] = {
+        _src_key(s.type, s.display_name, s.label): s for s in existing_sources
+    }
+
     src_id_map: dict[int, int] = {}
     for src in data.get("sources") or []:
         try:
             stype = SourceType(src["type"])
         except (ValueError, KeyError):
             stype = SourceType.web
+        key = _src_key(stype, src.get("display_name"), src.get("label"))
+        existing_src = existing_by_src_key.get(key)
+        if existing_src is not None:
+            src_id_map[src["id"]] = existing_src.id
+            continue
         new_src = Source(
             type=stype,
             label=src.get("label") or src["type"],
@@ -519,6 +602,7 @@ async def import_investigation(
         session.add(new_src)
         await session.flush()
         src_id_map[src["id"]] = new_src.id
+        existing_by_src_key[key] = new_src
 
     # ---- Reviews: dedupe by (new_source_id, external_id) ----
     rev_id_map: dict[int, int] = {}
@@ -611,8 +695,87 @@ async def import_investigation(
     session.add(new_inv)
     await session.flush()
 
+    # ---- Auto categories: insert fresh, scoped to the new investigation ----
+    # Without this, importing an auto card produced a fresh investigation
+    # with no AutoCategory rows, which made loadAutoCategories() return
+    # empty on the dashboard, _isAutoMode flipped false, and the user saw
+    # the manual empty-state CTA on what should have been an auto card.
+    ac_id_map: dict[int, int] = {}
+    for ac in data.get("auto_categories") or []:
+        new_ac = AutoCategory(
+            investigation_id=new_inv.id,
+            name=ac.get("name") or "(unnamed)",
+            description=ac.get("description"),
+            review_count=int(ac.get("review_count") or 0),
+            display_order=int(ac.get("display_order") or 0),
+            language=ac.get("language") or "en",
+            translations=ac.get("translations") or {},
+            created_at=_parse_dt(ac.get("created_at")) or datetime.utcnow(),
+        )
+        session.add(new_ac)
+        await session.flush()
+        if ac.get("id") is not None:
+            ac_id_map[int(ac["id"])] = new_ac.id
+
+    # Per-review auto-category junction, remapped through ac_id_map and
+    # rev_id_map. Skip rows whose review or auto_category id we couldn't
+    # resolve (typical when the source was dropped on import).
+    auto_junction_rows: list[dict] = []
+    seen_aj: set[tuple[int, int]] = set()
+    for row in data.get("review_auto_categories") or []:
+        try:
+            old_rid = int(row["review_id"])
+            old_acid = int(row["auto_category_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        new_rid = rev_id_map.get(old_rid)
+        new_acid = ac_id_map.get(old_acid)
+        if new_rid is None or new_acid is None:
+            continue
+        key = (new_rid, new_acid)
+        if key in seen_aj:
+            continue
+        seen_aj.add(key)
+        auto_junction_rows.append({"review_id": new_rid, "auto_category_id": new_acid})
+    if auto_junction_rows:
+        await session.execute(ReviewAutoCategoryLink.insert(), auto_junction_rows)
+
+    # Per-review manual junction. investigation_id is pinned to the new
+    # card's id (the export carried the old one but it has no meaning
+    # in the importer's workspace).
+    manual_junction_rows: list[dict] = []
+    seen_mj: set[int] = set()
+    for row in data.get("review_manual_categories") or []:
+        try:
+            old_rid = int(row["review_id"])
+            old_cid = int(row["category_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        new_rid = rev_id_map.get(old_rid)
+        new_cid = cat_id_map.get(old_cid)
+        if new_rid is None or new_cid is None:
+            continue
+        if new_rid in seen_mj:
+            continue
+        seen_mj.add(new_rid)
+        manual_junction_rows.append({
+            "review_id": new_rid,
+            "investigation_id": new_inv.id,
+            "category_id": new_cid,
+        })
+    if manual_junction_rows:
+        await session.execute(ReviewManualCategoryLink.insert(), manual_junction_rows)
+
     # ---- Theme snapshots: link to the new investigation ----
     for snap in data.get("theme_snapshots") or []:
+        # Auto-category-id references in saved mind maps need to be
+        # remapped through ac_id_map too. Drop any unresolved ids
+        # silently — they refer to deleted scopes on the source workspace.
+        snap_auto_ids = []
+        for aid in (snap.get("auto_category_ids") or []):
+            mapped = ac_id_map.get(int(aid) if isinstance(aid, (int, str)) and str(aid).lstrip("-").isdigit() else None)
+            if mapped is not None:
+                snap_auto_ids.append(mapped)
         session.add(
             ThemeSnapshot(
                 investigation_id=new_inv.id,
@@ -620,6 +783,7 @@ async def import_investigation(
                 sentiment=snap.get("sentiment") or "neutral",
                 source_ids=[src_id_map[x] for x in (snap.get("source_ids") or []) if x in src_id_map],
                 root_ids=[cat_id_map[x] for x in (snap.get("root_ids") or []) if x in cat_id_map],
+                auto_category_ids=snap_auto_ids,
                 summary_lang=snap.get("summary_lang") or "en",
                 sample_size=snap.get("sample_size") or 0,
                 model=snap.get("model"),
@@ -636,6 +800,7 @@ async def import_investigation(
             "sources_inserted": len(src_id_map),
             "categories_resolved": len(cat_id_map),
             "reviews_resolved": len(rev_id_map),
+            "auto_categories_inserted": len(ac_id_map),
             "snapshots": len(data.get("theme_snapshots") or []),
         },
     }
