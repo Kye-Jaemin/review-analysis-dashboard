@@ -639,15 +639,28 @@ function _persistStacks() {
     sessionStorage.setItem('dashStacks', JSON.stringify([...(_stacksExpanded)]));
   } catch (_) {}
 }
+// Sigs that were JUST expanded by a user click — the next render applies
+// the fan-out animation to those groups' newly-revealed cards, then the
+// set is cleared. (Persistent _stacksExpanded controls layout; this
+// transient set only controls one-shot motion.)
+const _stackJustOpened = new Set();
 function toggleStack(sig) {
-  if (_stacksExpanded.has(sig)) _stacksExpanded.delete(sig);
-  else _stacksExpanded.add(sig);
+  if (_stacksExpanded.has(sig)) {
+    _stacksExpanded.delete(sig);
+  } else {
+    _stacksExpanded.add(sig);
+    _stackJustOpened.add(sig);
+  }
   _persistStacks();
   renderInvestigations(_lastInvestigations);
 }
 function expandAllStacks(items) {
   // Compute every vendor sig from items and add it to the set.
-  (items || []).forEach(inv => _stacksExpanded.add(_vendorSig(inv)));
+  (items || []).forEach(inv => {
+    const sig = _vendorSig(inv);
+    if (!_stacksExpanded.has(sig)) _stackJustOpened.add(sig);
+    _stacksExpanded.add(sig);
+  });
   _persistStacks();
   renderInvestigations(items);
 }
@@ -747,13 +760,17 @@ function renderInvestigations(items) {
     // to collide with the outer attribute quotes and silently break the
     // click. Stash on a data attribute (HTML-escaped) and read it back via
     // dataset in the handler — no quote dance, no parsing surprise.
+    const chipStateCls = opts.expanded ? 'stack-toggle-expanded' : 'stack-toggle-collapsed';
+    const chipLabel = opts.expanded
+      ? `<span class="chip-arrow">▴</span><span>접기</span>`
+      : `<span>+${opts.stackSize - 1} 더 보기</span><span class="chip-arrow">▾</span>`;
     const stackBadge = opts.stackSize && opts.stackSize > 1 && opts.frontOfStack
       ? `<button type="button"
                  data-stack-sig="${escapeHtml(opts.sig)}"
                  onclick="event.stopPropagation(); toggleStack(this.dataset.stackSig)"
-                 class="stack-toggle text-[10px] bg-gray-800 text-white px-2 py-0.5 rounded-full shadow"
+                 class="stack-toggle ${chipStateCls}"
                  title="${opts.expanded ? '같은 업체 카드 접기' : '같은 업체 카드 모두 보기'}">
-           ${opts.expanded ? '▾ 접기' : `+${opts.stackSize - 1} 더`}
+           ${chipLabel}
          </button>`
       : '';
 
@@ -829,13 +846,23 @@ function renderInvestigations(items) {
     }
     if (expanded) {
       // Fan out — every card occupies its own grid cell, front card
-      // marked so its "접기" button shows on it.
-      return g.cards.map((inv, i) => _renderCard(inv, {
-        sig: g.sig,
-        stackSize,
-        expanded: true,
-        frontOfStack: i === 0,
-      })).join('');
+      // marked so its "접기" button shows on it. If this group was
+      // JUST expanded by a click, wrap each card in an outer div with
+      // the staggered fan-out animation; CSS picks the per-card delay.
+      const justOpened = _stackJustOpened.has(g.sig);
+      return g.cards.map((inv, i) => {
+        const html = _renderCard(inv, {
+          sig: g.sig,
+          stackSize,
+          expanded: true,
+          frontOfStack: i === 0,
+        });
+        if (!justOpened || i === 0) return html;
+        // Wrap the card in a positioned div carrying the animation. The
+        // delay index is capped at 5 so deep stacks don't trail forever.
+        const animIdx = Math.min(i, 5);
+        return `<div class="stack-just-expanded stack-anim-${animIdx}">${html}</div>`;
+      }).join('');
     }
     // Collapsed — wrap the front card in a stack visual that shows
     // the peek slices behind it. peek cards are decorative div copies,
@@ -878,6 +905,10 @@ function renderInvestigations(items) {
   // Brief swap-in animation on the wrapper so changes (delete, reorder) feel
   // continuous rather than abrupt.
   grid.classList.remove('grid-swap'); void grid.offsetWidth; grid.classList.add('grid-swap');
+  // Animation marker is one-shot: after this render's classes have been
+  // applied we clear the set so the next render (e.g. another card edit)
+  // doesn't replay the fan-out.
+  _stackJustOpened.clear();
 }
 
 async function applyInvestigation(id) {

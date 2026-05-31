@@ -313,12 +313,78 @@
     .stack-wrap:hover .stack-peek-1 { transform: translate(9px, 10px) rotate(0.8deg); }
     .stack-wrap:hover .stack-peek-2 { transform: translate(16px, 18px) rotate(1.6deg); }
     .stack-wrap .investigation-card { position: relative; z-index: 1; }
-    .stack-toggle {
-      transition: background-color 140ms ease-out, transform 120ms ease-out;
+
+    /* --- Stack toggle chip ---
+       Larger, more saturated, with a gentle bobbing pulse when collapsed so
+       the user notices "there are more cards behind here, click me". The
+       chip is the primary affordance for expansion so it deserves the
+       attention. */
+    @keyframes chipPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 1px 3px rgba(59, 130, 246, 0.35); }
+      50%      { transform: scale(1.05); box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.55); }
     }
-    .stack-toggle:hover { background-color: #1f2937; }
+    .stack-toggle {
+      display: inline-flex; align-items: center; gap: 0.25rem;
+      background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      box-shadow: 0 2px 6px -1px rgba(59, 130, 246, 0.45);
+      transition: transform 140ms ease-out, box-shadow 160ms ease-out,
+                  background 200ms ease-out;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+    }
+    /* The collapsed-state chip bobs once a second so it never disappears
+       into the busy card layout. Suspends on hover so it doesn't fight
+       the user's cursor. */
+    .stack-toggle.stack-toggle-collapsed {
+      animation: chipPulse 1.8s ease-in-out infinite;
+    }
+    .stack-toggle.stack-toggle-collapsed:hover {
+      animation-play-state: paused;
+    }
+    .stack-toggle:hover {
+      transform: scale(1.08);
+      background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+      box-shadow: 0 6px 14px -2px rgba(59, 130, 246, 0.6);
+    }
     .stack-toggle:active { transform: scale(0.95); }
+    .stack-toggle .chip-arrow {
+      display: inline-block;
+      transition: transform 180ms ease-out;
+      font-size: 13px;
+      line-height: 1;
+    }
+    .stack-toggle.stack-toggle-expanded .chip-arrow { transform: rotate(180deg); }
+
     .investigation-card.is-stack-front { /* hook for future styling */ }
+
+    /* --- Stack expand fan-out animation ---
+       When the user clicks +N, the JS adds .stack-just-expanded to every
+       newly-revealed card in the same vendor group. The keyframe brings
+       them in from the stack's origin with a slight scale + rotate so it
+       feels like the deck spreading open. The first card (front) skips
+       the animation since it was already visible. The 90ms delay step
+       gives the fan-out a clear stagger. */
+    @keyframes stackFan {
+      from {
+        transform: translate(-26px, -16px) rotate(-3deg) scale(0.92);
+        opacity: 0;
+      }
+      60%  { opacity: 1; }
+      to   { transform: none; opacity: 1; }
+    }
+    .stack-just-expanded {
+      animation: stackFan 0.42s cubic-bezier(.22,.61,.36,1) both;
+    }
+    .stack-just-expanded.stack-anim-1 { animation-delay: 0.06s; }
+    .stack-just-expanded.stack-anim-2 { animation-delay: 0.14s; }
+    .stack-just-expanded.stack-anim-3 { animation-delay: 0.22s; }
+    .stack-just-expanded.stack-anim-4 { animation-delay: 0.30s; }
+    .stack-just-expanded.stack-anim-5 { animation-delay: 0.38s; }
 
     /* --- Investigation card drag-and-drop --- */
     .investigation-card.is-dragging {
@@ -391,10 +457,14 @@
       .number-pop, .source-chip, .root-chip, .theme-cat-chip,
       .investigation-card.apply-pulse, main > div,
       .auto-cat-tile, .auto-cat-tile .auto-cat-fill,
-      .investigation-card.is-dragging {
+      .investigation-card.is-dragging,
+      .stack-toggle, .stack-toggle.stack-toggle-collapsed,
+      .stack-just-expanded, .stack-wrap .stack-peek {
         animation: none !important; transition: none !important;
       }
       .investigation-card { transform: none !important; }
+      .stack-toggle { transform: none !important; }
+      .stack-just-expanded { transform: none !important; opacity: 1 !important; }
     }
   </style>
 </head>
