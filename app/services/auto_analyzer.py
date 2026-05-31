@@ -66,6 +66,62 @@ def _link_upsert(values: list[dict]):
 SAMPLE_SIZE_FOR_EXTRACTION = 200
 TOP_N = 10
 
+# Two fixed "simple sentiment" buckets that are always added alongside
+# the LLM-derived Top 10 themes, giving a total of 12 categories per
+# investigation. Their purpose: short generic praise like "great",
+# "love it", "👍" or short generic complaints like "bad", "meh", "sucks"
+# get a home of their own instead of bleeding into a topical theme.
+# Position 10 / 11 (after the 10 themes) so existing UI rank ordering
+# keeps content themes at the top of the doughnut.
+SIMPLE_BUCKETS: dict[str, dict[str, dict[str, str]]] = {
+    "en": {
+        "simple_positive": {
+            "name": "Simple praise",
+            "description": (
+                "Short generic positive reviews — single words or one-line "
+                "compliments like 'great', 'love it', 'awesome', '👍' that "
+                "don't tie to a specific feature or topic."
+            ),
+        },
+        "simple_negative": {
+            "name": "Simple complaint",
+            "description": (
+                "Short generic negative reviews — 'bad', 'sucks', 'meh', "
+                "'don't like it' without a specific reason or topic."
+            ),
+        },
+    },
+    "ko": {
+        "simple_positive": {
+            "name": "단순 긍정",
+            "description": (
+                "특정 기능이나 주제 없이 '좋아요', '최고', '👍' 같은 짧은 "
+                "일반 칭찬 한두 마디로 끝나는 리뷰."
+            ),
+        },
+        "simple_negative": {
+            "name": "단순 부정",
+            "description": (
+                "특정 이유 없이 '별로', '나빠요', '싫어요' 같은 짧은 "
+                "일반 불만 한두 마디로 끝나는 리뷰."
+            ),
+        },
+    },
+}
+
+
+def _simple_bucket_defs(summary_lang: str) -> list[dict]:
+    """Return the two fixed simple-sentiment category dicts for a given
+    UI language, in display order (simple_positive first, then
+    simple_negative). Falls back to English if the lang isn't mapped."""
+    table = SIMPLE_BUCKETS.get((summary_lang or "en").lower(), SIMPLE_BUCKETS["en"])
+    return [
+        {"name": table["simple_positive"]["name"],
+         "description": table["simple_positive"]["description"]},
+        {"name": table["simple_negative"]["name"],
+         "description": table["simple_negative"]["description"]},
+    ]
+
 
 def _strip_fences(s: str) -> str:
     s = s.strip()
@@ -94,7 +150,14 @@ async def _extract_top_categories(
         f"Each category should be:\n"
         f"  - recognisable from real review content (don't invent generic buckets)\n"
         f"  - distinct from the others (minimal overlap)\n"
-        f"  - useful for grouping reviews (appears in multiple)\n\n"
+        f"  - useful for grouping reviews (appears in multiple)\n"
+        f"  - SUBSTANTIVE — tied to a specific feature, behaviour, or topic.\n"
+        f"    Do NOT propose a 'generic praise' / 'generic complaint' /\n"
+        f"    'positive feedback' / 'negative feedback' theme. Two fixed\n"
+        f"    buckets ('Simple praise' / 'Simple complaint') exist downstream\n"
+        f"    for short generic reviews like 'great' or 'bad' that don't fit\n"
+        f"    a content theme — your job here is purely to surface the real\n"
+        f"    topics in the data, not to label sentiment.\n\n"
         f"Output JSON only:\n"
         f"{{\n"
         f'  "categories": [\n'
@@ -166,6 +229,17 @@ async def _classify_batch(
         f"{cat_block}\n\n"
         f"For each review, pick the index (0..{len(categories)-1}) of the BEST fitting\n"
         f"category. Also rate sentiment + confidence.\n"
+        f"\n"
+        f"Category routing — IMPORTANT:\n"
+        f"  - The last two categories ('Simple praise' / 'Simple complaint',\n"
+        f"    or '단순 긍정' / '단순 부정' in Korean) are reserved for SHORT\n"
+        f"    GENERIC reviews that don't mention a specific feature or topic\n"
+        f"    — things like 'great', 'awesome', 'love it', '👍', 'bad',\n"
+        f"    'meh', 'sucks'. If a review has substantive content tied to a\n"
+        f"    feature / topic, route it to one of the topical categories\n"
+        f"    instead, even if it's also positive or negative.\n"
+        f"  - In other words: positivity / negativity alone does NOT route\n"
+        f"    to the simple buckets. Lack of substantive content does.\n"
         f"\n"
         f"Sentiment intensity calibration (IMPORTANT):\n"
         f"  - Reserve 'very_positive' / 'very_negative' for reviews with\n"
@@ -272,6 +346,9 @@ async def run_auto_analysis_job(
             cat_defs = await _extract_top_categories(sample, model, summary_lang)
             if not cat_defs:
                 raise RuntimeError("LLM did not return any categories")
+            # Append the two fixed "simple sentiment" buckets after the
+            # LLM-derived 10 themes. Total = 12 categories per investigation.
+            cat_defs = cat_defs + _simple_bucket_defs(summary_lang)
 
             # Replace any prior auto categories for this card. The junction
             # table has ON DELETE CASCADE on auto_category_id, so the deletes

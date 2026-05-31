@@ -2113,8 +2113,14 @@ async function loadSnapshot(idStr) {
     await renderThemesData(data, /*saved=*/true);
     currentLoadedSnapshotId = id;
     document.getElementById('themes-delete-btn').classList.remove('hidden');
-    // Sync the sentiment dropdown to the saved snapshot's sentiment.
-    document.getElementById('themes-sentiment').value = data.sentiment;
+    // Sync the sentiment tab strip to the saved snapshot's sentiment.
+    // (There used to be a <select id="themes-sentiment"> here, but the UI
+    // moved to a tab strip and the .value assignment kept blowing up
+    // with "Cannot set properties of null" every time a snapshot loaded.)
+    if (data.sentiment) {
+      _currentSentimentTab = data.sentiment;
+      renderSentimentTabs();
+    }
   } catch (e) {
     statusEl.textContent = String(e);
   }
