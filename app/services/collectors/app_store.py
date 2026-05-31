@@ -129,12 +129,36 @@ class AppStoreCollector(CollectorBase):
                 if isinstance(entries, dict):
                     entries = [entries]
                 if not entries:
+                    # On the FIRST page, an empty feed almost always means
+                    # Apple's public RSS isn't serving reviews for this
+                    # (app_id, country) pair — a known quirk of the
+                    # /customerreviews endpoint that hits a number of apps,
+                    # esp. in the US store (e.g. MacroFactor 1553503471).
+                    # Raise an explicit error so the user sees "try a
+                    # different country" instead of "0 new" with no clue.
+                    if page == 1 and emitted == 0:
+                        raise RuntimeError(
+                            f"Apple's public review feed for app_id={app_id} "
+                            f"in country '{country}' is empty. This is a known "
+                            f"Apple RSS limitation for certain apps/stores — "
+                            f"the reviews are still on the App Store website but "
+                            f"the public RSS endpoint doesn't serve them. Try "
+                            f"adding the source with country=gb (UK) or jp (Japan) "
+                            f"instead, which often work when US/CA/AU don't."
+                        )
                     break
 
                 # The first entry on page 1 is the app metadata, not a review.
                 # Reviews always carry an "author" + "content" + "im:rating".
                 page_reviews = [e for e in entries if "im:rating" in e and "content" in e]
                 if not page_reviews:
+                    if page == 1 and emitted == 0:
+                        raise RuntimeError(
+                            f"Apple's RSS feed for app_id={app_id} in country "
+                            f"'{country}' returned only app metadata, no reviews. "
+                            f"This usually means the public RSS isn't serving "
+                            f"reviews for this store. Try country=gb or jp."
+                        )
                     break
 
                 for e in page_reviews:
