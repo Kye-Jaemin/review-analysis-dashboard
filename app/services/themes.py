@@ -227,8 +227,13 @@ async def extract_themes(
     model: Optional[str] = None,
     force: bool = False,
     auto_category_ids: Optional[Sequence[int]] = None,
+    prefer_auto_labels: bool = False,
 ) -> dict:
-    key = _cache_key(sentiment, source_ids, root_ids, summary_lang, auto_category_ids)
+    # prefer_auto_labels is encoded into the cache key so an auto-mode
+    # render and a manual-mode render of the same scope don't collide.
+    key = _cache_key(
+        sentiment, source_ids, root_ids, summary_lang, auto_category_ids
+    ) + ("|au" if prefer_auto_labels else "|mn")
     if not force:
         cached = _get_cached(key)
         if cached:
@@ -299,7 +304,16 @@ async def extract_themes(
     # The junction outer-join can emit a row per (review, auto_cat) link, so
     # a review shared between two cards would appear twice. Collapse on
     # review id — keep the first label we see (deterministic enough for
-    # mind-map grouping; manual cat path is preferred when present).
+    # mind-map grouping).
+    #
+    # Which label wins depends on the mode the caller is in:
+    #   - prefer_auto_labels=True (auto-mode dashboard) → auto-category
+    #     name takes precedence; cat_path is only a last-resort fallback.
+    #     Without this, reviews that ALSO carry a manual
+    #     Analysis.category_id (set by a sibling manual card on the same
+    #     sources) would group the mind map by manual categories even
+    #     when the user is filtering auto-cat chips.
+    #   - default (manual / mixed) → manual cat_path wins, then auto.
     seen_ids: set[int] = set()
     sample = []
     for rid, text, summary, cat_path, auto_cat_name in rows:
@@ -307,9 +321,10 @@ async def extract_themes(
             continue
         seen_ids.add(rid)
         snippet = (summary if summary else (text or "")).strip().replace("\n", " ")
-        # Prefer the manual category path when present, fall back to the
-        # auto-category name (auto mode), then to a generic bucket.
-        label = cat_path or auto_cat_name or UNCATEGORIZED_LABEL
+        if prefer_auto_labels:
+            label = auto_cat_name or cat_path or UNCATEGORIZED_LABEL
+        else:
+            label = cat_path or auto_cat_name or UNCATEGORIZED_LABEL
         sample.append({
             "id": rid,
             "category": label,
@@ -382,6 +397,11 @@ async def autogen_theme_snapshots(
                 await session.delete(snap)
         await session.flush()
 
+        # Auto-mode cards (no manual roots) should label by auto category;
+        # manual cards label by manual category path. This mirrors the
+        # dashboard's prefer_auto_labels decision per active card.
+        prefer_auto = not (inv.root_ids or [])
+
         inserted = 0
         for sent in ALL_SENTIMENTS:
             try:
@@ -394,6 +414,7 @@ async def autogen_theme_snapshots(
                     model=model,
                     force=True,
                     auto_category_ids=ac_ids or None,
+                    prefer_auto_labels=prefer_auto,
                 )
             except Exception:
                 continue

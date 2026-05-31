@@ -2505,6 +2505,12 @@ async function generateThemes(force) {
   selectedRoots.forEach(id => params.append('root_ids', id));
   if (_isAutoMode) {
     _selectedAutoCats.forEach(id => params.append('auto_category_ids', id));
+    // Tell the server to label the mind map sample by auto-category name
+    // instead of the manual category path. Otherwise reviews that ALSO have
+    // a manual Analysis.category_id (from a sibling manual card on the
+    // same sources) get grouped by manual categories even though the user
+    // is in auto mode looking at auto-cat chips.
+    params.append('prefer_auto_labels', 'true');
   }
 
   try {

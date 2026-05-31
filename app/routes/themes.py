@@ -21,6 +21,7 @@ async def themes_endpoint(
     auto_category_ids: List[str] = Query(default_factory=list),
     summary_lang: str = Query("en"),
     force: bool = Query(False),
+    prefer_auto_labels: bool = Query(False),
     session: AsyncSession = Depends(get_session),
 ):
     s_ids = [v for v in (_parse_int(s) for s in source_ids) if v is not None]
@@ -35,6 +36,7 @@ async def themes_endpoint(
             summary_lang=summary_lang,
             force=force,
             auto_category_ids=a_ids or None,
+            prefer_auto_labels=prefer_auto_labels,
         )
     except Exception as e:
         raise HTTPException(500, f"theme extraction failed: {e}")
