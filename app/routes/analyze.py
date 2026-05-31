@@ -47,8 +47,17 @@ async def analyze_page(request: Request, session: AsyncSession = Depends(get_ses
     roots = [{"id": c.id, "name": c.name, "description": c.description} for c in root_rows]
 
     source_rows = (
-        await session.execute(select(Source).order_by(Source.label))
+        await session.execute(select(Source))
     ).scalars().all()
+    # Sort alphabetically, but ignore the "r/" prefix Reddit sources use so
+    # `r/MacroFactor` lands between `M…` apps instead of getting clumped at
+    # the bottom under "R". Case-insensitive for sanity.
+    def _sort_key(s) -> str:
+        name = (s.label or "").strip()
+        if name.lower().startswith("r/"):
+            name = name[2:]
+        return name.lower()
+    source_rows = sorted(source_rows, key=_sort_key)
     sources = [
         {
             "id": s.id,
