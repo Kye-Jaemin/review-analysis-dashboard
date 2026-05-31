@@ -1431,10 +1431,16 @@ function manualEmptyStateHtml(data) {
     return `<div class="text-gray-400 text-sm py-4 text-center">{{ t('common.no_data') }}</div>`;
   }
   // Build a /analyze deep link with this card's scope.
+  // mode=all because the reviews in scope already have Analysis rows
+  // (from a previous auto run, which is exactly the state that lands
+  // the user here). mode=unanalyzed would skip them all and do nothing.
+  // Re-classifying writes to the per-card review_manual_categories
+  // junction so other manual cards over the same sources keep their
+  // own classifications intact.
   const params = new URLSearchParams();
   (data.selected_sources || []).forEach(id => params.append('source_ids', id));
   (data.selected_roots || []).forEach(id => params.append('root_ids', id));
-  params.set('mode', 'unanalyzed');
+  params.set('mode', 'all');
   params.set('classification_mode', 'manual');
   const href = '/analyze?' + params.toString();
   return `
@@ -1448,8 +1454,13 @@ function manualEmptyStateHtml(data) {
           <div class="text-xs text-amber-800 leading-relaxed mb-3">
             이 카드의 ${total.toLocaleString()}건 리뷰 중 수동 카테고리 트리로 분류된 항목이 없습니다.
             분석은 ${analyzed.toLocaleString()}건 수행됐지만 자동 모드로 실행됐을 가능성이 큽니다.
-            아래 버튼으로 분석 페이지에서 <b>수동 모드</b>로 다시 실행하면
+            아래 버튼으로 분석 페이지에서 <b>수동 모드 + 전체 재분석</b>으로 실행하면
             이 패널이 채워집니다.
+            <br><br>
+            <span class="text-amber-700">
+              이 분석은 <b>이 카드 전용 정션</b>에 저장되므로 다른 수동
+              카드(예: 같은 앱의 다른 카테고리 트리 카드)의 결과는 그대로 유지됩니다.
+            </span>
           </div>
           <a href="${href}"
              class="inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-3 py-1.5 rounded">
