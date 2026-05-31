@@ -409,23 +409,28 @@ async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_
     cats_to_include = {c.id: c for c in all_cats if c.id in descendants}
     categories_payload = [_dump(c, CATEGORY_COLS) for c in cats_to_include.values()]
 
-    # Reviews in scope: source_id IN src_ids. If root_ids set, also limited to
-    # reviews whose Analysis falls in the descendant set.
+    # Reviews in scope: source_id IN src_ids. If the card is manual
+    # (root_ids set), restrict to reviews this card actually tagged via
+    # the per-card manual junction. The previous version filtered by
+    # Analysis.category_id, but that's the legacy single-FK column which
+    # gets clobbered any time another manual card over the same sources
+    # runs analysis — so an export of an "old" manual card came back with
+    # 0 reviews even when the junction still held its 170 tags. Reading
+    # from the junction directly survives sibling overwrites.
     reviews_payload = []
     analyses_payload = []
     if src_ids:
         review_rows = (
             await session.execute(select(Review).where(Review.source_id.in_(src_ids)))
         ).scalars().all()
-        if descendants:
-            in_scope_ids = (
+        if root_ids:
+            tagged_ids = (
                 await session.execute(
-                    select(Analysis.review_id)
-                    .where(Analysis.review_id.in_([r.id for r in review_rows]))
-                    .where(Analysis.category_id.in_(descendants))
+                    select(ReviewManualCategoryLink.c.review_id)
+                    .where(ReviewManualCategoryLink.c.investigation_id == inv_id)
                 )
             ).scalars().all()
-            scoped = set(in_scope_ids)
+            scoped = set(tagged_ids)
             review_rows = [r for r in review_rows if r.id in scoped]
         reviews_payload = [_dump(r, REVIEW_COLS) for r in review_rows]
         ids = [r.id for r in review_rows]
