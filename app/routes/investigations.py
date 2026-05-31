@@ -356,31 +356,35 @@ def _scrub_surrogates(obj):
     return obj
 
 
+def _safe_filename(label: str) -> str:
+    """Build an ASCII-only filename slug from an investigation label.
+
+    The previous version allowed `c.isalnum()` to pass, which is True for
+    every Unicode letter including Korean — and HTTP headers (where the
+    Content-Disposition filename ends up) must be latin-1 encodable.
+    Putting "라쿤" in there triggers a UnicodeEncodeError inside starlette
+    when it builds the response, surfacing as a generic 500 to the user.
+
+    Strategy: keep ASCII letters / digits / `-` / `_` directly, drop
+    everything else (Korean, emoji, separators, surrogate scars) replacing
+    them with `_`. Truncate to 60 chars and fall back to `card` when the
+    label was all non-ASCII (so the file still downloads with a sensible
+    name)."""
+    cleaned = []
+    for ch in (label or ""):
+        if ch.isascii() and (ch.isalnum() or ch in "-_"):
+            cleaned.append(ch)
+        else:
+            cleaned.append("_")
+    name = "".join(cleaned).strip("_")[:60]
+    # Collapse runs of underscores down to one so the filename isn't ugly.
+    while "__" in name:
+        name = name.replace("__", "_")
+    return name or "card"
+
+
 @router.get("/api/investigations/{inv_id}/export")
 async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_session)):
-    # Diagnostic wrapper — second time around. The surrogate scrub fix
-    # appears not to fully address what's failing on manual cards with
-    # Korean root names; let's surface the real exception in the
-    # response body again so we can SEE it instead of guessing.
-    import traceback as _tb
-    try:
-        return await _export_investigation_impl(inv_id, session)
-    except HTTPException:
-        raise
-    except Exception as e:
-        from fastapi.responses import JSONResponse
-        tb_text = _tb.format_exc()
-        return JSONResponse(
-            status_code=500,
-            content={
-                "type": type(e).__name__,
-                "error": str(e),
-                "traceback": tb_text.splitlines()[-25:],
-            },
-        )
-
-
-async def _export_investigation_impl(inv_id: int, session: AsyncSession):
     inv = await session.get(Investigation, inv_id)
     if not inv:
         raise HTTPException(404)
@@ -502,12 +506,14 @@ async def _export_investigation_impl(inv_id: int, session: AsyncSession):
     }
 
     # Scrub any lone surrogates that may have wormed in via earlier bad
-    # UTF-8 decodes (typical with Korean labels round-tripped through
-    # collectors / form data) so the .encode("utf-8") below doesn't
-    # raise UnicodeEncodeError.
+    # UTF-8 decodes (Korean labels round-tripped through forms / URLs
+    # sometimes carry \udcXX scars) so the .encode("utf-8") below doesn't
+    # raise UnicodeEncodeError on the body. The HEADER (Content-Disposition
+    # filename) goes through _safe_filename which strips non-ASCII entirely
+    # because HTTP headers must be latin-1 encodable.
     payload = _scrub_surrogates(payload)
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in _scrub_surrogates(inv.label))[:60] or "card"
+    safe_name = _safe_filename(inv.label)
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     return Response(
         content=body,
