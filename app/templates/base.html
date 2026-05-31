@@ -287,6 +287,39 @@
       transition: font-weight 120ms ease-out;
     }
 
+    /* --- Vendor stack visual ---
+       When a vendor has >1 card and the stack is collapsed, the front card
+       sits inside .stack-wrap with one or two .stack-peek divs absolutely
+       positioned slightly behind + below it. Hover lifts the peeks a few
+       pixels so the user feels "there are more". Clicking the badge on the
+       front card toggles expansion which fan-outs every card into its own
+       grid cell (handled in JS). */
+    .stack-wrap {
+      position: relative;
+      isolation: isolate;
+    }
+    .stack-wrap .stack-peek {
+      position: absolute; inset: 0;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.375rem; /* matches `rounded` on the card */
+      background: #fafafa;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+      pointer-events: none;
+      transition: transform 220ms cubic-bezier(.22,.61,.36,1);
+      z-index: 0;
+    }
+    .stack-wrap .stack-peek-1 { transform: translate(6px, 7px) rotate(0.8deg); opacity: 0.92; }
+    .stack-wrap .stack-peek-2 { transform: translate(11px, 13px) rotate(1.6deg); opacity: 0.78; }
+    .stack-wrap:hover .stack-peek-1 { transform: translate(9px, 10px) rotate(0.8deg); }
+    .stack-wrap:hover .stack-peek-2 { transform: translate(16px, 18px) rotate(1.6deg); }
+    .stack-wrap .investigation-card { position: relative; z-index: 1; }
+    .stack-toggle {
+      transition: background-color 140ms ease-out, transform 120ms ease-out;
+    }
+    .stack-toggle:hover { background-color: #1f2937; }
+    .stack-toggle:active { transform: scale(0.95); }
+    .investigation-card.is-stack-front { /* hook for future styling */ }
+
     /* --- Investigation card drag-and-drop --- */
     .investigation-card.is-dragging {
       opacity: 0.55;
