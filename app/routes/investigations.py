@@ -328,6 +328,28 @@ async def reorder_investigations(
 
 @router.get("/api/investigations/{inv_id}/export")
 async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_session)):
+    # Temporary diagnostic wrapper: surface the exception type + message so
+    # the Render 500 isn't a black box. Reverted in the next commit once
+    # the root cause is identified.
+    import traceback
+    try:
+        return await _export_investigation_impl(inv_id, session)
+    except HTTPException:
+        raise
+    except Exception as e:
+        tb = traceback.format_exc()
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "type": type(e).__name__,
+                "traceback": tb.splitlines()[-20:],
+            },
+        )
+
+
+async def _export_investigation_impl(inv_id: int, session: AsyncSession):
     inv = await session.get(Investigation, inv_id)
     if not inv:
         raise HTTPException(404)
