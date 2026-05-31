@@ -358,6 +358,29 @@ def _scrub_surrogates(obj):
 
 @router.get("/api/investigations/{inv_id}/export")
 async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_session)):
+    # Diagnostic wrapper — second time around. The surrogate scrub fix
+    # appears not to fully address what's failing on manual cards with
+    # Korean root names; let's surface the real exception in the
+    # response body again so we can SEE it instead of guessing.
+    import traceback as _tb
+    try:
+        return await _export_investigation_impl(inv_id, session)
+    except HTTPException:
+        raise
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        tb_text = _tb.format_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "type": type(e).__name__,
+                "error": str(e),
+                "traceback": tb_text.splitlines()[-25:],
+            },
+        )
+
+
+async def _export_investigation_impl(inv_id: int, session: AsyncSession):
     inv = await session.get(Investigation, inv_id)
     if not inv:
         raise HTTPException(404)
