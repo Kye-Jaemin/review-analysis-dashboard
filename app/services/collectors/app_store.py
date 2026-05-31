@@ -105,92 +105,116 @@ class AppStoreCollector(CollectorBase):
             )
         max_count = int(self.config.get("max_count", 500))
 
+        # Apple tightened the public /customerreviews RSS endpoint sometime
+        # in 2026 — even huge apps like WhatsApp now return at most ~100
+        # reviews via sortBy=mostRecent (pages 1-2 then empty) and another
+        # ~50 via sortBy=mostHelpful. Trying both and de-duping by external
+        # id is the only way to maximise coverage given Apple's cap.
+        # Page count is still capped at _MAX_PAGE since Apple stops earlier
+        # anyway, and we exit the inner loop the moment a page comes back
+        # empty so we don't burn requests on dead pages.
         emitted = 0
+        seen_ids: set[str] = set()
         async with httpx.AsyncClient(
             timeout=20,
             follow_redirects=True,
             headers={"User-Agent": "review-collector/0.1"},
         ) as client:
-            for page in range(1, _MAX_PAGE + 1):
+            first_pass_first_page_was_empty = False
+            for sort_idx, sort in enumerate(("mostRecent", "mostHelpful")):
                 if emitted >= max_count:
                     break
-                url = _RSS_URL.format(country=country, app_id=app_id, page=page)
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    # Apple sometimes returns 403 / 503 mid-pagination; treat as end.
-                    break
-                try:
-                    data = resp.json()
-                except Exception:
-                    break
-
-                entries = (data.get("feed") or {}).get("entry") or []
-                # Apple's RSS wraps a single entry in a dict instead of a list when only one exists.
-                if isinstance(entries, dict):
-                    entries = [entries]
-                if not entries:
-                    # On the FIRST page, an empty feed almost always means
-                    # Apple's public RSS isn't serving reviews for this
-                    # (app_id, country) pair — a known quirk of the
-                    # /customerreviews endpoint that hits a number of apps,
-                    # esp. in the US store (e.g. MacroFactor 1553503471).
-                    # Raise an explicit error so the user sees "try a
-                    # different country" instead of "0 new" with no clue.
-                    if page == 1 and emitted == 0:
-                        raise RuntimeError(
-                            f"Apple's public review feed for app_id={app_id} "
-                            f"in country '{country}' is empty. This is a known "
-                            f"Apple RSS limitation for certain apps/stores — "
-                            f"the reviews are still on the App Store website but "
-                            f"the public RSS endpoint doesn't serve them. Try "
-                            f"adding the source with country=gb (UK) or jp (Japan) "
-                            f"instead, which often work when US/CA/AU don't."
-                        )
-                    break
-
-                # The first entry on page 1 is the app metadata, not a review.
-                # Reviews always carry an "author" + "content" + "im:rating".
-                page_reviews = [e for e in entries if "im:rating" in e and "content" in e]
-                if not page_reviews:
-                    if page == 1 and emitted == 0:
-                        raise RuntimeError(
-                            f"Apple's RSS feed for app_id={app_id} in country "
-                            f"'{country}' returned only app metadata, no reviews. "
-                            f"This usually means the public RSS isn't serving "
-                            f"reviews for this store. Try country=gb or jp."
-                        )
-                    break
-
-                for e in page_reviews:
+                pages_with_reviews_this_sort = 0
+                for page in range(1, _MAX_PAGE + 1):
                     if emitted >= max_count:
                         break
-                    ext_id_raw = _label(e.get("id"))
-                    if not ext_id_raw:
-                        # Build a stable fallback hash if Apple didn't send an id.
-                        ext_id_raw = hashlib.sha1(
-                            (_label(e.get("title")) + "|" +
-                             _label(e.get("content")) + "|" +
-                             _label((e.get("author") or {}).get("name"))).encode("utf-8")
-                        ).hexdigest()
-
-                    title = _label(e.get("title"))
-                    content = _label(e.get("content"))
-                    text = (title + "\n\n" + content).strip() if title else content
-                    author = _label((e.get("author") or {}).get("name"))
-                    rating_str = _label(e.get("im:rating"))
-                    try:
-                        rating = float(rating_str) if rating_str else None
-                    except ValueError:
-                        rating = None
-                    posted_at = _parse_dt(_label(e.get("updated")))
-
-                    yield CollectedItem(
-                        external_id=str(ext_id_raw),
-                        text=text,
-                        author=author or None,
-                        posted_at=posted_at,
-                        rating=rating,
-                        url=_label((e.get("author") or {}).get("uri")) or None,
-                        raw=json_safe(e),
+                    url = (
+                        f"https://itunes.apple.com/{country}/rss/customerreviews/"
+                        f"id={app_id}/sortBy={sort}/page={page}/json"
                     )
-                    emitted += 1
+                    resp = await client.get(url)
+                    if resp.status_code != 200:
+                        # Apple sometimes returns 403 / 503 mid-pagination;
+                        # bail this sort and try the next one.
+                        break
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        break
+
+                    entries = (data.get("feed") or {}).get("entry") or []
+                    # Apple wraps a single entry in a dict instead of a list.
+                    if isinstance(entries, dict):
+                        entries = [entries]
+                    if not entries:
+                        if sort_idx == 0 and page == 1:
+                            first_pass_first_page_was_empty = True
+                        break
+
+                    # The first entry on page 1 is the app metadata, not a
+                    # review. Reviews always carry "im:rating" + "content".
+                    page_reviews = [
+                        e for e in entries if "im:rating" in e and "content" in e
+                    ]
+                    if not page_reviews:
+                        if sort_idx == 0 and page == 1:
+                            first_pass_first_page_was_empty = True
+                        break
+
+                    new_this_page = 0
+                    for e in page_reviews:
+                        if emitted >= max_count:
+                            break
+                        ext_id_raw = _label(e.get("id"))
+                        if not ext_id_raw:
+                            ext_id_raw = hashlib.sha1(
+                                (_label(e.get("title")) + "|" +
+                                 _label(e.get("content")) + "|" +
+                                 _label((e.get("author") or {}).get("name"))).encode("utf-8")
+                            ).hexdigest()
+                        if ext_id_raw in seen_ids:
+                            continue
+                        seen_ids.add(ext_id_raw)
+
+                        title = _label(e.get("title"))
+                        content = _label(e.get("content"))
+                        text = (title + "\n\n" + content).strip() if title else content
+                        author = _label((e.get("author") or {}).get("name"))
+                        rating_str = _label(e.get("im:rating"))
+                        try:
+                            rating = float(rating_str) if rating_str else None
+                        except ValueError:
+                            rating = None
+                        posted_at = _parse_dt(_label(e.get("updated")))
+
+                        yield CollectedItem(
+                            external_id=str(ext_id_raw),
+                            text=text,
+                            author=author or None,
+                            posted_at=posted_at,
+                            rating=rating,
+                            url=_label((e.get("author") or {}).get("uri")) or None,
+                            raw=json_safe(e),
+                        )
+                        emitted += 1
+                        new_this_page += 1
+                    pages_with_reviews_this_sort += 1
+                    if new_this_page == 0:
+                        # All reviews on this page were already seen via the
+                        # previous sortBy pass; Apple isn't giving us anything
+                        # new for this sort, stop and try the next one.
+                        break
+
+            # If neither sort returned anything on page 1, fail loudly so
+            # the user understands it's Apple-side, not "the app has no
+            # reviews".
+            if emitted == 0 and first_pass_first_page_was_empty:
+                raise RuntimeError(
+                    f"Apple's public review feed for app_id={app_id} in country "
+                    f"'{country}' is empty for both mostRecent and mostHelpful "
+                    f"sorts. This is a known Apple RSS limitation — reviews are "
+                    f"still on the App Store website but the public RSS endpoint "
+                    f"doesn't serve them for this app/store. Try country=gb (UK) "
+                    f"or jp (Japan), which often work when US/CA/AU don't."
+                )
+
