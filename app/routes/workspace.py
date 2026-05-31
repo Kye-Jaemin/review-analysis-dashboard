@@ -140,6 +140,10 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
         ],
     }
 
+    # Same surrogate guard as the per-card export — see
+    # investigations._scrub_surrogates for the why.
+    from app.routes.investigations import _scrub_surrogates
+    payload = _scrub_surrogates(payload)
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     return Response(

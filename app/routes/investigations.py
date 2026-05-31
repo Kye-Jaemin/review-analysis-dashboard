@@ -326,30 +326,31 @@ async def reorder_investigations(
 # ---------- Export ONE investigation card ----------
 
 
+def _scrub_surrogates(obj):
+    """Recursively replace lone surrogate codepoints in any string inside
+    a JSON-serializable structure. Some imported labels and review text
+    carry lone surrogates (`\\udcXX`) — leftovers from earlier UTF-8 decode
+    errors that the database happily stored. They survive json.dumps with
+    ensure_ascii=False, then crash the final `.encode("utf-8")` with
+    UnicodeEncodeError ('surrogates not allowed'). The result is the
+    plain-text "Internal Server Error" the user saw on manual cards
+    whose label includes a Korean root name. Scrub at serialization time
+    so the file always downloads cleanly; replacement char is U+FFFD."""
+    if isinstance(obj, str):
+        try:
+            obj.encode("utf-8")
+            return obj
+        except UnicodeEncodeError:
+            return obj.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(obj, list):
+        return [_scrub_surrogates(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _scrub_surrogates(v) for k, v in obj.items()}
+    return obj
+
+
 @router.get("/api/investigations/{inv_id}/export")
 async def export_investigation(inv_id: int, session: AsyncSession = Depends(get_session)):
-    # Temporary diagnostic wrapper: surface the exception type + message so
-    # the Render 500 isn't a black box. Reverted in the next commit once
-    # the root cause is identified.
-    import traceback
-    try:
-        return await _export_investigation_impl(inv_id, session)
-    except HTTPException:
-        raise
-    except Exception as e:
-        tb = traceback.format_exc()
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": str(e),
-                "type": type(e).__name__,
-                "traceback": tb.splitlines()[-20:],
-            },
-        )
-
-
-async def _export_investigation_impl(inv_id: int, session: AsyncSession):
     inv = await session.get(Investigation, inv_id)
     if not inv:
         raise HTTPException(404)
@@ -420,8 +421,13 @@ async def _export_investigation_impl(inv_id: int, session: AsyncSession):
         "theme_snapshots": snapshots_payload,
     }
 
+    # Scrub any lone surrogates that may have wormed in via earlier bad
+    # UTF-8 decodes (typical with Korean labels round-tripped through
+    # collectors / form data) so the .encode("utf-8") below doesn't
+    # raise UnicodeEncodeError.
+    payload = _scrub_surrogates(payload)
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in inv.label)[:60] or "card"
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in _scrub_surrogates(inv.label))[:60] or "card"
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     return Response(
         content=body,
