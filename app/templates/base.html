@@ -678,6 +678,99 @@
         }, 180);
       };
     })();
+
+    // ============================================================
+    // Temporary upgrade gate
+    // ============================================================
+    // Source collection (POST /sources/{id}/collect) and analysis
+    // execution (POST /analyze) are paywalled behind a 4-digit access
+    // code while the workspace is in upgrade mode. Once entered
+    // correctly the session remembers it (sessionStorage) so the user
+    // isn't reprompted on every action within the same tab. Remove
+    // this block once the upgrade is over and the buttons should be
+    // freely usable again.
+    (function () {
+      const GATE_CODE = '3537';
+      const GATE_MESSAGE = (
+        '⚠️ 현재 시스템 업그레이드 중으로 임시로 생성을 막아 두었습니다.\n' +
+        '\n' +
+        '문의가 있으신 경우 아래 이메일로 연락해주세요:\n' +
+        'jaemin.kye@samsung.com\n' +
+        '\n' +
+        '4자리 액세스 코드를 입력하세요:'
+      );
+      const SESSION_KEY = '__gate_access_granted__';
+
+      function isAuthorized() {
+        try { return sessionStorage.getItem(SESSION_KEY) === '1'; }
+        catch (_) { return false; }
+      }
+      function markAuthorized() {
+        try { sessionStorage.setItem(SESSION_KEY, '1'); } catch (_) {}
+      }
+
+      // Sync prompt-based gate. Returns true if the user is (or just
+      // became) authorized, false otherwise. We use the built-in
+      // prompt() rather than a custom modal because it's synchronous —
+      // a form's submit / htmx:beforeRequest handler needs to decide
+      // pass/fail without awaiting async UI.
+      function checkGate() {
+        if (isAuthorized()) return true;
+        const entered = prompt(GATE_MESSAGE);
+        if (entered === null) return false;          // user cancelled
+        if (String(entered).trim() === GATE_CODE) {
+          markAuthorized();
+          return true;
+        }
+        alert(
+          '액세스 코드가 일치하지 않습니다.\n\n' +
+          '문의: jaemin.kye@samsung.com'
+        );
+        return false;
+      }
+      // Expose so individual templates can call it from inline handlers
+      // if they need to (e.g. a deep link that isn't a normal form).
+      window._requireAccessCode = checkGate;
+
+      function needsGate(form) {
+        const action = (form && form.getAttribute && form.getAttribute('action')) || '';
+        if (!action) return false;
+        // POST /sources/{id}/collect — source collection trigger
+        if (/^\/sources\/\d+\/collect\/?$/.test(action)) return true;
+        // POST /analyze — analysis execution
+        if (action === '/analyze' || action === '/analyze/') return true;
+        return false;
+      }
+
+      // Capture-phase listener so we run BEFORE HTMX's own submit
+      // handler. If we preventDefault here, HTMX's request is
+      // suppressed too — verified against htmx 1.x source.
+      document.addEventListener('submit', function (evt) {
+        const form = evt.target;
+        if (!form || form.tagName !== 'FORM') return;
+        if (!needsGate(form)) return;
+        if (!checkGate()) {
+          evt.preventDefault();
+          evt.stopPropagation();
+        }
+      }, true);
+
+      // HTMX-only safety net for triggers that aren't a <form> submit
+      // (e.g. an `hx-post` on a button without a wrapping form).
+      document.addEventListener('htmx:beforeRequest', function (evt) {
+        const cfg = (evt.detail && evt.detail.requestConfig) || {};
+        const path = cfg.path || '';
+        const method = (cfg.verb || cfg.method || '').toLowerCase();
+        if (method !== 'post') return;
+        const matches = (
+          /^\/sources\/\d+\/collect\/?$/.test(path) ||
+          path === '/analyze' || path === '/analyze/'
+        );
+        if (matches && !checkGate()) {
+          evt.preventDefault();
+        }
+      });
+    })();
   </script>
   {% block scripts %}{% endblock %}
 </body>
