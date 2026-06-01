@@ -29,20 +29,37 @@ from app.models.analysis import SCORE_TO_SENTIMENT, SENTIMENT_TO_SCORE
 
 def _manual_link_upsert(values: list[dict]):
     """Dialect-aware ON CONFLICT DO UPDATE for the manual junction.
-    Same review_id + investigation_id pair re-runs in the same job
-    should overwrite category_id (the user just re-classified)."""
+    Same (review_id, investigation_id) pair re-runs in the same job
+    should overwrite category_id (the user just re-classified) AND
+    the per-card sentiment snapshot."""
     if not values:
         return None
+    refresh_cols = {
+        "category_id": None,
+        "sentiment": None,
+        "sentiment_score": None,
+        "user_tier": None,
+    }
     if settings.database_url.startswith("postgresql"):
         stmt = pg_insert(ReviewManualCategoryLink).values(values)
         return stmt.on_conflict_do_update(
             index_elements=["review_id", "investigation_id"],
-            set_={"category_id": stmt.excluded.category_id},
+            set_={
+                "category_id": stmt.excluded.category_id,
+                "sentiment": stmt.excluded.sentiment,
+                "sentiment_score": stmt.excluded.sentiment_score,
+                "user_tier": stmt.excluded.user_tier,
+            },
         )
     stmt = sqlite_insert(ReviewManualCategoryLink).values(values)
     return stmt.on_conflict_do_update(
         index_elements=["review_id", "investigation_id"],
-        set_={"category_id": stmt.excluded.category_id},
+        set_={
+            "category_id": stmt.excluded.category_id,
+            "sentiment": stmt.excluded.sentiment,
+            "sentiment_score": stmt.excluded.sentiment_score,
+            "user_tier": stmt.excluded.user_tier,
+        },
     )
 
 
@@ -406,11 +423,19 @@ async def run_analysis_job(
                             # same source set keep each own classification
                             # alive — Analysis.category_id may flicker on
                             # re-runs but the junction stays per-card.
+                            #
+                            # Per-card sentiment snapshot is stored on the
+                            # junction at analysis time so dashboard reads
+                            # for THIS card use its own snapshot, immune to
+                            # sibling cards overwriting Analysis.sentiment.
                             if investigation_id is not None and cat_id_to_store is not None:
                                 link_rows.append({
                                     "review_id": out.review_id,
                                     "investigation_id": investigation_id,
                                     "category_id": cat_id_to_store,
+                                    "sentiment": out.sentiment.value if out.sentiment is not None else None,
+                                    "sentiment_score": out.sentiment_score,
+                                    "user_tier": None,  # manual analyzer doesn't infer tier
                                 })
                             if success:
                                 processed += 1

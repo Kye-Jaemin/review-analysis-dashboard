@@ -40,6 +40,11 @@ ReviewManualCategoryLink = Table(
         nullable=False,
         index=True,
     ),
+    # Per-card sentiment snapshot — see migration 0014. Plain strings so
+    # we don't have to drag the Postgres ENUM around.
+    Column("sentiment", String(50), nullable=True),
+    Column("sentiment_score", Integer, nullable=True),
+    Column("user_tier", String(20), nullable=True),
 )
 
 

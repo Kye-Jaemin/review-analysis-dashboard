@@ -34,6 +34,13 @@ ReviewAutoCategoryLink = Table(
         nullable=False,
         index=True,
     ),
+    # Per-card sentiment snapshot — see migration 0014 for the why.
+    # Stored as plain strings so we don't depend on the analyses.sentiment
+    # Postgres ENUM type (cross-table ENUM reuse is finicky). The
+    # dashboard reads them as strings anyway.
+    Column("sentiment", String(50), nullable=True),
+    Column("sentiment_score", Integer, nullable=True),
+    Column("user_tier", String(20), nullable=True),
 )
 
 

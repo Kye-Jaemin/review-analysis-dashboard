@@ -49,18 +49,38 @@ from app.services.analyzer import _select_review_ids
 
 
 def _link_upsert(values: list[dict]):
-    """ON CONFLICT DO NOTHING insert for the junction table, dialect-aware
-    so the same call works on Postgres (prod) and SQLite (local/test)."""
+    """ON CONFLICT DO UPDATE insert for the auto junction, dialect-aware
+    so the same call works on Postgres (prod) and SQLite (local/test).
+
+    Updates the per-card sentiment snapshot (sentiment / sentiment_score /
+    user_tier) when the same (review, auto_category) pair re-appears,
+    so re-running auto analysis on this card refreshes its own snapshot
+    without touching any sibling card's junction rows."""
     if not values:
         return None
+    cols_to_refresh = {
+        "sentiment": None,  # placeholder, replaced via stmt.excluded
+        "sentiment_score": None,
+        "user_tier": None,
+    }
     if settings.database_url.startswith("postgresql"):
         stmt = pg_insert(ReviewAutoCategoryLink).values(values)
-        return stmt.on_conflict_do_nothing(
-            index_elements=["review_id", "auto_category_id"]
+        return stmt.on_conflict_do_update(
+            index_elements=["review_id", "auto_category_id"],
+            set_={
+                "sentiment": stmt.excluded.sentiment,
+                "sentiment_score": stmt.excluded.sentiment_score,
+                "user_tier": stmt.excluded.user_tier,
+            },
         )
     stmt = sqlite_insert(ReviewAutoCategoryLink).values(values)
-    return stmt.on_conflict_do_nothing(
-        index_elements=["review_id", "auto_category_id"]
+    return stmt.on_conflict_do_update(
+        index_elements=["review_id", "auto_category_id"],
+        set_={
+            "sentiment": stmt.excluded.sentiment,
+            "sentiment_score": stmt.excluded.sentiment_score,
+            "user_tier": stmt.excluded.user_tier,
+        },
     )
 
 SAMPLE_SIZE_FOR_EXTRACTION = 200
@@ -500,10 +520,19 @@ async def run_auto_analysis_job(
                             # earlier tags on this review (pointing at Card A
                             # auto_categories) stay put — only this card's
                             # old tags were cleared by the cascade above.
+                            #
+                            # Sentiment snapshot lands on the junction too so
+                            # this card's read path can show its own analysis
+                            # of the review even after another card re-runs
+                            # and overwrites the global Analysis row.
                             if ac_id_to_store is not None:
-                                link_rows.append(
-                                    {"review_id": rid, "auto_category_id": ac_id_to_store}
-                                )
+                                link_rows.append({
+                                    "review_id": rid,
+                                    "auto_category_id": ac_id_to_store,
+                                    "sentiment": sent.value if sent is not None else None,
+                                    "sentiment_score": score,
+                                    "user_tier": tier_val,
+                                })
 
                             if success:
                                 processed += 1
