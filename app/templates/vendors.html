@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('nav.vendors') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="text-2xl font-semibold">{{ t('nav.vendors') }}</h1>
+  <div class="text-xs text-gray-500">
+    {% if lang == 'ko' %}
+      소스 표시이름을 기준으로 같은 업체를 묶어, 자동 카테고리 + 감성 결과로 강점/약점을 집계합니다 (신규 분석 없음).
+    {% else %}
+      Groups sources by app name and rolls up your existing analysis into strengths and weaknesses (no new LLM calls).
+    {% endif %}
+  </div>
+</div>
+
+{% if not vendors %}
+  <div class="bg-white p-6 rounded text-center text-gray-500 text-sm">
+    {% if lang == 'ko' %}
+      아직 수집된 리뷰가 없습니다. 소스 추가 후 분석을 실행하면 여기서 강점/약점이 보입니다.
+    {% else %}
+      No reviews collected yet. Add sources and run analysis to see strengths and weaknesses here.
+    {% endif %}
+  </div>
+{% endif %}
+
+{% set sentiment_colors = {
+  'very_negative': '#b91c1c',
+  'negative': '#fdba74',
+  'neutral': '#9ca3af',
+  'positive': '#86efac',
+  'very_positive': '#15803d',
+} %}
+{% set sentiment_labels = {
+  'very_negative': t('sentiment.very_negative'),
+  'negative': t('sentiment.negative'),
+  'neutral': t('sentiment.neutral'),
+  'positive': t('sentiment.positive'),
+  'very_positive': t('sentiment.very_positive'),
+} %}
+
+<div class="space-y-4">
+  {% for v in vendors %}
+    {% set analyzed = v.analyzed_count or 0 %}
+    <div class="bg-white rounded shadow-sm p-4 panel-in">
+      <!-- Header: vendor name + KPIs -->
+      <div class="flex items-start justify-between gap-4 mb-3 flex-wrap">
+        <div class="flex items-center gap-3 min-w-0">
+          {% if v.icon_url %}
+            <img src="{{ v.icon_url }}" class="w-12 h-12 rounded shrink-0" alt="">
+          {% else %}
+            <div class="w-12 h-12 rounded bg-gray-200 flex items-center justify-center text-xs text-gray-500 shrink-0">
+              {{ (v.display or v.key)[:2].upper() }}
+            </div>
+          {% endif %}
+          <div class="min-w-0">
+            <div class="text-lg font-semibold text-gray-900 truncate" title="{{ v.display }}">{{ v.display }}</div>
+            <div class="text-[11px] text-gray-500 flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
+              {% for p in v.platforms %}
+                <span class="px-1.5 py-0.5 rounded bg-gray-100">{{ t('source_type.' + p) if t('source_type.' + p) != 'source_type.' + p else p }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-4 text-right text-sm shrink-0">
+          <div>
+            <div class="text-xs text-gray-500">{% if lang == 'ko' %}총 리뷰{% else %}Total reviews{% endif %}</div>
+            <div class="text-xl font-bold tabular-nums">{{ '{:,}'.format(v.review_count) }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-gray-500">{% if lang == 'ko' %}평균 감성{% else %}Avg sentiment{% endif %}</div>
+            <div class="text-xl font-bold tabular-nums">
+              {{ '%.2f'|format(v.avg_sentiment_score) if v.avg_sentiment_score is not none else '—' }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-gray-500">{% if lang == 'ko' %}평균 별점{% else %}Avg rating{% endif %}</div>
+            <div class="text-xl font-bold tabular-nums">
+              {{ '%.2f ★'|format(v.avg_rating) if v.avg_rating is not none else '—' }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sentiment distribution bar (full width) -->
+      {% if analyzed > 0 %}
+      <div class="mb-3">
+        <div class="flex h-2 rounded overflow-hidden bg-gray-100">
+          {% for band in ['very_positive', 'positive', 'neutral', 'negative', 'very_negative'] %}
+            {% set c = v.sentiments[band] %}
+            {% if c > 0 %}
+              <div style="width: {{ (c / analyzed * 100)|round(2) }}%; background: {{ sentiment_colors[band] }}"
+                   title="{{ sentiment_labels[band] }}: {{ '{:,}'.format(c) }}"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+          <span>
+            <span class="text-green-700">+{{ '{:,}'.format(v.sentiments.very_positive + v.sentiments.positive) }}</span>
+            ·
+            <span class="text-gray-500">{{ '{:,}'.format(v.sentiments.neutral) }}</span>
+            ·
+            <span class="text-red-700">−{{ '{:,}'.format(v.sentiments.negative + v.sentiments.very_negative) }}</span>
+          </span>
+          <span>
+            {% if lang == 'ko' %}분석 완료{% else %}analyzed{% endif %}:
+            <b class="text-gray-700 tabular-nums">{{ '{:,}'.format(analyzed) }}</b> /
+            <span class="tabular-nums">{{ '{:,}'.format(v.review_count) }}</span>
+          </span>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Strengths / Weaknesses two-column -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="border border-green-100 rounded p-3 bg-green-50/40">
+          <div class="text-xs font-medium text-green-800 mb-2 flex items-center gap-1.5">
+            <span>💪</span>
+            <span>{% if lang == 'ko' %}강점 Top 5{% else %}Top 5 strengths{% endif %}</span>
+            <span class="text-[10px] font-normal text-green-700/70 ml-1">
+              {% if lang == 'ko' %}(긍정 비율 + 응답수){% else %}(positive ratio + volume){% endif %}
+            </span>
+          </div>
+          {% if v.strengths %}
+            <ol class="space-y-1.5">
+              {% for c in v.strengths %}
+                <li class="flex items-baseline justify-between gap-2 text-xs">
+                  <span class="flex-1 min-w-0">
+                    <span class="font-medium text-gray-800">{{ loop.index }}. {{ c.name }}</span>
+                    {% if c.description %}
+                      <span class="text-[10px] text-gray-500 ml-1 line-clamp-1">{{ c.description }}</span>
+                    {% endif %}
+                  </span>
+                  <span class="shrink-0 text-right tabular-nums">
+                    <span class="text-green-700 font-semibold">{{ (c.pos_pct * 100)|round(1) }}%</span>
+                    <span class="text-gray-400">/</span>
+                    <span class="text-gray-600">{{ '{:,}'.format(c.total) }}</span>
+                  </span>
+                </li>
+              {% endfor %}
+            </ol>
+          {% else %}
+            <div class="text-[11px] text-gray-400 py-2 text-center">
+              {% if lang == 'ko' %}자동 분류 결과가 부족합니다 (카테고리당 최소 10건 필요){% else %}Not enough auto-categorized data (need ≥ 10 reviews per category){% endif %}
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="border border-red-100 rounded p-3 bg-red-50/40">
+          <div class="text-xs font-medium text-red-800 mb-2 flex items-center gap-1.5">
+            <span>⚠️</span>
+            <span>{% if lang == 'ko' %}약점 Top 5{% else %}Top 5 weaknesses{% endif %}</span>
+            <span class="text-[10px] font-normal text-red-700/70 ml-1">
+              {% if lang == 'ko' %}(부정 비율 + 응답수){% else %}(negative ratio + volume){% endif %}
+            </span>
+          </div>
+          {% if v.weaknesses %}
+            <ol class="space-y-1.5">
+              {% for c in v.weaknesses %}
+                <li class="flex items-baseline justify-between gap-2 text-xs">
+                  <span class="flex-1 min-w-0">
+                    <span class="font-medium text-gray-800">{{ loop.index }}. {{ c.name }}</span>
+                    {% if c.description %}
+                      <span class="text-[10px] text-gray-500 ml-1 line-clamp-1">{{ c.description }}</span>
+                    {% endif %}
+                  </span>
+                  <span class="shrink-0 text-right tabular-nums">
+                    <span class="text-red-700 font-semibold">{{ (c.neg_pct * 100)|round(1) }}%</span>
+                    <span class="text-gray-400">/</span>
+                    <span class="text-gray-600">{{ '{:,}'.format(c.total) }}</span>
+                  </span>
+                </li>
+              {% endfor %}
+            </ol>
+          {% else %}
+            <div class="text-[11px] text-gray-400 py-2 text-center">
+              {% if lang == 'ko' %}자동 분류 결과가 부족합니다{% else %}Not enough auto-categorized data{% endif %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

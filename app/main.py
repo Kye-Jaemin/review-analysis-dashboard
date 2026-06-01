@@ -17,6 +17,7 @@ from app.routes import (
     reviews,
     sources,
     themes,
+    vendors,
     workspace,
 )
 from app.templating import render, templates  # noqa: F401
@@ -73,3 +74,4 @@ app.include_router(themes.router)
 app.include_router(investigations.router)
 app.include_router(auto_categories.router)
 app.include_router(workspace.router)
+app.include_router(vendors.router)
