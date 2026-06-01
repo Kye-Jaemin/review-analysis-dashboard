@@ -53,6 +53,46 @@ _SCORE = {
 # would otherwise dominate the rankings.
 _MIN_BAND_REVIEWS = 10
 
+# Vendor stems that are actually the same company under different store
+# branding. After _vendor_key extracts the source's stem, this map merges
+# variants down to a single canonical key so the dashboard groups them
+# under one row. Keys are post-stem lowercased forms; values are the
+# canonical group key. Both directions matter — a stem that already
+# matches a value stays as-is.
+_VENDOR_ALIASES: dict[str, str] = {
+    # Google rebranded Fitbit's app while leaving the standalone Fitbit
+    # store listings alive — same company.
+    "google health (fitbit)": "fitbit",
+    "google health fitbit": "fitbit",
+    "google health": "fitbit",
+    # WeightWatchers / Weight Watchers Program / weightwatchers — same
+    # brand, varying spaces / formality across stores.
+    "weight watchers program": "weightwatchers",
+    "weight watchers": "weightwatchers",
+    "weightwatchers program": "weightwatchers",
+    "ww": "weightwatchers",  # the rebrand name people use sometimes
+    # Apple Fitness+ is sometimes "AppleFitnessPlus" (no space) and
+    # sometimes "Apple Fitness" in the App Store listing.
+    "applefitnessplus": "apple fitness",
+    "apple fitness+": "apple fitness",
+    "apple fitness plus": "apple fitness",
+}
+
+# Auto-category names that aren't real "strengths" or "weaknesses" but
+# are the bulk sentiment buckets the analyzer always inserts (Top 10 + 2
+# fixed simple buckets). Excluded from the strength/weakness ranking so
+# they don't dominate the lists with 100%-positive or 100%-negative
+# trivial entries. Matched case-insensitively against the lowercased
+# auto_category.name, in both en + ko.
+_SIMPLE_BUCKET_NAMES = {
+    # English (SIMPLE_BUCKETS in auto_analyzer.py)
+    "simple praise",
+    "simple complaint",
+    # Korean
+    "단순 긍정",
+    "단순 부정",
+}
+
 
 def _vendor_key(display_name: Optional[str], label: Optional[str]) -> str:
     """Reduce a source's display name to its vendor stem.
@@ -62,6 +102,7 @@ def _vendor_key(display_name: Optional[str], label: Optional[str]) -> str:
       - cut at the first ':' or ' - ' to drop subtitles like
         ':AI Calorie Counter' / '- Food Tracker'
       - lowercase + strip
+      - apply _VENDOR_ALIASES to merge known brand variants
     """
     name = (display_name or label or "").strip()
     if not name:
@@ -73,7 +114,9 @@ def _vendor_key(display_name: Optional[str], label: Optional[str]) -> str:
         if sep in name:
             name = name.split(sep, 1)[0]
             break
-    return name.strip().lower()
+    stem = name.strip().lower()
+    # Brand alias merge — e.g. "google health (fitbit)" → "fitbit".
+    return _VENDOR_ALIASES.get(stem, stem)
 
 
 async def list_vendors(session: AsyncSession) -> list[dict]:
@@ -213,10 +256,21 @@ async def list_vendors(session: AsyncSession) -> list[dict]:
             # Dedup auto-cats that appear with the same name across
             # multiple investigations (same vendor, two cards). Sum their
             # counts. Use lowercased name as the dedupe key.
+            #
+            # The two fixed simple-sentiment buckets ("Simple praise" /
+            # "Simple complaint" / "단순 긍정" / "단순 부정") are skipped
+            # here so they don't bubble to the top of strengths /
+            # weaknesses as 100%-positive / 100%-negative trivial wins —
+            # they aren't features the vendor is good or bad AT, they're
+            # just sentiment dumps. The dashboard's auto-cat doughnut
+            # still shows them; only the vendor strength/weakness
+            # ranking excludes them.
             by_name: dict[str, dict] = {}
             for c in cats:
                 nm = (c.name or "").strip()
                 if not nm:
+                    continue
+                if nm.lower() in _SIMPLE_BUCKET_NAMES:
                     continue
                 key_n = nm.lower()
                 node = by_name.setdefault(
