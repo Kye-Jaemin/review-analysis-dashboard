@@ -24,6 +24,7 @@
               class="text-xs text-gray-600 hover:underline hidden">
         모든 스택 펼치기
       </button>
+      <span id="investigations-hidden-toggle" class="inline-flex"></span>
       <div class="text-xs text-gray-500">{{ t('dashboard.investigations_hint') }}</div>
     </div>
   </div>
@@ -616,12 +617,27 @@ function setDashboardVisibility(visible) {
   document.getElementById('dashboard-empty').classList.toggle('hidden', visible);
 }
 
+// "Show hidden cards" toggle state. Persisted across refreshes so the
+// user doesn't have to re-flip it every time.
+let _includeHidden = (() => {
+  try { return sessionStorage.getItem('dashIncludeHidden') === '1'; }
+  catch (_) { return false; }
+})();
+let _hiddenCount = 0;
+function _persistIncludeHidden() {
+  try { sessionStorage.setItem('dashIncludeHidden', _includeHidden ? '1' : '0'); }
+  catch (_) {}
+}
+
 async function loadInvestigations() {
   try {
-    const res = await fetch('/api/investigations');
+    const url = _includeHidden ? '/api/investigations?include_hidden=1' : '/api/investigations';
+    const res = await fetch(url);
     const data = await res.json();
     _lastInvestigations = data.investigations || [];
+    _hiddenCount = data.hidden_count || 0;
     renderInvestigations(_lastInvestigations);
+    renderHiddenToggle();
     updateActiveFilterStrip();
     updateThemesPanelForActive();
     refreshSavedSnapshots();
@@ -629,6 +645,53 @@ async function loadInvestigations() {
   } catch (e) {
     document.getElementById('investigations-grid').innerHTML =
       '<div class="text-xs text-red-600">' + escapeHtml(String(e)) + '</div>';
+  }
+}
+
+// Tiny chip in the investigations header that shows "N hidden cards"
+// and toggles _includeHidden when clicked. Created on demand; if the
+// host element doesn't exist (e.g. older template) it bails silently.
+function renderHiddenToggle() {
+  const slot = document.getElementById('investigations-hidden-toggle');
+  if (!slot) return;
+  // No hidden cards exist AND we're not showing them → nothing to render.
+  if (_hiddenCount === 0 && !_includeHidden) { slot.innerHTML = ''; return; }
+  const label = _includeHidden
+    ? `숨긴 카드 가리기`
+    : `숨긴 카드 ${_hiddenCount}개 보기`;
+  slot.innerHTML = `
+    <button type="button" onclick="toggleIncludeHidden()"
+            class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border
+                   ${_includeHidden ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}">
+      <span aria-hidden="true">${_includeHidden ? '🙈' : '👁'}</span>
+      <span>${escapeHtml(label)}</span>
+    </button>`;
+}
+
+async function toggleIncludeHidden() {
+  _includeHidden = !_includeHidden;
+  _persistIncludeHidden();
+  await loadInvestigations();
+}
+
+// Flip a card's hidden flag and refresh.
+async function setInvestigationHidden(id, hidden) {
+  try {
+    const res = await fetch(`/api/investigations/${id}/visibility`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hidden }),
+    });
+    if (!res.ok) throw new Error('visibility toggle failed');
+    // If we just hid the currently-active card, clear the dashboard so it
+    // doesn't keep showing data for a card the user can't see anymore.
+    if (hidden && activeInvestigationId === id) {
+      await clearActiveInvestigation();
+    } else {
+      await loadInvestigations();
+    }
+  } catch (e) {
+    alert('카드 숨김 처리 실패: ' + e);
   }
 }
 
@@ -758,9 +821,18 @@ function renderInvestigations(items) {
            {{ t('dashboard.auto_category_badge') }}
          </span>`;
 
-    const date = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
+    // Card date shows created_at — the moment of the original analysis run
+    // — because users think of cards by "when did I make this". updated_at
+    // is bumped by drag-reorder / minor edits, so it's a misleading
+    // primary date. Both values still go into a tooltip for traceability.
+    const createdDate = inv.created_at ? inv.created_at.slice(0, 10) : '';
+    const updatedDate = inv.updated_at ? inv.updated_at.slice(0, 10) : '';
+    const dateTitle = createdDate
+      ? `생성: ${createdDate}` + (updatedDate && updatedDate !== createdDate ? ` · 수정: ${updatedDate}` : '')
+      : '';
     const totalReviews = (inv.review_count || 0).toLocaleString();
-    const extraCls = opts.frontOfStack ? ' is-stack-front' : '';
+    const hiddenCls = inv.hidden ? ' opacity-60' : '';
+    const extraCls = (opts.frontOfStack ? ' is-stack-front' : '') + hiddenCls;
     // sig can contain ':', '|', '(', etc. — anything an app name does.
     // Stuffing it through JSON.stringify into an onclick="" attribute used
     // to collide with the outer attribute quotes and silently break the
@@ -791,7 +863,7 @@ function renderInvestigations(items) {
               <span class="card-drag-handle text-gray-300 text-base leading-none select-none cursor-grab" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
               <div class="font-semibold text-sm truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</div>
             </div>
-            <div class="text-[10px] text-gray-500 mt-0.5">${date}</div>
+            <div class="text-[10px] text-gray-500 mt-0.5" title="${escapeHtml(dateTitle)}">${createdDate}${inv.hidden ? ' · <span class="text-amber-700">숨김</span>' : ''}</div>
           </div>
           <div class="text-right shrink-0">
             <div class="text-base font-semibold text-gray-800 leading-none tabular-nums">${totalReviews}</div>
@@ -814,6 +886,10 @@ function renderInvestigations(items) {
           <a href="/api/investigations/${inv.id}/export"
              onclick="event.stopPropagation()"
              class="text-[11px] text-gray-600 hover:underline">${escapeHtml('{{ t("dashboard.investigations_export") }}')}</a>
+          <button type="button"
+                  onclick="event.stopPropagation(); setInvestigationHidden(${inv.id}, ${inv.hidden ? 'false' : 'true'})"
+                  class="text-[11px] text-gray-600 hover:underline"
+                  title="${inv.hidden ? '다시 표시하기' : '대시보드에서 숨기기 (데이터는 보존)'}">${inv.hidden ? '복원' : '숨기기'}</button>
           <button type="button"
                   onclick="event.stopPropagation(); deleteInvestigation(${inv.id})"
                   class="text-[11px] text-red-600 hover:underline">${escapeHtml('{{ t("common.delete") }}')}</button>

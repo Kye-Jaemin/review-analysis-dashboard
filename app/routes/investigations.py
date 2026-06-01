@@ -50,7 +50,7 @@ SNAPSHOT_COLS = [
 ]
 INVESTIGATION_COLS = [
     "id", "label", "description", "source_ids", "root_ids",
-    "display_order", "created_at", "updated_at",
+    "display_order", "hidden", "created_at", "updated_at",
 ]
 AUTO_CATEGORY_COLS = [
     "id", "investigation_id", "name", "description", "review_count",
@@ -99,20 +99,22 @@ class InvestigationPatch(BaseModel):
 
 
 @router.get("/api/investigations")
-async def list_investigations(session: AsyncSession = Depends(get_session)):
+async def list_investigations(
+    include_hidden: bool = False,
+    session: AsyncSession = Depends(get_session),
+):
     # Pull rows in a stable base order. The final ordering is computed in
     # Python below because the grouping key depends on the related Source
     # rows (display_name / label) — there's no single SQL column we can
     # ORDER BY that produces vendor-grouped + auto-first + drag-sticky
     # output cleanly. display_order remains the within-group tiebreaker.
-    rows = (
-        await session.execute(
-            select(Investigation).order_by(
-                Investigation.display_order.asc(),
-                Investigation.updated_at.desc(),
-            )
-        )
-    ).scalars().all()
+    stmt = select(Investigation).order_by(
+        Investigation.display_order.asc(),
+        Investigation.updated_at.desc(),
+    )
+    if not include_hidden:
+        stmt = stmt.where(Investigation.hidden.is_(False))
+    rows = (await session.execute(stmt)).scalars().all()
 
     sources = {
         s.id: s for s in (await session.execute(select(Source))).scalars().all()
@@ -180,6 +182,7 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
                 "roots": cat_items,
                 "review_count": total_reviews,
                 "display_order": inv.display_order or 0,
+                "hidden": bool(inv.hidden),
                 "created_at": inv.created_at.isoformat() if inv.created_at else None,
                 "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
             }
@@ -238,7 +241,34 @@ async def list_investigations(session: AsyncSession = Depends(get_session)):
             await session.commit()
         except Exception:
             await session.rollback()
-    return {"investigations": out}
+    # Always report the hidden total so the dashboard can show a
+    # "숨긴 카드 N개 보기" toggle even when the current list is filtered.
+    hidden_count = (
+        await session.execute(
+            select(func.count(Investigation.id)).where(Investigation.hidden.is_(True))
+        )
+    ).scalar() or 0
+    return {"investigations": out, "hidden_count": int(hidden_count)}
+
+
+class VisibilityPayload(BaseModel):
+    hidden: bool
+
+
+@router.patch("/api/investigations/{inv_id}/visibility")
+async def set_investigation_visibility(
+    inv_id: int,
+    payload: VisibilityPayload,
+    session: AsyncSession = Depends(get_session),
+):
+    """Flip a card's hidden flag without touching anything else (label,
+    sources, analyses all stay). Used by the eye/⋮ menu on cards."""
+    inv = await session.get(Investigation, inv_id)
+    if not inv:
+        raise HTTPException(404)
+    inv.hidden = bool(payload.hidden)
+    await session.commit()
+    return {"id": inv.id, "hidden": inv.hidden}
 
 
 @router.post("/api/investigations")
@@ -723,6 +753,10 @@ async def import_investigation(
         source_ids=[src_id_map[s] for s in (inv_data.get("source_ids") or []) if s in src_id_map],
         root_ids=[cat_id_map[c] for c in (inv_data.get("root_ids") or []) if c in cat_id_map],
         display_order=int(max_order) + 1,
+        # Imported cards default to visible regardless of the source
+        # workspace's hidden flag — the importing user explicitly chose
+        # to bring it in and probably wants to see it.
+        hidden=False,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )

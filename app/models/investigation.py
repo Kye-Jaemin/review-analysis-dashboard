@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -26,6 +26,11 @@ class Investigation(Base):
     # next available value so they land at the end of the grid; the user
     # can then drag them anywhere.
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # User-controlled visibility. Hidden cards are still in the DB and
+    # exportable, but excluded from the dashboard's default grid until
+    # the user flips "Show hidden" on. Drag-reorder and analysis still
+    # work on hidden cards — this is purely a display flag.
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

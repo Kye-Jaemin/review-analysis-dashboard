@@ -62,7 +62,7 @@ SNAPSHOT_COLS = [
 ]
 INVESTIGATION_COLS = [
     "id", "label", "description", "source_ids", "root_ids",
-    "display_order", "created_at", "updated_at",
+    "display_order", "hidden", "created_at", "updated_at",
 ]
 
 
@@ -286,6 +286,7 @@ async def import_workspace(
                 source_ids=row.get("source_ids") or [],
                 root_ids=row.get("root_ids") or [],
                 display_order=int(row.get("display_order") or 0),
+                hidden=bool(row.get("hidden") or False),
                 created_at=_parse_dt(row.get("created_at")) or now,
                 updated_at=_parse_dt(row.get("updated_at")) or now,
             )
