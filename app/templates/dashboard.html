@@ -657,13 +657,17 @@ function renderHiddenToggle() {
   // No hidden cards exist AND we're not showing them → nothing to render.
   if (_hiddenCount === 0 && !_includeHidden) { slot.innerHTML = ''; return; }
   const label = _includeHidden
-    ? `숨긴 카드 가리기`
-    : `숨긴 카드 ${_hiddenCount}개 보기`;
+    ? `숨긴 카드 다시 숨기기`
+    : `🙈 숨긴 카드 ${_hiddenCount}개 보기`;
+  // Bumped up to font-size 12px + amber accent + soft pulse so the toggle
+  // doesn't disappear into the row of small grey controls in the header.
+  // Previous styling (11px, grey) made several users miss it entirely.
   slot.innerHTML = `
     <button type="button" onclick="toggleIncludeHidden()"
-            class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border
-                   ${_includeHidden ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}">
-      <span aria-hidden="true">${_includeHidden ? '🙈' : '👁'}</span>
+            class="hidden-toggle-chip inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border shadow-sm
+                   ${_includeHidden
+                     ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                     : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}">
       <span>${escapeHtml(label)}</span>
     </button>`;
 }
