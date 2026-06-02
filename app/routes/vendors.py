@@ -239,9 +239,13 @@ async def delete_reason_card(
 # full review texts. No additional LLM call — the IDs were already
 # captured at extract time.
 
+import csv  # noqa: E402
+import io  # noqa: E402
+
+from fastapi.responses import Response  # noqa: E402
 from sqlalchemy import select  # noqa: E402 — local import keeps the
 # top-of-file imports clean while this section is self-contained.
-from app.models import Analysis, Review  # noqa: E402
+from app.models import Analysis, Review, VendorReasonCard  # noqa: E402
 
 
 @router.get("/api/vendor-reasons/reviews-by-ids")
@@ -299,3 +303,119 @@ async def reviews_by_ids(
     # LLM produced (typically rough strength-of-signal order).
     ordered = [by_id[i] for i in id_list if i in by_id]
     return {"reviews": ordered, "found": len(ordered), "requested": len(id_list)}
+
+
+# ----------------------------------------------------------------------------
+# CSV export
+# ----------------------------------------------------------------------------
+
+
+@router.get("/vendors/export.csv")
+async def vendors_export_csv(
+    vendor_keys: str = Query(
+        "", description="comma-separated vendor keys; empty means all visible vendors"
+    ),
+    include: str = Query("both", pattern="^(strengths|weaknesses|both)$"),
+    include_reasons: int = Query(
+        0, description="1 = append saved reason analyses as a 'reasons' column"
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Download the strength/weakness Top 5 table for the selected vendors
+    as a CSV. The reasons column (optional) joins each row with the
+    causal reasons from the matching VendorReasonCard, when one exists.
+
+    Excel-friendly: UTF-8 with BOM so Korean characters render correctly
+    when the file is opened in Excel on Windows. Filename is ASCII to
+    avoid the latin-1 Content-Disposition pitfall."""
+    vendors = await list_vendors(session)
+    selected = {k.strip() for k in vendor_keys.split(",") if k.strip()}
+    if selected:
+        vendors = [v for v in vendors if v.get("key") in selected]
+
+    # Optional: load saved reason cards so we can splice their causal
+    # mechanisms into the export. Keyed by (vendor_key, lowercased
+    # category_name, band) to match the same triple the page uses.
+    reason_map: dict[tuple[str, str, str], list[tuple[str, int]]] = {}
+    if include_reasons:
+        cards = (
+            await session.execute(
+                select(VendorReasonCard).where(VendorReasonCard.hidden.is_(False))
+            )
+        ).scalars().all()
+        for c in cards:
+            payload = c.reasons
+            if isinstance(payload, dict):
+                reasons = payload.get("reasons") or []
+            elif isinstance(payload, list):
+                reasons = payload
+            else:
+                reasons = []
+            entries = [
+                (str(r.get("reason") or "").strip(), int(r.get("count") or 0))
+                for r in reasons
+                if isinstance(r, dict) and (r.get("reason") or "").strip()
+            ]
+            key = (c.vendor_key, (c.category_name or "").strip().lower(), c.band)
+            reason_map[key] = entries
+
+    def _join_reasons(entries: list[tuple[str, int]]) -> str:
+        return "; ".join(f"{name}({n})" for name, n in entries)
+
+    # Stream rows into an in-memory buffer; CSV files for ~14 vendors ×
+    # 10 rows are tiny so this is fine without chunking.
+    buf = io.StringIO()
+    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([
+        "vendor",
+        "type",
+        "category",
+        "pct",
+        "count",
+        "wilson_score",
+        "description",
+        "small_sample",
+        "reasons",
+    ])
+
+    for v in vendors:
+        if include in ("strengths", "both"):
+            for s in v.get("strengths") or []:
+                name = (s.get("name") or "").strip()
+                key = (v.get("key"), name.lower(), "positive")
+                writer.writerow([
+                    v.get("display") or v.get("key"),
+                    "strength",
+                    name,
+                    round(float(s.get("pos_pct") or 0.0) * 100, 1),
+                    int(s.get("total") or 0),
+                    round(float(s.get("pos_score") or 0.0), 3),
+                    (s.get("description") or "").strip(),
+                    "Y" if s.get("small_sample") else "",
+                    _join_reasons(reason_map.get(key, [])) if include_reasons else "",
+                ])
+        if include in ("weaknesses", "both"):
+            for w in v.get("weaknesses") or []:
+                name = (w.get("name") or "").strip()
+                key = (v.get("key"), name.lower(), "negative")
+                writer.writerow([
+                    v.get("display") or v.get("key"),
+                    "weakness",
+                    name,
+                    round(float(w.get("neg_pct") or 0.0) * 100, 1),
+                    int(w.get("total") or 0),
+                    round(float(w.get("neg_score") or 0.0), 3),
+                    (w.get("description") or "").strip(),
+                    "Y" if w.get("small_sample") else "",
+                    _join_reasons(reason_map.get(key, [])) if include_reasons else "",
+                ])
+
+    # BOM lets Excel-on-Windows auto-detect UTF-8 for the Korean cells.
+    body = ("﻿" + buf.getvalue()).encode("utf-8")
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="vendor_analysis.csv"'
+        },
+    )

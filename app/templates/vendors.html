@@ -3,18 +3,25 @@
 {% block title %}{{ t('nav.vendors') }} — {{ t('app.name') }}{% endblock %}
 
 {% block content %}
-<div class="flex items-baseline justify-between mb-4">
+<div class="flex items-baseline justify-between mb-4 gap-3">
   <h1 class="text-2xl font-semibold">{{ t('nav.vendors') }}</h1>
-  <div class="text-xs text-gray-500">
-    {% if lang == 'ko' %}
-      소스 표시이름을 기준으로 같은 업체를 묶어, 자동 카테고리 + 감성 결과로 강점/약점을 집계합니다 (신규 분석 없음).
-      <br>
-      <span class="text-[10px]">랭킹은 <a class="text-blue-600 hover:underline" href="https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval" target="_blank">Wilson 95% 하한 신뢰구간</a> — 표본이 작은 카테고리는 그만큼 패널티. <span class="inline-block px-1 py-0 rounded bg-amber-100 text-amber-800 align-middle">표본 적음</span> 마크는 응답 30건 미만.</span>
-    {% else %}
-      Groups sources by app name and rolls up your existing analysis into strengths and weaknesses (no new LLM calls).
-      <br>
-      <span class="text-[10px]">Ranking uses the <a class="text-blue-600 hover:underline" href="https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval" target="_blank">Wilson 95 % lower bound</a> — small samples get penalised. <span class="inline-block px-1 py-0 rounded bg-amber-100 text-amber-800 align-middle">small n</span> means &lt; 30 reviews.</span>
-    {% endif %}
+  <div class="flex items-baseline gap-3">
+    <button type="button" onclick="openExportModal()"
+            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium whitespace-nowrap shrink-0"
+            {% if not vendors %}disabled style="opacity:0.5;cursor:not-allowed"{% endif %}>
+      📥 {% if lang == 'ko' %}CSV 내보내기{% else %}Export CSV{% endif %}
+    </button>
+    <div class="text-xs text-gray-500">
+      {% if lang == 'ko' %}
+        소스 표시이름을 기준으로 같은 업체를 묶어, 자동 카테고리 + 감성 결과로 강점/약점을 집계합니다 (신규 분석 없음).
+        <br>
+        <span class="text-[10px]">랭킹은 <a class="text-blue-600 hover:underline" href="https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval" target="_blank">Wilson 95% 하한 신뢰구간</a> — 표본이 작은 카테고리는 그만큼 패널티. <span class="inline-block px-1 py-0 rounded bg-amber-100 text-amber-800 align-middle">표본 적음</span> 마크는 응답 30건 미만.</span>
+      {% else %}
+        Groups sources by app name and rolls up your existing analysis into strengths and weaknesses (no new LLM calls).
+        <br>
+        <span class="text-[10px]">Ranking uses the <a class="text-blue-600 hover:underline" href="https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval" target="_blank">Wilson 95 % lower bound</a> — small samples get penalised. <span class="inline-block px-1 py-0 rounded bg-amber-100 text-amber-800 align-middle">small n</span> means &lt; 30 reviews.</span>
+      {% endif %}
+    </div>
   </div>
 </div>
 
@@ -261,6 +268,164 @@
     </div>
   {% endfor %}
 </div>
+
+{# ========== CSV export modal ==========
+   Picker for which vendors + which sides (strengths / weaknesses / both)
+   should land in the download. Defaults: all vendors + both. Optional
+   "include saved reasons" appends a `reasons` column with each row's
+   matching VendorReasonCard causal mechanisms joined as
+   "name(N); name(N); ...". #}
+<div id="export-modal"
+     class="fixed inset-0 z-50 hidden bg-black/50 flex items-center justify-center p-4"
+     onclick="if (event.target === this) closeExportModal()">
+  <div class="bg-white rounded-lg shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div class="px-5 py-3 border-b flex items-center gap-2">
+      <span class="text-xl">📥</span>
+      <span class="font-semibold text-gray-900">
+        {% if lang == 'ko' %}CSV 내보내기{% else %}Export to CSV{% endif %}
+      </span>
+      <button type="button" onclick="closeExportModal()"
+              class="ml-auto text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-5 space-y-5">
+      {# Vendor picker #}
+      <section>
+        <div class="flex items-baseline justify-between mb-2">
+          <h3 class="text-sm font-semibold text-gray-800">
+            {% if lang == 'ko' %}업체 선택{% else %}Select vendors{% endif %}
+            <span class="text-xs text-gray-500 ml-1" id="export-vendor-count"></span>
+          </h3>
+          <div class="text-xs flex gap-2">
+            <button type="button" onclick="exportToggleAllVendors(true)"
+                    class="text-blue-600 hover:underline">
+              {% if lang == 'ko' %}모두{% else %}All{% endif %}
+            </button>
+            <span class="text-gray-300">·</span>
+            <button type="button" onclick="exportToggleAllVendors(false)"
+                    class="text-blue-600 hover:underline">
+              {% if lang == 'ko' %}없음{% else %}None{% endif %}
+            </button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto p-2 border border-gray-200 rounded bg-gray-50">
+          {% for v in vendors %}
+            <label class="flex items-center gap-1.5 text-xs hover:bg-white px-1.5 py-1 rounded cursor-pointer">
+              <input type="checkbox" name="export-vendor" value="{{ v.key }}" checked
+                     onchange="exportUpdateCount()"
+                     class="rounded">
+              <span class="truncate" title="{{ v.display }}">{{ v.display }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </section>
+
+      {# Side picker #}
+      <section>
+        <h3 class="text-sm font-semibold text-gray-800 mb-2">
+          {% if lang == 'ko' %}포함 항목{% else %}Include{% endif %}
+        </h3>
+        <div class="flex flex-wrap gap-3 text-sm">
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="export-include" value="both" checked>
+            <span>{% if lang == 'ko' %}강점 + 약점{% else %}Strengths + Weaknesses{% endif %}</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="export-include" value="strengths">
+            <span>💪 {% if lang == 'ko' %}강점만{% else %}Strengths only{% endif %}</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="export-include" value="weaknesses">
+            <span>⚠️ {% if lang == 'ko' %}약점만{% else %}Weaknesses only{% endif %}</span>
+          </label>
+        </div>
+      </section>
+
+      {# Reasons option #}
+      <section>
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input type="checkbox" id="export-include-reasons" class="mt-0.5">
+          <span class="text-sm">
+            <span class="font-medium">
+              📌 {% if lang == 'ko' %}저장된 원인 분석 포함{% else %}Include saved reason analyses{% endif %}
+            </span>
+            <span class="block text-[11px] text-gray-500 mt-0.5">
+              {% if lang == 'ko' %}
+                해당 항목에 저장된 카드가 있으면 인과 원인을
+                <code class="font-mono bg-gray-100 px-1 rounded">reason(N)</code> 형식으로 별도 열에 추가합니다.
+              {% else %}
+                When a saved card exists for a row, append its causal reasons as
+                <code class="font-mono bg-gray-100 px-1 rounded">reason(N)</code> in an extra column.
+              {% endif %}
+            </span>
+          </span>
+        </label>
+      </section>
+
+      <div class="text-[11px] text-gray-500 italic border-t pt-3">
+        {% if lang == 'ko' %}
+          CSV는 UTF-8 + BOM으로 저장됩니다 — Excel에서 한글이 깨지지 않습니다.
+        {% else %}
+          CSV is encoded as UTF-8 with BOM so Korean text renders correctly in Excel.
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="px-5 py-3 border-t bg-gray-50 flex items-center justify-end gap-2">
+      <button type="button" onclick="closeExportModal()"
+              class="px-3 py-1.5 text-xs bg-gray-200 hover:bg-gray-300 rounded">
+        {% if lang == 'ko' %}취소{% else %}Cancel{% endif %}
+      </button>
+      <button type="button" onclick="exportRunCsv()"
+              class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">
+        📥 {% if lang == 'ko' %}다운로드{% else %}Download{% endif %}
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openExportModal() {
+  document.getElementById('export-modal').classList.remove('hidden');
+  exportUpdateCount();
+}
+function closeExportModal() {
+  document.getElementById('export-modal').classList.add('hidden');
+}
+function exportToggleAllVendors(checked) {
+  document.querySelectorAll('input[name=export-vendor]').forEach(cb => cb.checked = checked);
+  exportUpdateCount();
+}
+function exportUpdateCount() {
+  const all = document.querySelectorAll('input[name=export-vendor]').length;
+  const sel = document.querySelectorAll('input[name=export-vendor]:checked').length;
+  const el = document.getElementById('export-vendor-count');
+  if (el) el.textContent = `(${sel}/${all})`;
+}
+function exportRunCsv() {
+  const keys = [...document.querySelectorAll('input[name=export-vendor]:checked')].map(i => i.value);
+  if (!keys.length) {
+    alert('{% if lang == "ko" %}최소 1개 업체를 선택해주세요.{% else %}Select at least one vendor.{% endif %}');
+    return;
+  }
+  const include = document.querySelector('input[name=export-include]:checked').value;
+  const includeReasons = document.getElementById('export-include-reasons').checked ? 1 : 0;
+  const params = new URLSearchParams({
+    vendor_keys: keys.join(','),
+    include: include,
+    include_reasons: String(includeReasons),
+  });
+  // Trigger download via direct nav. The route sets Content-Disposition.
+  window.location.href = '/vendors/export.csv?' + params.toString();
+  closeExportModal();
+}
+// Escape closes
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('export-modal').classList.contains('hidden')) {
+    closeExportModal();
+  }
+});
+</script>
 
 {# ========== Reasons modal (single instance, populated on click) ==========
 
