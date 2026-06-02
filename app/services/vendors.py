@@ -17,6 +17,7 @@ of all the Top-10 buckets the user has built up.
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Optional
 
@@ -52,6 +53,34 @@ _SCORE = {
 # strength or weakness — single-review categories with 100% positive
 # would otherwise dominate the rankings.
 _MIN_BAND_REVIEWS = 10
+
+# 95 % confidence z-score for the Wilson interval. Anything in the
+# 90 – 99 % range works; 95 % is the conventional default and what
+# Reddit / Amazon use for their "best of" rankings.
+_WILSON_Z = 1.96
+
+
+def _wilson_lower_bound(p_hat: float, n: int, z: float = _WILSON_Z) -> float:
+    """Lower bound of the Wilson score interval for a binomial proportion.
+
+    Given an observed positive ratio p_hat out of n samples, returns the
+    LOWER edge of the 95 % confidence interval for the true ratio. This
+    is what we sort by instead of the raw p_hat so that:
+
+      - 15 reviews × 100 % positive  →  Wilson ≈ 0.80
+      - 500 reviews × 85 % positive  →  Wilson ≈ 0.82  (wins, correctly)
+
+    The raw p_hat for the smaller sample is higher but our confidence
+    that the true rate is that high is weaker — Wilson encodes that.
+    Reddit's "Best" comment ranking is the canonical reference.
+    """
+    if n <= 0:
+        return 0.0
+    p_hat = max(0.0, min(1.0, p_hat))
+    denom = 1.0 + (z * z) / n
+    centre = p_hat + (z * z) / (2.0 * n)
+    margin = z * math.sqrt((p_hat * (1.0 - p_hat) + (z * z) / (4.0 * n)) / n)
+    return max(0.0, (centre - margin) / denom)
 
 # Vendor stems that are actually the same company under different store
 # branding. After _vendor_key extracts the source's stem, this map merges
@@ -295,13 +324,24 @@ async def list_vendors(session: AsyncSession) -> list[dict]:
                 neg = sum(node["sentiments"][b] for b in _NEG_BAND)
                 node["pos_pct"] = pos / total
                 node["neg_pct"] = neg / total
+                # Wilson lower bounds — the actual ranking key. The raw
+                # pos_pct / neg_pct stays on the response so the UI still
+                # shows the observed ratio the user expects to see; sort
+                # order is driven by the confidence-adjusted score so
+                # 15-review wins don't outrank 500-review wins.
+                node["pos_score"] = _wilson_lower_bound(node["pos_pct"], total)
+                node["neg_score"] = _wilson_lower_bound(node["neg_pct"], total)
+                # A "small sample" flag for the UI so the dashboard can mark
+                # entries the user should treat with caution (still shown,
+                # just visually de-emphasised or hinted).
+                node["small_sample"] = total < 30
                 cat_buckets.append(node)
 
         strengths = sorted(
-            cat_buckets, key=lambda x: (x["pos_pct"], x["total"]), reverse=True
+            cat_buckets, key=lambda x: (x["pos_score"], x["total"]), reverse=True
         )[:5]
         weaknesses = sorted(
-            cat_buckets, key=lambda x: (x["neg_pct"], x["total"]), reverse=True
+            cat_buckets, key=lambda x: (x["neg_score"], x["total"]), reverse=True
         )[:5]
 
         vendors.append({
