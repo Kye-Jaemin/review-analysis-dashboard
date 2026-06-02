@@ -826,6 +826,49 @@
         }
       }, true);
 
+      // Earlier-fire backup: catch the CLICK on gate-protected UI
+      // before HTMX gets to it. This covers two cases the
+      // submit-listener doesn't see fast enough:
+      //   (a) Multipart form submits — some browsers fire HTMX's
+      //       own click→XHR path before the capture-phase submit
+      //       event becomes visible to my global listener.
+      //   (b) Standalone `hx-post` buttons (e.g. the 🔄 다시 분석
+      //       button on saved cards) that aren't wrapped in a <form>
+      //       — those never fire a submit event at all.
+      document.addEventListener('click', function (evt) {
+        // Submit button inside a form
+        const submitBtn = evt.target.closest('button[type="submit"], input[type="submit"]');
+        if (submitBtn) {
+          const form = submitBtn.form || submitBtn.closest('form');
+          if (form) {
+            const target = _formGateTarget(form);
+            if (target && pathNeedsGate(target.method, target.path) && !checkGate()) {
+              evt.preventDefault();
+              evt.stopPropagation();
+              evt.stopImmediatePropagation();
+              return;
+            }
+          }
+        }
+        // Standalone HTMX button (or any element with hx-* directly on it)
+        const hxEl = evt.target.closest(
+          '[hx-post], [hx-get], [hx-patch], [hx-delete], [hx-put]'
+        );
+        if (hxEl) {
+          const verbs = ['post', 'put', 'patch', 'delete', 'get'];
+          for (const v of verbs) {
+            const url = hxEl.getAttribute('hx-' + v);
+            if (!url) continue;
+            if (pathNeedsGate(v.toUpperCase(), url) && !checkGate()) {
+              evt.preventDefault();
+              evt.stopPropagation();
+              evt.stopImmediatePropagation();
+            }
+            return;
+          }
+        }
+      }, true);
+
       // HTMX-driven requests (hx-get / hx-post / hx-patch / hx-delete).
       document.addEventListener('htmx:beforeRequest', function (evt) {
         const cfg = (evt.detail && evt.detail.requestConfig) || {};
