@@ -570,6 +570,26 @@ async def extract_reasons(
     capped_reasons, capped_simple = _cap_counts(
         san_reasons, san_simple, len(sample)
     )
+    # Hard invariant: count == len(review_ids) for every bucket.
+    # _cap_counts can reduce a `count` without trimming review_ids when
+    # the running total bumps against sample_size, which leaves the
+    # expand button ("N reviews") and the chart bar ("N") disagreeing.
+    # Truncate ids to count if count is now smaller. If count somehow
+    # ended up larger than ids (shouldn't after sync above, but
+    # defensive), trust ids.
+    for r in capped_reasons:
+        ids = r.get("review_ids", []) or []
+        cnt = int(r.get("count") or 0)
+        if cnt < len(ids):
+            r["review_ids"] = ids[:cnt]
+        elif cnt > len(ids):
+            r["count"] = len(ids)
+    sids = capped_simple.get("review_ids", []) or []
+    cnt = int(capped_simple.get("count") or 0)
+    if cnt < len(sids):
+        capped_simple["review_ids"] = sids[:cnt]
+    elif cnt > len(sids) and sids:
+        capped_simple["count"] = len(sids)
 
     result = {
         "vendor_key": vendor_key,
