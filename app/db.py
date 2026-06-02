@@ -26,7 +26,16 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def init_db() -> None:
-    from app.models import source, review, category, analysis, theme_snapshot, investigation, auto_category  # noqa: F401
+    from app.models import (  # noqa: F401
+        analysis,
+        auto_category,
+        category,
+        competitive_card,
+        investigation,
+        review,
+        source,
+        theme_snapshot,
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

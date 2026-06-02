@@ -42,12 +42,15 @@ import json
 import re
 from typing import Optional
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import (
     Analysis,
+    CompetitiveFactorCard,
     Review,
     ReviewAutoCategoryLink,
     Sentiment,
@@ -427,3 +430,223 @@ async def rank_vendors_by_factor(
         "weakness_ranking": weakness_rows,
         "universe_size": len(universe),
     }
+
+
+# ============================================================================
+# Saved-card CRUD
+# ============================================================================
+#
+# These wrap the CompetitiveFactorCard model so the routes stay
+# transport-layer-only. Snapshots are point-in-time — no upsert by
+# factor, every save creates a new row, the user manages duplicates.
+
+
+async def list_saved_cards(
+    session: AsyncSession, *, include_hidden: bool = False
+) -> list[dict]:
+    """Sidebar listing — metadata only, no `result` JSON in the payload.
+
+    Keeps the response small (~200 bytes/row) so the sidebar can refresh
+    on every save/delete without hauling around the full result blobs.
+    The full row is fetched on click via `get_saved_card`.
+    """
+    stmt = select(CompetitiveFactorCard)
+    if not include_hidden:
+        stmt = stmt.where(CompetitiveFactorCard.hidden.is_(False))
+    stmt = stmt.order_by(
+        CompetitiveFactorCard.display_order.asc(),
+        CompetitiveFactorCard.updated_at.desc(),
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    out: list[dict] = []
+    for c in rows:
+        result = c.result or {}
+        out.append({
+            "id": c.id,
+            "factor": c.factor,
+            "label": c.label,
+            "threshold": c.threshold,
+            "universe_size": c.universe_size,
+            "model_used": c.model_used,
+            "hidden": c.hidden,
+            "display_order": c.display_order,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            # Pre-computed counts so the sidebar can render the
+            # "N vendors" / "M weakness signals" pills without parsing
+            # the result JSON in the template.
+            "strength_count": len(result.get("strength_ranking") or []),
+            "weakness_count": len(result.get("weakness_ranking") or []),
+        })
+    return out
+
+
+async def get_saved_card(
+    session: AsyncSession, card_id: int
+) -> Optional[CompetitiveFactorCard]:
+    return await session.get(CompetitiveFactorCard, card_id)
+
+
+async def save_card(
+    session: AsyncSession,
+    *,
+    factor: str,
+    label: Optional[str],
+    result: dict,
+    threshold: float,
+    model_used: Optional[str],
+) -> CompetitiveFactorCard:
+    """Persist a fresh analysis. Always creates a new row (no upsert).
+
+    `universe_size` and the embedded threshold are pulled out of
+    `result` if not provided explicitly so the caller can just pass the
+    rank_vendors_by_factor() return verbatim.
+    """
+    factor = (factor or "").strip()
+    if not factor:
+        raise ValueError("factor is required")
+    if not isinstance(result, dict):
+        raise ValueError("result must be a dict")
+
+    # Place new cards at the end of the visible list. Read max+1
+    # rather than COUNT(*) so hidden cards don't disturb ordering.
+    max_order = (
+        await session.execute(
+            select(CompetitiveFactorCard.display_order)
+            .order_by(CompetitiveFactorCard.display_order.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none() or 0
+
+    card = CompetitiveFactorCard(
+        factor=factor[:200],
+        label=(label or factor)[:200],
+        threshold=float(threshold),
+        model_used=(model_used or "")[:100] or None,
+        universe_size=int(result.get("universe_size") or 0),
+        result=result,
+        hidden=False,
+        display_order=int(max_order) + 1,
+    )
+    session.add(card)
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def update_card_label(
+    session: AsyncSession, card_id: int, label: str
+) -> Optional[CompetitiveFactorCard]:
+    card = await session.get(CompetitiveFactorCard, card_id)
+    if not card:
+        return None
+    label = (label or "").strip()
+    if not label:
+        raise ValueError("label cannot be empty")
+    card.label = label[:200]
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def toggle_card_hidden(
+    session: AsyncSession, card_id: int, hidden: bool
+) -> Optional[CompetitiveFactorCard]:
+    card = await session.get(CompetitiveFactorCard, card_id)
+    if not card:
+        return None
+    card.hidden = bool(hidden)
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def delete_card(session: AsyncSession, card_id: int) -> bool:
+    card = await session.get(CompetitiveFactorCard, card_id)
+    if not card:
+        return False
+    await session.delete(card)
+    await session.commit()
+    return True
+
+
+async def reanalyze_card(
+    session: AsyncSession,
+    card_id: int,
+    *,
+    model: Optional[str] = None,
+) -> Optional[CompetitiveFactorCard]:
+    """Re-run rank_vendors_by_factor() with the card's saved factor +
+    threshold and overwrite this row's `result` + bump `updated_at`.
+
+    The model arg lets the user pick a different Claude tier without
+    losing the saved threshold or factor. universe_size is refreshed
+    from the new run so the drift indicator stays accurate."""
+    card = await session.get(CompetitiveFactorCard, card_id)
+    if not card:
+        return None
+    new_result = await rank_vendors_by_factor(
+        session,
+        card.factor,
+        model=model,
+        threshold=card.threshold,
+        sample_limit=SAMPLE_LIMIT,
+    )
+    card.result = new_result
+    card.universe_size = int(new_result.get("universe_size") or 0)
+    if model:
+        card.model_used = model[:100]
+    card.updated_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def compute_drift(
+    session: AsyncSession, card: CompetitiveFactorCard
+) -> dict:
+    """How much has the universe of auto-categories changed since this
+    card was saved? Used to flag "your saved view may be stale" in the UI.
+
+    Returns:
+      {
+        "saved_universe": int,   # at save time
+        "current_universe": int, # right now
+        "delta": int,            # current - saved
+      }
+    """
+    vendors = await list_vendors(session)
+    universe: set[str] = set()
+    for v in vendors:
+        for s in v.get("strengths", []) + v.get("weaknesses", []):
+            n = (s.get("name") or "").strip().lower()
+            if n:
+                universe.add(n)
+    current = len(universe)
+    saved = int(card.universe_size or 0)
+    return {
+        "saved_universe": saved,
+        "current_universe": current,
+        "delta": current - saved,
+    }
+
+
+async def reorder_cards(session: AsyncSession, ordered_ids: list[int]) -> int:
+    """Assign 1..N display_order to the given card ids in array position.
+
+    Cards not in the list keep their current order; this is how the UI
+    sends just the visible reordered subset. Returns the number of rows
+    actually updated."""
+    if not ordered_ids:
+        return 0
+    n_updated = 0
+    for i, cid in enumerate(ordered_ids, start=1):
+        card = await session.get(CompetitiveFactorCard, int(cid))
+        if not card:
+            continue
+        if card.display_order != i:
+            card.display_order = i
+            n_updated += 1
+    if n_updated:
+        await session.commit()
+    return n_updated

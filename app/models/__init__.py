@@ -5,6 +5,7 @@ from app.models.analysis import Analysis, AnalysisJob, Sentiment, AnalysisStatus
 from app.models.theme_snapshot import ThemeSnapshot
 from app.models.investigation import Investigation
 from app.models.auto_category import AutoCategory, ReviewAutoCategoryLink
+from app.models.competitive_card import CompetitiveFactorCard
 
 __all__ = [
     "Source",
@@ -22,4 +23,5 @@ __all__ = [
     "AutoCategory",
     "ReviewAutoCategoryLink",
     "ReviewManualCategoryLink",
+    "CompetitiveFactorCard",
 ]

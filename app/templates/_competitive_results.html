@@ -1,13 +1,14 @@
 {# Partial rendered by HTMX into #competitive-results.
 
    Inputs:
-     factor   the user's input string
-     result   the rank_vendors_by_factor() return dict (or None on error)
-     error    optional error string
-
-   The shape of `result` is documented at the top of
-   app/services/competitive.py. Iteration order: strength_ranking shown
-   first (always open), then weakness_ranking inside an x-show toggle. #}
+     factor       the user's input string
+     result       the rank_vendors_by_factor() return dict (or None on error)
+     error        optional error string
+     saved_card   optional dict {id, label, factor, threshold, model_used,
+                  created_at, updated_at, just_reanalyzed?} when this view
+                  comes from a saved card (not a fresh analysis)
+     drift        optional dict {saved_universe, current_universe, delta}
+                  populated only when saved_card is set #}
 
 {% if error %}
   <div class="border border-rose-200 bg-rose-50 rounded-md p-4 text-sm text-rose-800">
@@ -15,7 +16,138 @@
     <div>{{ error }}</div>
   </div>
 {% elif result %}
-  <div class="space-y-4" x-data="{ showWeak: false }">
+  <div class="space-y-4" x-data="{ showWeak: false, renaming: false }">
+
+    {# ========== META BAR ==========
+       Two modes:
+         A. Fresh analysis (saved_card is None) → show 💾 save button
+         B. Loaded saved card                   → show drift + rename + reanalyze + delete #}
+    {% if saved_card %}
+      <div class="border border-blue-200 bg-blue-50/60 rounded-md p-3">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-base">📅</span>
+          <div class="flex-1 min-w-0">
+            {# Inline rename input — toggled via Alpine renaming flag #}
+            <div x-show="!renaming" class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-sm text-gray-900 truncate">{{ saved_card.label }}</span>
+              <button type="button" @click="renaming = true; $nextTick(() => $refs.renameInput.focus())"
+                      class="text-[11px] text-blue-600 hover:underline">
+                🏷️ 이름 변경
+              </button>
+              {% if saved_card.just_reanalyzed %}
+                <span class="px-1.5 py-0.5 text-[10px] rounded-full bg-emerald-100 text-emerald-800 font-semibold">
+                  ✓ 방금 재분석됨
+                </span>
+              {% endif %}
+            </div>
+            <div x-show="renaming" class="flex items-center gap-2" x-cloak>
+              <input type="text" maxlength="200" x-ref="renameInput"
+                     :value="$refs.renameInput?.value || '{{ saved_card.label|e }}'"
+                     class="flex-1 min-w-0 border border-blue-300 rounded px-2 py-1 text-sm"
+                     @keydown.enter.prevent="
+                       fetch('/competitive/cards/{{ saved_card.id }}', {
+                         method:'PATCH', headers:{'Content-Type':'application/json'},
+                         body: JSON.stringify({label: $refs.renameInput.value})
+                       }).then(r => r.ok ? (renaming = false, htmx.ajax('GET','/competitive/cards','#competitive-cards')) : alert('이름 변경 실패'));
+                     "
+                     @keydown.escape="renaming = false" />
+              <button type="button"
+                      @click="
+                        fetch('/competitive/cards/{{ saved_card.id }}', {
+                          method:'PATCH', headers:{'Content-Type':'application/json'},
+                          body: JSON.stringify({label: $refs.renameInput.value})
+                        }).then(r => r.ok ? (renaming = false, htmx.ajax('GET','/competitive/cards','#competitive-cards')) : alert('이름 변경 실패'));
+                      "
+                      class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded">저장</button>
+              <button type="button" @click="renaming = false"
+                      class="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded">취소</button>
+            </div>
+            <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+              <span title="저장 시 입력값">원본: <span class="font-mono">{{ saved_card.factor }}</span></span>
+              <span>임계값 {{ '%.2f'|format(saved_card.threshold) }}</span>
+              {% if saved_card.updated_at %}
+                <span>마지막 분석: <span class="font-mono">{{ saved_card.updated_at[:16].replace('T',' ') }}</span></span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button"
+                    hx-post="/competitive/cards/{{ saved_card.id }}/reanalyze"
+                    hx-target="#competitive-results"
+                    hx-swap="innerHTML"
+                    hx-indicator="#competitive-loading"
+                    hx-on::after-request="if (event.detail.successful) { htmx.ajax('GET', '/competitive/cards', '#competitive-cards'); }"
+                    class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium">
+              🔄 다시 분석
+            </button>
+            <button type="button"
+                    hx-delete="/competitive/cards/{{ saved_card.id }}"
+                    hx-confirm="이 카드를 영구 삭제하시겠습니까?"
+                    hx-target="#competitive-results"
+                    hx-swap="innerHTML"
+                    hx-on::after-request="if (event.detail.successful) { document.getElementById('competitive-results').innerHTML = '<div class=\'text-sm text-gray-500 italic\'>카드를 삭제했습니다.</div>'; htmx.ajax('GET', '/competitive/cards', '#competitive-cards'); }"
+                    title="삭제"
+                    class="px-2 py-1.5 text-xs bg-gray-200 hover:bg-red-100 hover:text-red-700 rounded">
+              ❌
+            </button>
+          </div>
+        </div>
+        {# Drift indicator — flag when the universe has changed #}
+        {% if drift and drift.delta != 0 %}
+          <div class="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            ⚠ 자동 카테고리 풀 변화:
+            저장 시점 <b>{{ drift.saved_universe }}</b>개 →
+            현재 <b>{{ drift.current_universe }}</b>개
+            ({% if drift.delta > 0 %}+{{ drift.delta }}{% else %}{{ drift.delta }}{% endif %})
+            — 새로 추가된 카테고리는 <b>🔄 다시 분석</b>을 눌러야 매칭됩니다.
+          </div>
+        {% endif %}
+      </div>
+    {% else %}
+      {# Fresh analysis — offer to save. Save button POSTs the full
+         result JSON; on success the sidebar refreshes and the button
+         flips to "✓ 저장됨". #}
+      <div class="border border-emerald-200 bg-emerald-50/40 rounded-md p-3 flex items-center gap-3" x-data="{ saved: false, saving: false }">
+        <span class="text-base">💾</span>
+        <div class="flex-1 text-xs text-gray-700">
+          <b>이 분석을 카드로 저장</b>하면 다음에 LLM 호출 없이 같은 결과를 볼 수 있습니다.
+        </div>
+        <button type="button"
+                x-show="!saved"
+                :disabled="saving"
+                @click="
+                  saving = true;
+                  fetch('/competitive/cards', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                      factor: {{ result.factor|tojson }},
+                      label: {{ result.factor|tojson }},
+                      threshold: {{ result.threshold }},
+                      model_used: null,
+                      result: {{ result|tojson }}
+                    })
+                  })
+                  .then(r => {
+                    saving = false;
+                    if (r.ok) {
+                      saved = true;
+                      htmx.ajax('GET', '/competitive/cards', '#competitive-cards');
+                    } else {
+                      alert('카드 저장 실패');
+                    }
+                  })
+                  .catch(() => { saving = false; alert('카드 저장 실패'); });
+                "
+                class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded font-medium whitespace-nowrap">
+          <span x-show="!saving">💾 카드로 저장</span>
+          <span x-show="saving">저장 중…</span>
+        </button>
+        <span x-show="saved" x-cloak class="px-3 py-1.5 text-xs bg-emerald-700 text-white rounded font-semibold">
+          ✓ 저장됨
+        </span>
+      </div>
+    {% endif %}
 
     <!-- Result header echo -->
     <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
