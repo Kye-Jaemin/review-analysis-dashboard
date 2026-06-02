@@ -185,33 +185,70 @@ function clearCsvFile() {
 // Factor entry rows (factor + optional criteria, stacked)
 // ============================================================
 const MAX_FACTORS = 10;
+// LocalStorage key — the form's last entries persist across reloads,
+// new tabs, and analysis-save round-trips until the user explicitly
+// clears each row with the × button. Stored as a JSON array of
+// {factor, criteria} objects.
+const ENTRIES_STORAGE_KEY = 'competitive.lastEntries';
 
 function _entryRowsAll() {
   return [...document.querySelectorAll('#factor-entry-list .factor-entry-row')];
 }
 function _collectEntries() {
-  const seen = new Set();
+  // Live read across ALL rows, including duplicates and blanks, so
+  // the localStorage snapshot reflects what the user typed verbatim
+  // (a half-typed factor is restored on reload too).
   const out = [];
   for (const row of _entryRowsAll()) {
     const factor = (row.querySelector('.factor-input').value || '').trim().slice(0, 200);
-    if (!factor) continue;
-    const key = factor.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
     const criteria = (row.querySelector('.criteria-input').value || '').trim().slice(0, 500) || null;
+    if (!factor && !criteria) continue;  // skip fully-empty rows
     out.push({ factor, criteria });
   }
   return out;
 }
+function _collectEntriesForSubmit() {
+  // What actually goes to the server: factor required, dedup on
+  // lowercased factor. (localStorage retains the looser shape.)
+  const seen = new Set();
+  const out = [];
+  for (const e of _collectEntries()) {
+    if (!e.factor) continue;
+    const key = e.factor.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+function _saveEntriesToStorage() {
+  try {
+    localStorage.setItem(ENTRIES_STORAGE_KEY, JSON.stringify(_collectEntries()));
+  } catch (_) { /* private mode / quota — silently degrade */ }
+}
+function _loadEntriesFromStorage() {
+  try {
+    const raw = localStorage.getItem(ENTRIES_STORAGE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter(e => e && typeof e === 'object')
+      .map(e => ({
+        factor: String(e.factor || '').slice(0, 200),
+        criteria: e.criteria ? String(e.criteria).slice(0, 500) : null,
+      }))
+      .slice(0, MAX_FACTORS);
+  } catch (_) { return []; }
+}
 function _serializeEntries() {
   const hidden = document.getElementById('entries-hidden');
-  const entries = _collectEntries();
+  const entries = _collectEntriesForSubmit();
   hidden.value = JSON.stringify(entries);
   const count = entries.length;
   const total = _entryRowsAll().length;
   const lbl = document.getElementById('factor-count-label');
   if (lbl) lbl.textContent = '(' + count + '/' + total + ', max ' + MAX_FACTORS + ')';
-  // Disable + Add when at cap.
   const addBtn = document.getElementById('factor-add-btn');
   if (addBtn) {
     if (total >= MAX_FACTORS) {
@@ -220,6 +257,9 @@ function _serializeEntries() {
       addBtn.classList.remove('opacity-40', 'cursor-not-allowed');
     }
   }
+  // Persist the loose (with-blanks) snapshot so reloads restore
+  // exactly what the user was working on.
+  _saveEntriesToStorage();
 }
 
 function _newEntryRow() {
@@ -273,15 +313,26 @@ function addFactorEntry() {
 }
 
 (function initFactorEntries() {
-  // Seed one empty row.
   const list = document.getElementById('factor-entry-list');
-  list.appendChild(_newEntryRow());
+  // Restore the last entries the user was working on (localStorage).
+  // If nothing saved (first visit / cleared), seed a single empty row.
+  const saved = _loadEntriesFromStorage();
+  if (saved.length > 0) {
+    saved.forEach(e => {
+      const row = _newEntryRow();
+      row.querySelector('.factor-input').value = e.factor || '';
+      row.querySelector('.criteria-input').value = e.criteria || '';
+      list.appendChild(row);
+    });
+  } else {
+    list.appendChild(_newEntryRow());
+  }
   _serializeEntries();
 
   // Submit guard
   document.getElementById('competitive-form').addEventListener('submit', (e) => {
     _serializeEntries();
-    const entries = _collectEntries();
+    const entries = _collectEntriesForSubmit();
     if (entries.length === 0) {
       e.preventDefault();
       alert('{% if lang == "ko" %}최소 1개 경쟁력 요소를 입력해주세요.{% else %}Enter at least one factor.{% endif %}');
