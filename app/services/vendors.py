@@ -105,6 +105,10 @@ _VENDOR_ALIASES: dict[str, str] = {
     "applefitnessplus": "apple fitness",
     "apple fitness+": "apple fitness",
     "apple fitness plus": "apple fitness",
+    # r/OuraRing (subreddit stem → "ouraring") and the App Store /
+    # Play Store "Oura" listings refer to the same product.
+    "ouraring": "oura",
+    "oura ring": "oura",
 }
 
 # Auto-category names that aren't real "strengths" or "weaknesses" but
@@ -183,7 +187,17 @@ async def list_vendors(session: AsyncSession) -> list[dict]:
         candidate = (s.display_name or s.label or "").strip()
         if candidate.lower().startswith("r/"):
             candidate = candidate[2:]
-        if len(candidate) > len(g["display"]):
+        # Display name pick: prefer the candidate whose lowercased form is
+        # the canonical alias key (the "official" brand name), falling
+        # back to the longest candidate otherwise. Without this, an
+        # alias-merged group like Oura {"Oura", "ouraring"} would expose
+        # "ouraring" (longer) instead of the proper brand "Oura".
+        current = g["display"]
+        cand_is_canonical = candidate.lower() == key
+        curr_is_canonical = current.lower() == key if current else False
+        if cand_is_canonical and not curr_is_canonical:
+            g["display"] = candidate
+        elif cand_is_canonical == curr_is_canonical and len(candidate) > len(current):
             g["display"] = candidate
 
     vendors: list[dict] = []
