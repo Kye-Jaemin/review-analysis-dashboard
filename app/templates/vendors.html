@@ -379,6 +379,27 @@
         </div>
       </section>
 
+      {# Weak-signal exclusion (default ON, mirrors /vendors gray-out) #}
+      <section>
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input type="checkbox" id="export-exclude-weak" class="mt-0.5" checked>
+          <span class="text-sm">
+            <span class="font-medium">
+              🩶 {% if lang == 'ko' %}30% 이하 약한 신호 제외{% else %}Exclude weak signals (under 30 %){% endif %}
+            </span>
+            <span class="block text-[11px] text-gray-500 mt-0.5">
+              {% if lang == 'ko' %}
+                긍정/부정 비율이 30% 미만인 항목 (페이지에서 회색으로 처리된 행)을 CSV에서 제외합니다.
+                실질적 강점·약점만 받고 싶을 때 켜두세요. 끄면 Top 5 전체가 포함됩니다.
+              {% else %}
+                Skip rows whose polarity ratio is below 30 % (the same entries grayed out on the page).
+                Leave on to get only meaningful strengths/weaknesses; turn off to include every Top-5 row.
+              {% endif %}
+            </span>
+          </span>
+        </label>
+      </section>
+
       {# Reasons option #}
       <section>
         <label class="flex items-start gap-2 cursor-pointer">
@@ -448,10 +469,12 @@ function exportRunCsv() {
   }
   const include = document.querySelector('input[name=export-include]:checked').value;
   const includeReasons = document.getElementById('export-include-reasons').checked ? 1 : 0;
+  const excludeWeak = document.getElementById('export-exclude-weak').checked ? 1 : 0;
   const params = new URLSearchParams({
     vendor_keys: keys.join(','),
     include: include,
     include_reasons: String(includeReasons),
+    exclude_weak: String(excludeWeak),
   });
   // Trigger download via direct nav. The route sets Content-Disposition.
   window.location.href = '/vendors/export.csv?' + params.toString();

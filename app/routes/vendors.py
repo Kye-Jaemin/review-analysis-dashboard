@@ -319,6 +319,14 @@ async def vendors_export_csv(
     include_reasons: int = Query(
         0, description="1 = append saved reason analyses as a 'reasons' column"
     ),
+    exclude_weak: int = Query(
+        1,
+        description=(
+            "1 = drop rows whose polarity ratio is under 30 % (the same "
+            "threshold the /vendors page grays out as a weak signal); 0 "
+            "= keep every Top-5 entry. Default 1."
+        ),
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     """Download the strength/weakness Top 5 table for the selected vendors
@@ -378,16 +386,24 @@ async def vendors_export_csv(
         "reasons",
     ])
 
+    # 30 % threshold matches the gray-out logic in vendors.html, so the
+    # exported CSV and the on-screen "strong" rows are the same set when
+    # the user keeps the default exclude_weak=1.
+    WEAK_THRESHOLD = 0.30
+
     for v in vendors:
         if include in ("strengths", "both"):
             for s in v.get("strengths") or []:
+                pos_pct = float(s.get("pos_pct") or 0.0)
+                if exclude_weak and pos_pct < WEAK_THRESHOLD:
+                    continue
                 name = (s.get("name") or "").strip()
                 key = (v.get("key"), name.lower(), "positive")
                 writer.writerow([
                     v.get("display") or v.get("key"),
                     "strength",
                     name,
-                    round(float(s.get("pos_pct") or 0.0) * 100, 1),
+                    round(pos_pct * 100, 1),
                     int(s.get("total") or 0),
                     round(float(s.get("pos_score") or 0.0), 3),
                     (s.get("description") or "").strip(),
@@ -396,13 +412,16 @@ async def vendors_export_csv(
                 ])
         if include in ("weaknesses", "both"):
             for w in v.get("weaknesses") or []:
+                neg_pct = float(w.get("neg_pct") or 0.0)
+                if exclude_weak and neg_pct < WEAK_THRESHOLD:
+                    continue
                 name = (w.get("name") or "").strip()
                 key = (v.get("key"), name.lower(), "negative")
                 writer.writerow([
                     v.get("display") or v.get("key"),
                     "weakness",
                     name,
-                    round(float(w.get("neg_pct") or 0.0) * 100, 1),
+                    round(neg_pct * 100, 1),
                     int(w.get("total") or 0),
                     round(float(w.get("neg_score") or 0.0), 3),
                     (w.get("description") or "").strip(),
