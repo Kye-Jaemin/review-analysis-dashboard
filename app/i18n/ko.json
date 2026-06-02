@@ -5,12 +5,12 @@
   },
   "nav": {
     "dashboard": "대시보드",
-    "sources": "소스",
+    "sources": "리뷰 수집",
     "categories": "수동 카테고리",
-    "analyze": "분석",
-    "reviews": "리뷰",
-    "vendors": "업체 분석",
-    "competitive": "경쟁력 분석",
+    "analyze": "리뷰 분류 및 긍부정 평가",
+    "reviews": "전체 리뷰 보기",
+    "vendors": "업체 강/약점 분석",
+    "competitive": "경쟁력 분류(베타)",
     "howto": "사용법"
   },
   "common": {

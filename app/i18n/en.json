@@ -5,12 +5,12 @@
   },
   "nav": {
     "dashboard": "Dashboard",
-    "sources": "Sources",
+    "sources": "Review collection",
     "categories": "Manual categories",
-    "analyze": "Analyze",
-    "reviews": "Reviews",
-    "vendors": "Vendor analysis",
-    "competitive": "Competitive factor",
+    "analyze": "Classification & sentiment",
+    "reviews": "All reviews",
+    "vendors": "Vendor strengths/weaknesses",
+    "competitive": "Competitive factor (beta)",
     "howto": "How to use"
   },
   "common": {
