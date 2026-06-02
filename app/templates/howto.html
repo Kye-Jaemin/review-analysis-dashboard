@@ -48,6 +48,7 @@
     <li><a href="#cards">조사 카드 관리 (정렬·숨김·그룹·내보내기)</a></li>
     <li><a href="#dashboard">대시보드 패널</a></li>
     <li><a href="#vendors">업체 분석 페이지 (강점/약점)</a></li>
+    <li><a href="#competitive">경쟁력 분석 페이지 (요소 → 업체 매칭)</a></li>
     <li><a href="#mindmap">감성 원인 마인드맵</a></li>
     <li><a href="#reviews">리뷰 탐색 + 내보내기 + 번역</a></li>
     <li><a href="#workspace">워크스페이스 저장·불러오기</a></li>
@@ -283,7 +284,27 @@
   <strong>단순 긍정/부정 버킷은 강점/약점 ranking 에서 제외</strong> — 이건 진짜 강/약점이 아니라 sentiment 덤프이기 때문.
 </div>
 
-<h2 id="mindmap">9. 감성 원인 마인드맵</h2>
+<h2 id="competitive">9. 경쟁력 분석 페이지 (NEW)</h2>
+<p><a href="/competitive" class="text-blue-600 hover:underline">경쟁력 분석</a> 메뉴 — 사용자가 입력한 <strong>경쟁력 요소</strong>(예: "헬스 데이터 기반 AI 코칭")에 의미상 부합하는 강점을 보유한 업체를 자동 랭킹.</p>
+
+<ul>
+  <li>입력란에 요소 텍스트 입력 후 <strong>[분석]</strong> 클릭 (Enter 도 가능)</li>
+  <li>최근 검색어 5개는 자동으로 칩으로 저장 — 1-click 재검색</li>
+  <li><strong>매칭 방식</strong>: LLM(Claude)이 모든 자동 카테고리(약 110개)와 입력 요소의 의미 일치도를 0–1로 채점. 키워드가 정확히 일치하지 않아도 의미가 가까우면 매칭됨</li>
+  <li><strong>업체 점수</strong>: <code class="font-mono bg-gray-100 px-1 rounded text-[12px]">max(매칭도 × Wilson 긍정 점수)</code> — 가장 잘 매칭되는 단일 강점이 업체 순위를 결정. 화면에 점수 계산 과정이 그대로 노출</li>
+  <li><strong>임계값 0.5</strong> 미만 매칭은 제외 (LLM의 약한 추측을 결과에서 거름)</li>
+  <li>각 매칭 카드 아래 <strong>💬 리뷰 샘플 보기</strong> 클릭 시 해당 카테고리·해당 업체의 긍정 강도가 가장 큰 리뷰 3개 노출</li>
+  <li><strong>🚩 약점 시그널 섹션</strong>은 기본 접힘 상태. 헤더 클릭으로 펼침 — 같은 요소가 약점으로 잡힌 업체 별도 랭킹 (부정 비율 + Wilson 적용)</li>
+</ul>
+
+<div class="callout info">
+  <strong>샘플 시나리오:</strong>
+  "AI 코칭" 입력 → Fitbit의 "AI 코치 기능" 카테고리(매칭 91%, 긍정 74%) → 점수 0.67로 1위.
+  자세히 펼쳐서 실제 리뷰 3개로 매칭 근거 확인.
+  <strong>같은 요소가 약점으로도 잡혔다면</strong> 약점 섹션을 펼쳐 어떤 업체가 그 분야에서 부정 평가가 강한지 한눈에 비교 가능.
+</div>
+
+<h2 id="mindmap">10. 감성 원인 마인드맵</h2>
 <p>활성 카드의 리뷰들을 LLM 이 분석해서 "왜 이 감성이 나오는지" 테마를 추출합니다.</p>
 
 <h3>9.1 자동 생성 (NEW — 분석 직후)</h3>
@@ -317,7 +338,7 @@
   <li>per-card export 와 워크스페이스 export 모두에 포함됨</li>
 </ul>
 
-<h2 id="reviews">10. 리뷰 탐색 + 내보내기 + 번역</h2>
+<h2 id="reviews">11. 리뷰 탐색 + 내보내기 + 번역</h2>
 <ul>
   <li>리뷰 페이지 상단에도 <strong>조사 카드 그리드</strong>가 표시됨 — 클릭하면 그 카드 범위의 리뷰만 표시</li>
   <li>좌측 사이드바 필터(감성/기간/키워드)로 카드 범위 안에서 추가 필터링 가능</li>
@@ -325,7 +346,7 @@
   <li>자동 카테고리 모달의 각 리뷰에 <strong>🌐 번역</strong> 토글 — UI 언어로 LLM 번역 후 DOM 캐시 (다시 누르면 원문 복귀)</li>
 </ul>
 
-<h2 id="workspace">11. 워크스페이스 저장·불러오기</h2>
+<h2 id="workspace">12. 워크스페이스 저장·불러오기</h2>
 <p>DB 는 모든 방문자와 공유됩니다. 본인 조사를 따로 보관하려면:</p>
 
 <h3>11.1 워크스페이스 전체 (사이드바 워크스페이스 섹션)</h3>
@@ -341,7 +362,7 @@
   <li>대시보드 / 리뷰 상단의 "<strong>📥 카드 가져오기</strong>" — 다른 워크스페이스의 카드 JSON 을 import → 자동으로 같은 앱 소스는 dedup, 새 카드로 추가</li>
 </ul>
 
-<h2 id="troubleshoot">12. 문제 해결</h2>
+<h2 id="troubleshoot">13. 문제 해결</h2>
 <table>
   <thead><tr><th>증상</th><th>원인 / 해결</th></tr></thead>
   <tbody>

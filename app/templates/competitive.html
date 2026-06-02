@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('nav.competitive') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Page header -->
+  <div>
+    <h1 class="text-2xl font-semibold flex items-center gap-2">
+      <span>🎯</span>
+      <span>경쟁력 요소 분석</span>
+    </h1>
+    <p class="text-sm text-gray-600 mt-1 max-w-3xl">
+      찾고 싶은 <b>경쟁력 요소</b>를 입력하면, 자동 카테고리 강점이 해당 요소와
+      의미상 일치하는 업체를 순위로 보여줍니다.
+      매칭은 LLM이 의미 기반으로 수행하므로 키워드가 정확히 일치하지 않아도
+      관련 강점이 잡힙니다.
+    </p>
+  </div>
+
+  <!-- Input form -->
+  <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+    <form hx-get="/competitive/results"
+          hx-target="#competitive-results"
+          hx-swap="innerHTML"
+          hx-indicator="#competitive-loading"
+          class="space-y-3">
+      <label for="factor-input" class="block text-sm font-semibold text-gray-800">
+        경쟁력 요소
+      </label>
+      <div class="flex flex-col sm:flex-row gap-2">
+        <input id="factor-input"
+               name="factor"
+               type="text"
+               required
+               minlength="1"
+               maxlength="200"
+               autocomplete="off"
+               placeholder="예) 헬스 데이터 기반 AI 코칭"
+               class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        <input type="hidden" name="threshold" value="{{ default_threshold }}" />
+        <button type="submit"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium whitespace-nowrap">
+          분석
+        </button>
+      </div>
+
+      <!-- Recent searches (chip row, populated by Alpine from localStorage). -->
+      <div x-data="recentFactors()" x-init="load()" class="text-[11px]">
+        <template x-if="items.length > 0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-gray-500">최근 검색:</span>
+            <template x-for="(it, i) in items" :key="i">
+              <button type="button"
+                      @click="reuse(it)"
+                      class="px-2 py-0.5 rounded-full bg-gray-100 hover:bg-blue-100 text-gray-700 hover:text-blue-700 border border-gray-200 transition-colors"
+                      x-text="it"></button>
+            </template>
+            <button type="button"
+                    @click="clearAll()"
+                    class="ml-auto text-gray-400 hover:text-red-600 underline">
+              비우기
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <!-- Submit-time helper text + loading state -->
+      <div class="text-[11px] text-gray-500">
+        매칭 점수 공식:
+        <code class="font-mono bg-gray-100 px-1 rounded">max(매칭도 × Wilson 긍정 점수)</code>
+        · 임계값 {{ default_threshold }} 미만은 매칭에서 제외됩니다.
+      </div>
+    </form>
+
+    <div id="competitive-loading" class="htmx-indicator mt-4 flex items-center gap-2 text-sm text-gray-500">
+      <svg class="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      LLM이 카테고리 매칭도를 계산 중입니다…
+    </div>
+  </div>
+
+  <!-- Result swap target -->
+  <div id="competitive-results">
+    <!-- empty until first submit -->
+    <div class="text-sm text-gray-500 italic">
+      위 입력란에 경쟁력 요소를 입력하고 [분석]을 눌러주세요.
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .htmx-indicator { display: none; }
+  .htmx-request .htmx-indicator { display: flex; }
+  .htmx-request.htmx-indicator { display: flex; }
+</style>
+
+<script>
+  // Alpine component: 최근 검색어 5개를 localStorage에 저장.
+  // 같은 검색어를 다시 입력하면 맨 위로 끌어올리고 중복 제거.
+  function recentFactors() {
+    return {
+      key: 'competitive.recentFactors',
+      items: [],
+      load() {
+        try {
+          this.items = JSON.parse(localStorage.getItem(this.key) || '[]')
+            .filter(s => typeof s === 'string' && s.trim()).slice(0, 5);
+        } catch { this.items = []; }
+      },
+      save() {
+        try { localStorage.setItem(this.key, JSON.stringify(this.items)); } catch {}
+      },
+      add(factor) {
+        if (!factor) return;
+        factor = String(factor).trim().slice(0, 200);
+        if (!factor) return;
+        this.items = [factor, ...this.items.filter(s => s !== factor)].slice(0, 5);
+        this.save();
+      },
+      reuse(factor) {
+        const inp = document.getElementById('factor-input');
+        if (inp) {
+          inp.value = factor;
+          inp.form.requestSubmit();
+        }
+      },
+      clearAll() {
+        this.items = [];
+        this.save();
+      }
+    };
+  }
+
+  // After every successful HTMX swap, record the just-submitted factor.
+  document.body.addEventListener('htmx:afterRequest', (ev) => {
+    if (!ev.detail.successful) return;
+    const target = ev.detail.target;
+    if (!target || target.id !== 'competitive-results') return;
+    const inp = document.getElementById('factor-input');
+    const factor = (inp && inp.value || '').trim();
+    if (!factor) return;
+    // Grab the running Alpine component and push.
+    document.querySelectorAll('[x-data]').forEach(el => {
+      if (el._x_dataStack && el._x_dataStack[0] && typeof el._x_dataStack[0].add === 'function') {
+        el._x_dataStack[0].add(factor);
+      }
+    });
+  });
+</script>
+{% endblock %}

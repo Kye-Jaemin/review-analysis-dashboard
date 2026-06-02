@@ -327,8 +327,14 @@ async def list_vendors(session: AsyncSession) -> list[dict]:
                         "description": c.description,
                         "sentiments": {b: 0 for b in SENTIMENT_ORDER},
                         "total": 0,
+                        # Every AutoCategory row that fed this by_name entry.
+                        # Downstream callers (e.g. the competitive-rank
+                        # service) use this list to look up sample reviews
+                        # via the junction table.
+                        "cat_ids": [],
                     },
                 )
+                node["cat_ids"].append(c.id)
                 src_counts = per_cat.get(c.id, {})
                 for band, cnt in src_counts.items():
                     node["sentiments"][band] += cnt
