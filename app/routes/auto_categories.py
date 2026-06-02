@@ -370,6 +370,104 @@ async def reviews_for_auto_category(
     }
 
 
+@router.post("/api/auto-categories/neutralize-names")
+async def neutralize_auto_category_names(
+    dry_run: int = 0,
+    model: Optional[str] = None,
+    batch_size: int = 25,
+    session: AsyncSession = Depends(get_session),
+):
+    """One-shot admin op: retro-fit existing auto-category names to be
+    sentiment-neutral.
+
+    Background: the Top-N extraction prompt was updated to forbid
+    evaluative words (불만 / 거부감 / 부정확 / 저하 / 문제 / inaccuracy
+    / complaint / etc.) in the NAME, because a topic bucket legitimately
+    collects both polarities and a sentiment-loaded name becomes
+    self-contradictory the moment a positive review lands in a
+    'negative-sounding' bucket. New cards extracted after that prompt
+    change are fine; this endpoint walks the existing rows and asks
+    Claude to neutralize each name in place.
+
+    Skips the two fixed simple-sentiment buckets (Simple praise /
+    Simple complaint / 단순 긍정 / 단순 부정) — their identity IS the
+    sentiment, so their names should stay as-is.
+
+    Cached translations (`translations` JSON) are cleared on any change
+    because they're keyed off the old name and would otherwise drift.
+    The next /api/auto-categories?lang=… call lazily re-translates from
+    the new neutral name.
+
+    Query params:
+      dry_run=1     don't write — just preview what would change
+      model=…       Claude model override (defaults to settings.ANTHROPIC_MODEL)
+      batch_size=N  items per LLM call (default 25, max 50)
+    """
+    from app.services.auto_analyzer import (
+        SIMPLE_BUCKETS,
+        neutralize_category_names,
+    )
+    from app.config import settings as _settings
+
+    # Build the set of simple-bucket names across every language we ship.
+    # Matched case-insensitively against AutoCategory.name to skip them.
+    simple_names: set[str] = set()
+    for lang_table in SIMPLE_BUCKETS.values():
+        for entry in lang_table.values():
+            simple_names.add(entry["name"].strip().lower())
+
+    rows = (await session.execute(select(AutoCategory))).scalars().all()
+    candidates: list[AutoCategory] = [
+        r for r in rows
+        if (r.name or "").strip().lower() not in simple_names
+    ]
+
+    chosen_model = (model or _settings.ANTHROPIC_MODEL).strip()
+    bs = max(1, min(int(batch_size or 25), 50))
+
+    rename_map: dict[int, str] = {}
+    for i in range(0, len(candidates), bs):
+        batch = candidates[i : i + bs]
+        items = [
+            {"id": r.id, "name": r.name, "language": r.language}
+            for r in batch
+        ]
+        partial = await neutralize_category_names(items, chosen_model)
+        rename_map.update(partial)
+
+    changes: list[dict] = []
+    for r in candidates:
+        new_name = rename_map.get(r.id)
+        if not new_name:
+            continue
+        if new_name.strip() == (r.name or "").strip():
+            continue
+        changes.append({
+            "id": r.id,
+            "investigation_id": r.investigation_id,
+            "lang": r.language,
+            "old": r.name,
+            "new": new_name,
+        })
+        if not dry_run:
+            r.name = new_name
+            # Stale cache: translations were of the OLD name. Clear so the
+            # next lang= read re-translates from the new neutral original.
+            r.translations = {}
+
+    if not dry_run and changes:
+        await session.commit()
+
+    return {
+        "dry_run": bool(dry_run),
+        "total_rows": len(rows),
+        "skipped_simple_buckets": len(rows) - len(candidates),
+        "candidates": len(candidates),
+        "changed": len(changes),
+        "samples": changes[:200],
+    }
+
+
 @router.post("/api/translate-review")
 async def translate_review(body: TranslateReviewRequest):
     """Translate a single review text into the requested UI language.

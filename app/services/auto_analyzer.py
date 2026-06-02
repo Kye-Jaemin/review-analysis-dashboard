@@ -233,6 +233,84 @@ async def _extract_top_categories(
     return out
 
 
+async def neutralize_category_names(
+    items: list[dict], model: str
+) -> dict[int, str]:
+    """Rewrite existing AutoCategory names to be sentiment-neutral.
+
+    `items` is a list of {"id": int, "name": str, "language": str}. Returns
+    {id: new_name}. Items whose original name is already neutral may be
+    returned unchanged; the caller decides whether to write back. The
+    helper itself does NOT touch the database — keeping it side-effect
+    free makes it trivial to dry-run.
+
+    Used by the one-shot /api/auto-categories/neutralize-names admin
+    route to retro-fit existing rows after the extraction prompt was
+    updated. Same Claude pattern as _extract_top_categories — single
+    JSON-only completion, batched by the caller.
+    """
+    if not items:
+        return {}
+    if not settings.ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+    from anthropic import AsyncAnthropic
+
+    system = (
+        "You rewrite topic category labels to be SENTIMENT-NEUTRAL.\n"
+        "For each item, output a name that:\n"
+        "  - keeps the same topic / feature / concept\n"
+        "  - REMOVES evaluative words: complaint / aversion / inaccurate\n"
+        "    / inaccuracy / degradation / problem / problems / issue /\n"
+        "    issues / error / errors / failure / praise / 불만 / 거부감\n"
+        "    / 부정확 / 저하 / 문제 / 개선 / 결함 / 우려 / 불편 / 부족\n"
+        "    / 부재 / 오류 / 실패\n"
+        "  - STAYS in the SAME language and script as the original\n"
+        "  - is short (3–6 words), a NOUN PHRASE describing the topic\n"
+        "  - does NOT invert meaning (a name about 'inaccurate sleep'\n"
+        "    becomes 'sleep tracking accuracy', NOT 'accurate sleep')\n"
+        "If the original is already neutral, return it unchanged.\n\n"
+        "Examples:\n"
+        '  "AI 코치 기능 거부감"          → "AI 코치 기능"\n'
+        '  "수면 추적 정확도 문제"        → "수면 추적 정확도"\n'
+        '  "피트빗→구글헬스 전환 불만"     → "피트빗→구글헬스 전환"\n'
+        '  "운동·심박존 커스터마이징 부재" → "운동·심박존 커스터마이징"\n'
+        '  "걸음 수·활동 데이터 부정확"    → "걸음 수·활동 데이터 정확도"\n'
+        '  "음식·칼로리 기록 기능 저하"    → "음식·칼로리 기록 기능"\n'
+        '  "앱 동기화 및 기술적 오류"      → "앱 동기화"\n'
+        '  "Sleep tracking inaccuracy"   → "Sleep tracking accuracy"\n'
+        '  "Battery life complaints"     → "Battery life"\n'
+        '  "App sync errors"             → "App sync"\n'
+        '  "Subscription pricing"        → "Subscription pricing"   (already neutral)\n\n'
+        "Output JSON only:\n"
+        '  {"renames": [{"id": <int>, "name": "<neutral name>"}, ...]}\n'
+        "Include EVERY input id exactly once. No prose, no markdown fences."
+    )
+    user = "Items:\n" + "\n".join(
+        f"[{it['id']}] ({(it.get('language') or 'en')}) {it['name']}"
+        for it in items
+    )
+
+    client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    resp = await client.messages.create(
+        model=model, max_tokens=2048, system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    text = _strip_fences("".join(getattr(b, "text", "") for b in resp.content))
+    parsed = json.loads(text)
+    out: dict[int, str] = {}
+    for r in parsed.get("renames", []) or []:
+        if not isinstance(r, dict):
+            continue
+        try:
+            rid = int(r.get("id"))
+        except (TypeError, ValueError):
+            continue
+        new_name = (r.get("name") or "").strip()
+        if new_name:
+            out[rid] = new_name[:200]
+    return out
+
+
 async def _classify_batch(
     categories: list[AutoCategory],
     reviews: list[Review],
