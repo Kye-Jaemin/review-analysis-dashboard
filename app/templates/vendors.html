@@ -140,20 +140,25 @@
                 {% set score = (c.pos_score * 100)|round(1) %}
                 {% set rank_icon = ['🥇','🥈','🥉','4.','5.'][loop.index0] %}
                 {% set saved_card_id = saved_lookup.get((v.key, (c.name or '').strip().lower(), 'positive')) %}
-                <li class="bg-white/70 rounded-md p-2.5 border border-green-100 hover:border-green-300 hover:shadow-sm transition-all cursor-pointer"
+                <li class="rounded-md p-2.5 border hover:shadow-sm transition-all cursor-pointer
+                           {% if saved_card_id %}bg-emerald-50/80 border-emerald-300 border-l-4 border-l-emerald-500 hover:border-emerald-400{% else %}bg-white/70 border-green-100 hover:border-green-300{% endif %}"
                     data-reasons-trigger
                     data-vendor-key="{{ v.key }}"
                     data-vendor-display="{{ v.display }}"
                     data-category="{{ c.name }}"
                     data-band="positive"
                     data-saved-id="{{ saved_card_id or '' }}"
-                    title="{% if lang == 'ko' %}클릭하면 이 강점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this strength{% endif %}">
+                    title="{% if saved_card_id %}{% if lang == 'ko' %}저장된 원인 분석 보기 (LLM 호출 없음){% else %}View saved reasons (no LLM call){% endif %}{% else %}{% if lang == 'ko' %}클릭하면 이 강점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this strength{% endif %}{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
                     <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% else %}text-gray-500 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
-                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">
-                      {{ c.name }}
-                      {% if saved_card_id %}<span class="ml-1 text-emerald-600" title="{% if lang == 'ko' %}저장된 원인 분석 있음 — 클릭하면 LLM 호출 없이 불러옴{% else %}Saved reasons available — click to load without LLM call{% endif %}">📌</span>{% endif %}
-                    </span>
+                    {# Category name (truncate-safe — the 📌 indicator lives in its own pill outside this span) #}
+                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">{{ c.name }}</span>
+                    {# Saved-card chip: outside the truncate so it always shows. Click target is the same li. #}
+                    {% if saved_card_id %}
+                      <span class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
+                        📌 {% if lang == 'ko' %}저장됨{% else %}saved{% endif %}
+                      </span>
+                    {% endif %}
                     <span class="shrink-0 text-right" title="{% if lang == 'ko' %}Wilson 신뢰 점수: {{ score }}%{% else %}Wilson confidence score: {{ score }}%{% endif %}">
                       <span class="text-base font-bold text-green-700 tabular-nums">{{ pct }}%</span>
                       <span class="text-[10px] text-gray-500 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
@@ -203,20 +208,23 @@
                 {% set score = (c.neg_score * 100)|round(1) %}
                 {% set rank_icon = ['🚨','⚠','⚠','4.','5.'][loop.index0] %}
                 {% set saved_card_id = saved_lookup.get((v.key, (c.name or '').strip().lower(), 'negative')) %}
-                <li class="bg-white/70 rounded-md p-2.5 border border-red-100 hover:border-red-300 hover:shadow-sm transition-all cursor-pointer"
+                <li class="rounded-md p-2.5 border hover:shadow-sm transition-all cursor-pointer
+                           {% if saved_card_id %}bg-emerald-50/80 border-emerald-300 border-l-4 border-l-emerald-500 hover:border-emerald-400{% else %}bg-white/70 border-red-100 hover:border-red-300{% endif %}"
                     data-reasons-trigger
                     data-vendor-key="{{ v.key }}"
                     data-vendor-display="{{ v.display }}"
                     data-category="{{ c.name }}"
                     data-band="negative"
                     data-saved-id="{{ saved_card_id or '' }}"
-                    title="{% if lang == 'ko' %}클릭하면 이 약점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this weakness{% endif %}">
+                    title="{% if saved_card_id %}{% if lang == 'ko' %}저장된 원인 분석 보기 (LLM 호출 없음){% else %}View saved reasons (no LLM call){% endif %}{% else %}{% if lang == 'ko' %}클릭하면 이 약점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this weakness{% endif %}{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
                     <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% else %}text-gray-500 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
-                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">
-                      {{ c.name }}
-                      {% if saved_card_id %}<span class="ml-1 text-emerald-600" title="{% if lang == 'ko' %}저장된 원인 분석 있음 — 클릭하면 LLM 호출 없이 불러옴{% else %}Saved reasons available — click to load without LLM call{% endif %}">📌</span>{% endif %}
-                    </span>
+                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">{{ c.name }}</span>
+                    {% if saved_card_id %}
+                      <span class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
+                        📌 {% if lang == 'ko' %}저장됨{% else %}saved{% endif %}
+                      </span>
+                    {% endif %}
                     <span class="shrink-0 text-right" title="{% if lang == 'ko' %}Wilson 신뢰 점수: {{ score }}%{% else %}Wilson confidence score: {{ score }}%{% endif %}">
                       <span class="text-base font-bold text-red-700 tabular-nums">{{ pct }}%</span>
                       <span class="text-[10px] text-gray-500 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
@@ -556,16 +564,30 @@ async function reasonsSave() {
     }
     const data = await res.json();
     _reasonsState.savedCardId = data.id;
-    // Update the page's 📌 indicator on the trigger li
+    // Update the trigger <li> to match the server-rendered "saved" state
+    // so subsequent clicks load from DB and the user sees the indicator
+    // without a page reload.
     if (_reasonsState.trigger) {
-      _reasonsState.trigger.dataset.savedId = data.id;
-      const nameSpan = _reasonsState.trigger.querySelector('.font-semibold.text-sm');
-      if (nameSpan && !nameSpan.querySelector('.pin')) {
-        const pin = document.createElement('span');
-        pin.className = 'pin ml-1 text-emerald-600';
-        pin.textContent = '📌';
-        nameSpan.appendChild(pin);
+      const li = _reasonsState.trigger;
+      li.dataset.savedId = data.id;
+      // Swap the visual treatment: emerald background + left accent.
+      li.classList.remove('bg-white/70');
+      li.classList.add('bg-emerald-50/80', 'border-emerald-300', 'border-l-4', 'border-l-emerald-500');
+      // Remove the band-specific hover-border classes so they don't fight emerald.
+      li.classList.remove('border-green-100','hover:border-green-300','border-red-100','hover:border-red-300');
+      li.classList.add('hover:border-emerald-400');
+      // Insert the "📌 저장됨" chip right after the truncated name span if not already there.
+      if (!li.querySelector('.saved-chip')) {
+        const nameSpan = li.querySelector('.font-semibold.text-sm.truncate');
+        if (nameSpan) {
+          const chip = document.createElement('span');
+          chip.className = 'saved-chip shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300';
+          chip.textContent = '📌 {% if lang == "ko" %}저장됨{% else %}saved{% endif %}';
+          nameSpan.after(chip);
+        }
       }
+      // Update title attribute to reflect the new behaviour.
+      li.title = '{% if lang == "ko" %}저장된 원인 분석 보기 (LLM 호출 없음){% else %}View saved reasons (no LLM call){% endif %}';
     }
     _updateFooter(true, true);
     btn.disabled = false;
@@ -627,11 +649,28 @@ async function reasonsDelete() {
   try {
     const res = await fetch('/api/vendor-reason-cards/' + _reasonsState.savedCardId, { method: 'DELETE' });
     if (!res.ok) { alert('{% if lang == 'ko' %}삭제 실패{% else %}Delete failed{% endif %}'); return; }
-    // Remove the 📌 from the trigger li, clear saved id
+    // Reset the trigger li back to its fresh-not-saved appearance.
     if (_reasonsState.trigger) {
-      _reasonsState.trigger.dataset.savedId = '';
-      const pin = _reasonsState.trigger.querySelector('.pin');
-      if (pin) pin.remove();
+      const li = _reasonsState.trigger;
+      li.dataset.savedId = '';
+      // Drop the saved styling
+      li.classList.remove('bg-emerald-50/80','border-emerald-300','border-l-4','border-l-emerald-500','hover:border-emerald-400');
+      // Restore the band-specific baseline
+      li.classList.add('bg-white/70');
+      if (_reasonsState.band === 'positive') {
+        li.classList.add('border-green-100','hover:border-green-300');
+      } else {
+        li.classList.add('border-red-100','hover:border-red-300');
+      }
+      // Drop the chip
+      const chip = li.querySelector('.saved-chip');
+      if (chip) chip.remove();
+      // Old (legacy) inline pin variant — drop too for safety
+      const oldPin = li.querySelector('.pin');
+      if (oldPin) oldPin.remove();
+      li.title = (_reasonsState.band === 'positive')
+        ? '{% if lang == "ko" %}클릭하면 이 강점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this strength{% endif %}'
+        : '{% if lang == "ko" %}클릭하면 이 약점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this weakness{% endif %}';
     }
     closeReasonsModal();
   } catch (e) { alert(String(e)); }
