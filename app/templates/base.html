@@ -793,12 +793,33 @@
 
       // Capture-phase form submit listener — runs BEFORE HTMX's own
       // submit handler. preventDefault here suppresses HTMX too.
+      //
+      // For HTMX forms (`hx-post`, `hx-get`, …) `action` is empty and
+      // the request URL lives in the corresponding `hx-*` attribute,
+      // so we fall back to scanning those before deciding to skip.
+      // Without this, multipart HTMX uploads like /competitive/analyze-csv
+      // slipped past the gate.
+      function _formGateTarget(form) {
+        const action = form.getAttribute('action');
+        if (action) {
+          return {
+            path: action,
+            method: (form.getAttribute('method') || 'GET').toUpperCase(),
+          };
+        }
+        const verbs = ['post', 'put', 'patch', 'delete', 'get'];
+        for (const v of verbs) {
+          const url = form.getAttribute('hx-' + v);
+          if (url) return { path: url, method: v.toUpperCase() };
+        }
+        return null;
+      }
       document.addEventListener('submit', function (evt) {
         const form = evt.target;
         if (!form || form.tagName !== 'FORM') return;
-        const action = form.getAttribute('action') || '';
-        const method = (form.getAttribute('method') || 'GET').toUpperCase();
-        if (!pathNeedsGate(method, action)) return;
+        const target = _formGateTarget(form);
+        if (!target) return;
+        if (!pathNeedsGate(target.method, target.path)) return;
         if (!checkGate()) {
           evt.preventDefault();
           evt.stopPropagation();

@@ -949,38 +949,55 @@ async def analyze_csv(
             "message": "no_strength_rows_in_csv",
         }
 
-    # Distinct universe
-    universe: dict[str, dict] = {}
-    for r in strengths:
-        key = r["category"].strip().lower()
-        if key in universe:
-            continue
-        universe[key] = {
-            "name": r["category"],
-            "description": r["description"] or None,
-        }
-    items = list(universe.values())
+    # Per-ROW matching candidates (new behavior, requested by user).
+    # The classifier scores each strength row against each factor using
+    # the row's SAVED REASONS text as the primary signal — the causal
+    # mechanisms uncovered by the /vendors per-strength analysis.
+    # Category name is kept as a secondary cue inside `description` so
+    # the LLM still has structural context, but the matching surface
+    # is the reasons cell. Rows with empty reasons fall back to the
+    # category name alone (and the UI flags them so the user can go
+    # back to /vendors and analyze that strength's reasons).
+    #
+    # Candidate `name` is a stable per-row key (`row_<idx>`) so dedup
+    # in _score_categories stays well-defined; the LLM never sees the
+    # key, only the description.
+    candidates: list[dict] = []
+    rows_with_reasons_count = 0
+    for i, r in enumerate(strengths):
+        reasons = (r.get("reasons") or "").strip()
+        if reasons:
+            rows_with_reasons_count += 1
+            desc = f"[{r['vendor']} > {r['category']}] {reasons}"
+        else:
+            desc = f"[{r['vendor']} > {r['category']}] (no detail reasons available)"
+        candidates.append({
+            "name": f"row_{i}",
+            "description": desc[:600],
+        })
 
-    # Parallel LLM scoring per entry (factor + criteria)
     chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
     per_entry_scores = await _score_factors_parallel(
-        cleaned_entries, items, chosen_model
+        cleaned_entries, candidates, chosen_model
     )
 
-    # Build per-entry groups
+    # Build per-entry groups. Matched rows carry their row index back
+    # through the lowercased name key the LLM echoes ("row_3").
     groups: list[dict] = []
     total_matched = 0
+    rows_with_empty_reasons_matched = 0
     for entry, scores in zip(cleaned_entries, per_entry_scores):
         matched: list[dict] = []
-        for r in strengths:
-            cat_key = r["category"].strip().lower()
-            relevance = float(scores.get(cat_key, 0.0))
+        for i, r in enumerate(strengths):
+            relevance = float(scores.get(f"row_{i}", 0.0))
             if relevance < threshold:
                 continue
             out = dict(r)
             out["relevance"] = round(relevance, 3)
             out["match_score"] = round(relevance * r["wilson_score"], 4)
             matched.append(out)
+            if not (r.get("reasons") or "").strip():
+                rows_with_empty_reasons_matched += 1
         matched.sort(key=lambda x: (x["relevance"], x["pct"]), reverse=True)
         groups.append({
             "factor": entry["factor"],
@@ -998,8 +1015,12 @@ async def analyze_csv(
         "threshold": threshold,
         "input_row_count": input_row_count,
         "strength_input_count": len(strengths),
+        "rows_with_reasons_count": rows_with_reasons_count,
+        "rows_with_empty_reasons_matched": rows_with_empty_reasons_matched,
         "groups": groups,
         "total_matched_rows": total_matched,
-        "universe_size": len(universe),
+        # Universe size now reflects the per-row candidate count (each
+        # row is its own scoring item under the reasons-first scheme).
+        "universe_size": len(candidates),
         "model": chosen_model,
     }
