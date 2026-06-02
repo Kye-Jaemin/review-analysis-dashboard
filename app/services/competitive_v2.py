@@ -37,11 +37,14 @@ from app.config import settings
 from app.models import CompetitiveV2Card
 
 
-# Target category count. The prompt asks for ~5 categories (4-6 acceptable
-# range so the LLM has flexibility when the data naturally splits more or
-# less than that). Confirmed with the user.
+# Target category count. User wants ~5; we strictly enforce 3-6 because
+# the LLM has a strong tendency to over-split when the input data covers
+# many product verticals (calorie apps, exercise apps, wearables …).
+# The prompt explicitly tells it to MERGE topical neighbours rather than
+# create vendor-specific categories.
 TARGET_CATEGORY_COUNT_MIN = 4
 TARGET_CATEGORY_COUNT_MAX = 6
+TARGET_CATEGORY_HARD_CAP = 6
 
 # Soft cap on reasons sent to Claude in a single call. Typical /vendors
 # CSV produces ~150 reasons; 400 is the worst-case ceiling that still
@@ -131,22 +134,31 @@ async def _llm_cluster_reasons(
         "for a positive review (e.g. \"바코드 스캔으로 빠른 음식 입력\"). "
         "Different products often express the SAME underlying success "
         "factor in different words — your job is to find those.\n\n"
-        f"Cluster the items into approximately {TARGET_CATEGORY_COUNT_MIN}"
-        f"–{TARGET_CATEGORY_COUNT_MAX} SUCCESS FACTOR CATEGORIES. For each:\n"
+        f"Cluster the items into approximately {TARGET_CATEGORY_COUNT_MIN}–"
+        f"{TARGET_CATEGORY_COUNT_MAX} (target: 5) success-factor categories.\n"
+        f"HARD CAP: never return more than {TARGET_CATEGORY_HARD_CAP} categories.\n\n"
+        "For each category:\n"
         "  - name: 3–7 word label NAMING the success factor (noun phrase,\n"
         "          in the same language as the input reasons)\n"
         "  - description: ONE sentence on what specifically makes this a\n"
         "                 driver of positive user experience\n"
         "  - member_reasons: array of the [N] indices belonging here\n\n"
-        "Rules:\n"
-        "  - Every input reason belongs to EXACTLY ONE category (each\n"
-        "    index appears in exactly one member_reasons array).\n"
-        "  - Avoid vague catch-all categories like \"general satisfaction\"\n"
-        "    — categories must be SUBSTANTIVE and DISTINCT.\n"
-        "  - Order categories from largest member count to smallest.\n"
-        "  - If the data clearly splits into more or fewer than "
-        f"{TARGET_CATEGORY_COUNT_MIN}–{TARGET_CATEGORY_COUNT_MAX} natural\n"
-        "    clusters, deviate within reason (3 minimum, 8 maximum).\n\n"
+        "Critical rules:\n"
+        "  1. PREFER MERGING over splitting. When you see vendor-specific\n"
+        "     patterns (e.g. WW-only point system, Apple Fitness+-only\n"
+        "     instructor content, a single-product mascot game), find the\n"
+        "     BROADER underlying success driver they exemplify and merge\n"
+        "     them into a cross-vendor category. The whole point of this\n"
+        "     analysis is universal patterns, not per-product enumerations.\n"
+        "  2. Every input index belongs to EXACTLY ONE category. Never\n"
+        "     duplicate an index.\n"
+        "  3. Avoid vague catch-all categories like \"general satisfaction\"\n"
+        "     or \"misc features\" — every category must name a SPECIFIC\n"
+        "     success mechanism.\n"
+        "  4. Single-vendor categories are a code-smell that you split too\n"
+        "     fine. Try harder to find the cross-vendor umbrella unless\n"
+        "     the topic is genuinely unique to one vendor (rare).\n"
+        "  5. Order categories from largest member count to smallest.\n\n"
         "Output JSON only, no prose, no markdown fences:\n"
         "{\n"
         '  "categories": [\n'
