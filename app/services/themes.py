@@ -347,6 +347,37 @@ async def extract_themes(
         }
 
     categories = parsed.get("categories") or []
+
+    # Authoritative category totals — the LLM is asked to fill in `total`
+    # but it's an LLM estimate from reading the tagged sample, and off-by-one
+    # errors are common (~1–2 review miscount). The truthful count is the
+    # number of UNIQUE reviews in `sample` tagged with that category label.
+    # That's the same number the dashboard's /api/auto-categories tile
+    # reports for this (cat, sentiment) pair (within the same scope), so
+    # the two surfaces stay consistent.
+    #
+    # Match by exact category-string equality — `sample[i]["category"]` was
+    # passed to the LLM verbatim, and well-behaved LLMs echo it back. If
+    # the LLM invents a new category name, we leave its self-reported
+    # total alone (no override) since we have no truth to substitute.
+    truth_by_cat: dict[str, int] = {}
+    for s in sample:
+        c = s.get("category") or UNCATEGORIZED_LABEL
+        truth_by_cat[c] = truth_by_cat.get(c, 0) + 1
+    for cat in categories:
+        nm = cat.get("category")
+        if nm in truth_by_cat:
+            cat["total"] = truth_by_cat[nm]
+            # Re-cap theme counts against the new (smaller, when LLM
+            # over-reported) total so sub-counts stay sub-additive.
+            running = 0
+            for t in cat.get("themes") or []:
+                c = t.get("count")
+                if isinstance(c, int):
+                    if running + c > cat["total"]:
+                        t["count"] = max(0, cat["total"] - running)
+                    running += t["count"] if isinstance(t["count"], int) else 0
+
     result = {
         "sentiment": sentiment,
         "categories": categories,
