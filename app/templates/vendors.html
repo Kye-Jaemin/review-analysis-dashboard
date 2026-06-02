@@ -6,11 +6,23 @@
 <div class="flex items-baseline justify-between mb-4 gap-3">
   <h1 class="text-2xl font-semibold">{{ t('nav.vendors') }}</h1>
   <div class="flex items-baseline gap-3">
-    <button type="button" onclick="openExportModal()"
-            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium whitespace-nowrap shrink-0"
-            {% if not vendors %}disabled style="opacity:0.5;cursor:not-allowed"{% endif %}>
-      📥 {% if lang == 'ko' %}CSV 내보내기{% else %}Export CSV{% endif %}
-    </button>
+    <div class="flex gap-2 shrink-0">
+      {% if vendors %}
+        <button type="button" onclick="expandAllVendors()"
+                class="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium whitespace-nowrap">
+          ▼ {% if lang == 'ko' %}전체 펼치기{% else %}Expand all{% endif %}
+        </button>
+        <button type="button" onclick="collapseAllVendors()"
+                class="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium whitespace-nowrap">
+          ▲ {% if lang == 'ko' %}전체 접기{% else %}Collapse all{% endif %}
+        </button>
+      {% endif %}
+      <button type="button" onclick="openExportModal()"
+              class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium whitespace-nowrap"
+              {% if not vendors %}disabled style="opacity:0.5;cursor:not-allowed"{% endif %}>
+        📥 {% if lang == 'ko' %}CSV 내보내기{% else %}Export CSV{% endif %}
+      </button>
+    </div>
     <div class="text-xs text-gray-500">
       {% if lang == 'ko' %}
         소스 표시이름을 기준으로 같은 업체를 묶어, 자동 카테고리 + 감성 결과로 강점/약점을 집계합니다 (신규 분석 없음).
@@ -53,7 +65,7 @@
 <div class="space-y-4">
   {% for v in vendors %}
     {% set analyzed = v.analyzed_count or 0 %}
-    <div class="bg-white rounded shadow-sm p-4 panel-in">
+    <div class="bg-white rounded shadow-sm p-4 panel-in" data-vendor-row data-vendor-key="{{ v.key }}">
       <!-- Header: vendor name + KPIs -->
       <div class="flex items-start justify-between gap-4 mb-3 flex-wrap">
         <div class="flex items-center gap-3 min-w-0">
@@ -122,7 +134,21 @@
       </div>
       {% endif %}
 
-      <!-- Strengths / Weaknesses two-column -->
+      <!-- Strengths / Weaknesses toggle — collapsed by default, restored
+           from localStorage on load (init_vendor_expansion script at the
+           bottom). The header + sentiment bar above is always visible so
+           the user can scan vendor summaries; the heavy Top-5 grids
+           only render once they explicitly expand a row. -->
+      <button type="button"
+              data-vendor-toggle
+              onclick="toggleVendor(this)"
+              class="w-full mt-1 px-3 py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-xs font-medium text-gray-700 flex items-center justify-center gap-2 transition-colors">
+        <span data-vendor-toggle-icon>▼</span>
+        <span data-vendor-toggle-label>
+          {% if lang == 'ko' %}강점·약점 Top 5 펼치기{% else %}Show top 5 strengths &amp; weaknesses{% endif %}
+        </span>
+      </button>
+
       <!-- Strengths / Weaknesses cards. Each insight gets:
            - a chunky rank badge (1./2./3. medal for top 3)
            - the category name in a readable size
@@ -130,7 +156,7 @@
              dominant this strength/weakness is)
            - count + percentage tabular-nums
            - the description as a quieter second line -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div data-vendor-expand class="hidden mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
         {# --- Strengths --- #}
         <div class="border border-green-200 rounded-lg p-4 bg-gradient-to-br from-green-50 to-emerald-50/60 shadow-sm">
           <div class="flex items-center gap-2 mb-3 pb-2 border-b border-green-200/70">
@@ -425,6 +451,82 @@ document.addEventListener('keydown', (e) => {
     closeExportModal();
   }
 });
+
+// ============================================================
+// Vendor row expand / collapse
+// ============================================================
+// Each <div data-vendor-row> on /vendors has a Top-5 strengths +
+// weaknesses grid that's hidden by default. The user clicks the
+// "▼ 강점·약점 Top 5 펼치기" button to reveal it. Toolbar buttons at
+// the top of the page expand or collapse every row at once.
+// State is mirrored to localStorage (a Set of vendor_keys that are
+// currently expanded) so a reload restores the user's last view.
+
+const _VENDOR_EXPAND_KEY = 'vendors.expanded';
+
+function _loadExpandedKeys() {
+  try {
+    const raw = localStorage.getItem(_VENDOR_EXPAND_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch { return new Set(); }
+}
+function _saveExpandedKeys(set) {
+  try { localStorage.setItem(_VENDOR_EXPAND_KEY, JSON.stringify([...set])); } catch {}
+}
+
+function _setVendorRow(row, open) {
+  const grid = row.querySelector('[data-vendor-expand]');
+  const icon = row.querySelector('[data-vendor-toggle-icon]');
+  const label = row.querySelector('[data-vendor-toggle-label]');
+  if (!grid) return;
+  if (open) {
+    grid.classList.remove('hidden');
+    if (icon) icon.textContent = '▲';
+    if (label) label.textContent = {% if lang == 'ko' %}'강점·약점 Top 5 접기'{% else %}'Hide top 5 strengths & weaknesses'{% endif %};
+  } else {
+    grid.classList.add('hidden');
+    if (icon) icon.textContent = '▼';
+    if (label) label.textContent = {% if lang == 'ko' %}'강점·약점 Top 5 펼치기'{% else %}'Show top 5 strengths & weaknesses'{% endif %};
+  }
+}
+
+function toggleVendor(btn) {
+  const row = btn.closest('[data-vendor-row]');
+  if (!row) return;
+  const key = row.dataset.vendorKey;
+  const grid = row.querySelector('[data-vendor-expand]');
+  const willOpen = grid.classList.contains('hidden');
+  _setVendorRow(row, willOpen);
+  const keys = _loadExpandedKeys();
+  if (willOpen) keys.add(key); else keys.delete(key);
+  _saveExpandedKeys(keys);
+}
+
+function expandAllVendors() {
+  const keys = new Set();
+  document.querySelectorAll('[data-vendor-row]').forEach(row => {
+    _setVendorRow(row, true);
+    if (row.dataset.vendorKey) keys.add(row.dataset.vendorKey);
+  });
+  _saveExpandedKeys(keys);
+}
+
+function collapseAllVendors() {
+  document.querySelectorAll('[data-vendor-row]').forEach(row => {
+    _setVendorRow(row, false);
+  });
+  _saveExpandedKeys(new Set());
+}
+
+// Restore state on load.
+(function restoreVendorExpansion() {
+  const keys = _loadExpandedKeys();
+  document.querySelectorAll('[data-vendor-row]').forEach(row => {
+    if (keys.has(row.dataset.vendorKey)) _setVendorRow(row, true);
+  });
+})();
 </script>
 
 {# ========== Reasons modal (single instance, populated on click) ==========
