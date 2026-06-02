@@ -35,6 +35,7 @@ async def init_db() -> None:
         review,
         source,
         theme_snapshot,
+        vendor_reason_card,
     )
 
     async with engine.begin() as conn:

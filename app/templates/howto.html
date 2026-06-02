@@ -284,6 +284,23 @@
   <strong>단순 긍정/부정 버킷은 강점/약점 ranking 에서 제외</strong> — 이건 진짜 강/약점이 아니라 sentiment 덤프이기 때문.
 </div>
 
+<h3>8.1 강점·약점 클릭 → 세부 원인 분석 (NEW)</h3>
+<p>각 강점/약점 Top 5 항목을 <strong>클릭</strong>하면 모달이 열리고, LLM이 해당 카테고리 리뷰 최대 100건을 읽어 <strong>4–6개의 세부 원인</strong>을 추출해 가로 막대 차트로 보여줍니다.</p>
+<ul>
+  <li><strong>샘플 범위</strong>: 해당 (벤더, 카테고리, 감정 밴드) 조합의 리뷰. 강점은 긍정+매우긍정, 약점은 부정+매우부정 합산</li>
+  <li><strong>차트</strong>: 가로 막대 (원인별 리뷰 수). 강점은 녹색, 약점은 빨강</li>
+  <li><strong>예시 리뷰</strong>: 각 원인을 펼치면 대표 리뷰 2–3개 표시</li>
+  <li><strong>📌 저장</strong>: 모달 하단 <code>💾 카드로 저장</code> → DB에 영구 저장. 다음 클릭부터 <strong>LLM 호출 0건</strong>으로 즉시 불러옴. Render 재배포로 메모리 캐시가 날아가도 살아남음</li>
+  <li>저장된 항목은 강점/약점 텍스트 옆에 <strong>📌</strong> 아이콘으로 표시됨</li>
+  <li><strong>🔄 다시 분석</strong>: 명시적 opt-in. 새 리뷰가 쌓였을 때 카드를 갱신</li>
+  <li><strong>🏷️ 이름 변경 / ❌ 삭제</strong>: 저장된 카드만 적용 가능</li>
+  <li><strong>LLM 결정성</strong>: <code>temperature=0</code> 으로 호출되어 같은 데이터엔 같은 결과 반환</li>
+  <li><strong>truthful count</strong>: LLM이 estimate한 원인별 count를 서버측 deterministic 샘플 수로 cap → 차트와 실제 리뷰 수 일치 보장</li>
+</ul>
+<div class="callout info">
+  <strong>예시 시나리오:</strong> Weight Watchers Program의 <em>체중 감량 성과 공유</em>(강점) 클릭 → 모달 열림 → "지속적 식단·습관 형성 (24)", "커뮤니티 응원 (18)", "포인트 시스템 (17)" 같은 원인이 차트로 표시 → 각 원인 펼치면 실제 리뷰 인용 → 💾 저장.
+</div>
+
 <h2 id="competitive">9. 경쟁력 분석 페이지 (NEW)</h2>
 <p><a href="/competitive" class="text-blue-600 hover:underline">경쟁력 분석</a> 메뉴 — 사용자가 입력한 <strong>경쟁력 요소</strong>(예: "헬스 데이터 기반 AI 코칭")에 의미상 부합하는 강점을 보유한 업체를 자동 랭킹.</p>
 

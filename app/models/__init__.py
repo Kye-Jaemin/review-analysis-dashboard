@@ -6,6 +6,7 @@ from app.models.theme_snapshot import ThemeSnapshot
 from app.models.investigation import Investigation
 from app.models.auto_category import AutoCategory, ReviewAutoCategoryLink
 from app.models.competitive_card import CompetitiveFactorCard
+from app.models.vendor_reason_card import VendorReasonCard
 
 __all__ = [
     "Source",
@@ -24,4 +25,5 @@ __all__ = [
     "ReviewAutoCategoryLink",
     "ReviewManualCategoryLink",
     "CompetitiveFactorCard",
+    "VendorReasonCard",
 ]

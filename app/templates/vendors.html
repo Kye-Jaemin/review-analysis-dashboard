@@ -139,10 +139,21 @@
                 {% set pct = (c.pos_pct * 100)|round(1) %}
                 {% set score = (c.pos_score * 100)|round(1) %}
                 {% set rank_icon = ['🥇','🥈','🥉','4.','5.'][loop.index0] %}
-                <li class="bg-white/70 rounded-md p-2.5 border border-green-100 hover:border-green-300 hover:shadow-sm transition-all">
+                {% set saved_card_id = saved_lookup.get((v.key, (c.name or '').strip().lower(), 'positive')) %}
+                <li class="bg-white/70 rounded-md p-2.5 border border-green-100 hover:border-green-300 hover:shadow-sm transition-all cursor-pointer"
+                    data-reasons-trigger
+                    data-vendor-key="{{ v.key }}"
+                    data-vendor-display="{{ v.display }}"
+                    data-category="{{ c.name }}"
+                    data-band="positive"
+                    data-saved-id="{{ saved_card_id or '' }}"
+                    title="{% if lang == 'ko' %}클릭하면 이 강점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this strength{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
                     <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% else %}text-gray-500 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
-                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">{{ c.name }}</span>
+                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">
+                      {{ c.name }}
+                      {% if saved_card_id %}<span class="ml-1 text-emerald-600" title="{% if lang == 'ko' %}저장된 원인 분석 있음 — 클릭하면 LLM 호출 없이 불러옴{% else %}Saved reasons available — click to load without LLM call{% endif %}">📌</span>{% endif %}
+                    </span>
                     <span class="shrink-0 text-right" title="{% if lang == 'ko' %}Wilson 신뢰 점수: {{ score }}%{% else %}Wilson confidence score: {{ score }}%{% endif %}">
                       <span class="text-base font-bold text-green-700 tabular-nums">{{ pct }}%</span>
                       <span class="text-[10px] text-gray-500 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
@@ -191,10 +202,21 @@
                 {% set pct = (c.neg_pct * 100)|round(1) %}
                 {% set score = (c.neg_score * 100)|round(1) %}
                 {% set rank_icon = ['🚨','⚠','⚠','4.','5.'][loop.index0] %}
-                <li class="bg-white/70 rounded-md p-2.5 border border-red-100 hover:border-red-300 hover:shadow-sm transition-all">
+                {% set saved_card_id = saved_lookup.get((v.key, (c.name or '').strip().lower(), 'negative')) %}
+                <li class="bg-white/70 rounded-md p-2.5 border border-red-100 hover:border-red-300 hover:shadow-sm transition-all cursor-pointer"
+                    data-reasons-trigger
+                    data-vendor-key="{{ v.key }}"
+                    data-vendor-display="{{ v.display }}"
+                    data-category="{{ c.name }}"
+                    data-band="negative"
+                    data-saved-id="{{ saved_card_id or '' }}"
+                    title="{% if lang == 'ko' %}클릭하면 이 약점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this weakness{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
                     <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% else %}text-gray-500 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
-                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">{{ c.name }}</span>
+                    <span class="flex-1 min-w-0 font-semibold text-sm text-gray-900 truncate" title="{{ c.name }}">
+                      {{ c.name }}
+                      {% if saved_card_id %}<span class="ml-1 text-emerald-600" title="{% if lang == 'ko' %}저장된 원인 분석 있음 — 클릭하면 LLM 호출 없이 불러옴{% else %}Saved reasons available — click to load without LLM call{% endif %}">📌</span>{% endif %}
+                    </span>
                     <span class="shrink-0 text-right" title="{% if lang == 'ko' %}Wilson 신뢰 점수: {{ score }}%{% else %}Wilson confidence score: {{ score }}%{% endif %}">
                       <span class="text-base font-bold text-red-700 tabular-nums">{{ pct }}%</span>
                       <span class="text-[10px] text-gray-500 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
@@ -231,4 +253,410 @@
     </div>
   {% endfor %}
 </div>
+
+{# ========== Reasons modal (single instance, populated on click) ========== #}
+<div id="reasons-modal"
+     class="fixed inset-0 z-50 hidden bg-black/50 flex items-center justify-center p-4"
+     onclick="if (event.target === this) closeReasonsModal()">
+  <div class="bg-white rounded-lg shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <!-- Header -->
+    <div class="px-5 py-3 border-b flex items-center gap-2 shrink-0" id="reasons-modal-header">
+      <span id="reasons-modal-icon" class="text-xl">💡</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs text-gray-500" id="reasons-modal-band-label"></div>
+        <div class="text-sm font-semibold text-gray-900 truncate" id="reasons-modal-title"></div>
+      </div>
+      <button type="button" onclick="closeReasonsModal()"
+              class="text-gray-400 hover:text-gray-700 text-2xl leading-none px-2"
+              aria-label="close">×</button>
+    </div>
+
+    <!-- Body -->
+    <div class="flex-1 overflow-y-auto" id="reasons-modal-body">
+      <!-- Loading state -->
+      <div id="reasons-loading" class="hidden p-8 flex flex-col items-center gap-3 text-sm text-gray-600">
+        <svg class="animate-spin h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>
+        <span>{% if lang == 'ko' %}리뷰를 읽고 원인을 분석 중…{% else %}Analyzing reviews and surfacing reasons…{% endif %}</span>
+      </div>
+
+      <!-- Error -->
+      <div id="reasons-error" class="hidden p-5 bg-rose-50 border-l-4 border-rose-400 text-sm text-rose-800 m-4 rounded"></div>
+
+      <!-- Empty state -->
+      <div id="reasons-empty" class="hidden p-8 text-center text-sm text-gray-600">
+        {% if lang == 'ko' %}이 카테고리·감정 조합에 분석할 리뷰가 없습니다.{% else %}No reviews found in this category and sentiment band.{% endif %}
+      </div>
+
+      <!-- Result -->
+      <div id="reasons-result" class="hidden p-5 space-y-4">
+        <!-- Meta -->
+        <div class="text-xs text-gray-600 flex flex-wrap items-center gap-x-3 gap-y-1" id="reasons-meta"></div>
+
+        <!-- Chart -->
+        <div class="bg-gray-50 rounded p-3">
+          <canvas id="reasons-chart" style="max-height: 280px;"></canvas>
+        </div>
+
+        <!-- Reason list with examples -->
+        <ol id="reasons-list" class="space-y-2"></ol>
+      </div>
+    </div>
+
+    <!-- Footer (action buttons) -->
+    <div class="px-5 py-3 border-t bg-gray-50 flex items-center gap-2 shrink-0" id="reasons-modal-footer">
+      <button type="button" id="reasons-reanalyze-btn"
+              class="hidden px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium"
+              onclick="reasonsReanalyze()">
+        🔄 {% if lang == 'ko' %}다시 분석{% else %}Re-analyze{% endif %}
+      </button>
+      <button type="button" id="reasons-rename-btn"
+              class="hidden px-3 py-1.5 text-xs bg-gray-200 hover:bg-gray-300 rounded"
+              onclick="reasonsRename()">
+        🏷️ {% if lang == 'ko' %}이름 변경{% else %}Rename{% endif %}
+      </button>
+      <button type="button" id="reasons-delete-btn"
+              class="hidden px-2 py-1.5 text-xs bg-gray-200 hover:bg-red-100 hover:text-red-700 rounded"
+              onclick="reasonsDelete()">
+        ❌ {% if lang == 'ko' %}삭제{% else %}Delete{% endif %}
+      </button>
+      <div class="flex-1"></div>
+      <button type="button" id="reasons-save-btn"
+              class="hidden px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded font-medium"
+              onclick="reasonsSave()">
+        💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}
+      </button>
+      <button type="button" onclick="closeReasonsModal()"
+              class="px-3 py-1.5 text-xs bg-gray-200 hover:bg-gray-300 rounded">
+        {% if lang == 'ko' %}닫기{% else %}Close{% endif %}
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Reasons modal state machine — vanilla JS over Chart.js + fetch.
+// Three modes:
+//   "fresh": just-extracted, never saved → show 💾 save button
+//   "saved": loaded from DB → show 🔄 reanalyze / 🏷️ rename / ❌ delete
+//   "error"/"empty": status messages, no buttons
+
+let _reasonsState = {
+  trigger: null,        // DOM <li> that opened the modal
+  vendor_key: null,
+  vendor_display: null,
+  category: null,
+  band: null,           // "positive" | "negative"
+  savedCardId: null,    // null if fresh, int if loaded from card
+  result: null,         // last fetched payload
+  chart: null,          // Chart.js instance
+};
+
+const _BAND_LABEL = {
+  positive: {% if lang == 'ko' %}'💪 강점 원인'{% else %}'💪 Strength reasons'{% endif %},
+  negative: {% if lang == 'ko' %}'⚠️ 약점 원인'{% else %}'⚠️ Weakness reasons'{% endif %},
+};
+
+function openReasonsModalFor(el) {
+  const vk = el.dataset.vendorKey;
+  const vd = el.dataset.vendorDisplay;
+  const cat = el.dataset.category;
+  const band = el.dataset.band;
+  const savedId = parseInt(el.dataset.savedId, 10);
+  _reasonsState.trigger = el;
+  _reasonsState.vendor_key = vk;
+  _reasonsState.vendor_display = vd;
+  _reasonsState.category = cat;
+  _reasonsState.band = band;
+  _reasonsState.savedCardId = Number.isFinite(savedId) ? savedId : null;
+  _reasonsState.result = null;
+
+  // Header
+  document.getElementById('reasons-modal-band-label').textContent =
+    _BAND_LABEL[band] + ' · ' + vd;
+  document.getElementById('reasons-modal-title').textContent = cat;
+  document.getElementById('reasons-modal-icon').textContent =
+    band === 'positive' ? '💡' : '⚠️';
+
+  // Show modal
+  document.getElementById('reasons-modal').classList.remove('hidden');
+
+  if (_reasonsState.savedCardId) {
+    loadSavedReasons(_reasonsState.savedCardId);
+  } else {
+    fetchFreshReasons(false);
+  }
+}
+
+function closeReasonsModal() {
+  document.getElementById('reasons-modal').classList.add('hidden');
+  if (_reasonsState.chart) { try { _reasonsState.chart.destroy(); } catch {} _reasonsState.chart = null; }
+}
+
+function _showOnly(which) {
+  for (const id of ['reasons-loading','reasons-error','reasons-empty','reasons-result']) {
+    document.getElementById(id).classList.toggle('hidden', id !== which);
+  }
+}
+
+function _showError(msg) {
+  document.getElementById('reasons-error').textContent = msg;
+  _showOnly('reasons-error');
+  _updateFooter(false, false);
+}
+
+function _updateFooter(saved, hasResult) {
+  document.getElementById('reasons-save-btn').classList.toggle('hidden', saved || !hasResult);
+  document.getElementById('reasons-reanalyze-btn').classList.toggle('hidden', !saved);
+  document.getElementById('reasons-rename-btn').classList.toggle('hidden', !saved);
+  document.getElementById('reasons-delete-btn').classList.toggle('hidden', !saved);
+}
+
+async function fetchFreshReasons(force) {
+  _showOnly('reasons-loading');
+  _updateFooter(false, false);
+  const params = new URLSearchParams({
+    vendor_key: _reasonsState.vendor_key,
+    category_name: _reasonsState.category,
+    band: _reasonsState.band,
+    summary_lang: '{{ lang }}',
+  });
+  if (force) params.append('force', 'true');
+  try {
+    const res = await fetch('/api/vendor-reasons?' + params.toString());
+    if (!res.ok) { _showError('HTTP ' + res.status); return; }
+    const data = await res.json();
+    if (data.error) { _showError(data.error); return; }
+    _reasonsState.result = data;
+    _renderResult(data, /*saved=*/false);
+  } catch (e) {
+    _showError(String(e));
+  }
+}
+
+async function loadSavedReasons(cardId) {
+  _showOnly('reasons-loading');
+  _updateFooter(true, false);
+  try {
+    const res = await fetch('/api/vendor-reason-cards/' + cardId);
+    if (!res.ok) { _showError('HTTP ' + res.status); return; }
+    const data = await res.json();
+    _reasonsState.savedCardId = data.id;
+    _reasonsState.result = {
+      vendor_key: data.vendor_key,
+      vendor_display: data.vendor_display,
+      category_name: data.category_name,
+      band: data.band,
+      sample_size: data.sample_size,
+      reasons: data.reasons,
+      model: data.model_used,
+      source_ids: data.source_ids_snapshot,
+      cached: true,
+      savedAt: data.updated_at,
+      label: data.label,
+    };
+    _renderResult(_reasonsState.result, /*saved=*/true);
+  } catch (e) {
+    _showError(String(e));
+  }
+}
+
+function _renderResult(data, saved) {
+  const reasons = data.reasons || [];
+  if (!reasons.length) {
+    _showOnly('reasons-empty');
+    _updateFooter(saved, false);
+    return;
+  }
+  // Meta line
+  const metaEl = document.getElementById('reasons-meta');
+  const parts = [];
+  parts.push(`{% if lang == 'ko' %}표본 <b>${data.sample_size || 0}</b>개 리뷰{% else %}sample of <b>${data.sample_size || 0}</b> reviews{% endif %}`);
+  if (data.model) parts.push(`<span class="text-gray-400">${data.model}</span>`);
+  if (data.cached) parts.push(`<span class="text-emerald-700">⚡ {% if lang == 'ko' %}캐시됨{% else %}cached{% endif %}</span>`);
+  if (saved && data.savedAt) parts.push(`<span class="text-blue-700">📅 ${data.savedAt.slice(0,16).replace('T',' ')}</span>`);
+  metaEl.innerHTML = parts.join(' · ');
+
+  // Chart — horizontal bars
+  if (_reasonsState.chart) { try { _reasonsState.chart.destroy(); } catch {} }
+  const ctx = document.getElementById('reasons-chart').getContext('2d');
+  const isPositive = data.band === 'positive';
+  const baseColor = isPositive ? 'rgba(22,163,74,0.85)' : 'rgba(220,38,38,0.85)';
+  const borderColor = isPositive ? 'rgb(22,163,74)' : 'rgb(220,38,38)';
+  _reasonsState.chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: reasons.map(r => r.reason),
+      datasets: [{
+        label: '{% if lang == 'ko' %}리뷰 수{% else %}reviews{% endif %}',
+        data: reasons.map(r => r.count || 0),
+        backgroundColor: baseColor,
+        borderColor: borderColor,
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ctx.parsed.x + ' {% if lang == 'ko' %}건{% else %}reviews{% endif %}' } }
+      },
+      scales: {
+        x: { beginAtZero: true, ticks: { precision: 0 } },
+        y: { ticks: { autoSkip: false, font: { size: 11 } } }
+      }
+    }
+  });
+
+  // Reason list (with expandable examples)
+  const listEl = document.getElementById('reasons-list');
+  listEl.innerHTML = reasons.map((r, i) => {
+    const exs = (r.examples || []).map(e =>
+      `<li class="text-[12px] text-gray-700 pl-2 border-l-2 ${isPositive ? 'border-green-200' : 'border-red-200'}">${escapeHtml(e)}</li>`
+    ).join('');
+    const bg = isPositive ? 'bg-green-50/40 border-green-100' : 'bg-rose-50/40 border-rose-100';
+    return `
+      <li class="${bg} border rounded p-2.5">
+        <details ${i < 2 ? 'open' : ''}>
+          <summary class="cursor-pointer flex items-center gap-2 font-medium text-sm text-gray-900">
+            <span class="text-xs text-gray-400 tabular-nums w-6">#${i+1}</span>
+            <span class="flex-1 min-w-0">${escapeHtml(r.reason)}</span>
+            <span class="tabular-nums text-xs ${isPositive ? 'text-green-700' : 'text-red-700'} font-semibold">${r.count || 0}</span>
+          </summary>
+          ${exs ? `<ul class="mt-2 ml-8 space-y-1">${exs}</ul>` : ''}
+        </details>
+      </li>`;
+  }).join('');
+
+  _showOnly('reasons-result');
+  _updateFooter(saved, true);
+}
+
+async function reasonsSave() {
+  if (!_reasonsState.result) return;
+  const btn = document.getElementById('reasons-save-btn');
+  btn.disabled = true;
+  btn.textContent = '{% if lang == 'ko' %}저장 중…{% else %}Saving…{% endif %}';
+  try {
+    const res = await fetch('/api/vendor-reason-cards', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ label: _reasonsState.result.category_name, result: _reasonsState.result })
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      alert('{% if lang == 'ko' %}저장 실패{% else %}Save failed{% endif %} (HTTP ' + res.status + ')\n' + t.slice(0, 200));
+      btn.disabled = false;
+      btn.textContent = '💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}';
+      return;
+    }
+    const data = await res.json();
+    _reasonsState.savedCardId = data.id;
+    // Update the page's 📌 indicator on the trigger li
+    if (_reasonsState.trigger) {
+      _reasonsState.trigger.dataset.savedId = data.id;
+      const nameSpan = _reasonsState.trigger.querySelector('.font-semibold.text-sm');
+      if (nameSpan && !nameSpan.querySelector('.pin')) {
+        const pin = document.createElement('span');
+        pin.className = 'pin ml-1 text-emerald-600';
+        pin.textContent = '📌';
+        nameSpan.appendChild(pin);
+      }
+    }
+    _updateFooter(true, true);
+    btn.disabled = false;
+    btn.textContent = '💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}';
+  } catch (e) {
+    alert('{% if lang == 'ko' %}저장 실패{% else %}Save failed{% endif %}: ' + e);
+    btn.disabled = false;
+    btn.textContent = '💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}';
+  }
+}
+
+async function reasonsReanalyze() {
+  if (!_reasonsState.savedCardId) return;
+  if (!confirm('{% if lang == 'ko' %}이 카드를 다시 분석합니다. LLM 호출 1회 발생.{% else %}Re-analyze this card? 1 LLM call.{% endif %}')) return;
+  _showOnly('reasons-loading');
+  _updateFooter(true, false);
+  try {
+    const res = await fetch('/api/vendor-reason-cards/' + _reasonsState.savedCardId + '/reanalyze?summary_lang={{ lang }}', { method: 'POST' });
+    if (!res.ok) { _showError('HTTP ' + res.status); return; }
+    const data = await res.json();
+    _reasonsState.result = {
+      vendor_key: data.vendor_key,
+      vendor_display: data.vendor_display,
+      category_name: data.category_name,
+      band: data.band,
+      sample_size: data.sample_size,
+      reasons: data.reasons,
+      model: data.model_used,
+      source_ids: data.source_ids_snapshot,
+      cached: false,
+      savedAt: data.updated_at,
+      label: data.label,
+    };
+    _renderResult(_reasonsState.result, /*saved=*/true);
+  } catch (e) {
+    _showError(String(e));
+  }
+}
+
+async function reasonsRename() {
+  if (!_reasonsState.savedCardId) return;
+  const cur = (_reasonsState.result && _reasonsState.result.label) || _reasonsState.category;
+  const nv = prompt('{% if lang == 'ko' %}새 이름{% else %}New label{% endif %}', cur);
+  if (!nv || nv === cur) return;
+  try {
+    const res = await fetch('/api/vendor-reason-cards/' + _reasonsState.savedCardId, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ label: nv })
+    });
+    if (!res.ok) { alert('{% if lang == 'ko' %}변경 실패{% else %}Rename failed{% endif %}'); return; }
+    if (_reasonsState.result) _reasonsState.result.label = nv;
+  } catch (e) { alert(String(e)); }
+}
+
+async function reasonsDelete() {
+  if (!_reasonsState.savedCardId) return;
+  if (!confirm('{% if lang == 'ko' %}이 저장된 분석을 영구 삭제합니까?{% else %}Permanently delete this saved analysis?{% endif %}')) return;
+  try {
+    const res = await fetch('/api/vendor-reason-cards/' + _reasonsState.savedCardId, { method: 'DELETE' });
+    if (!res.ok) { alert('{% if lang == 'ko' %}삭제 실패{% else %}Delete failed{% endif %}'); return; }
+    // Remove the 📌 from the trigger li, clear saved id
+    if (_reasonsState.trigger) {
+      _reasonsState.trigger.dataset.savedId = '';
+      const pin = _reasonsState.trigger.querySelector('.pin');
+      if (pin) pin.remove();
+    }
+    closeReasonsModal();
+  } catch (e) { alert(String(e)); }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Wire up clicks. Delegated to body for resilience across HTMX swaps.
+document.body.addEventListener('click', (e) => {
+  const trigger = e.target.closest('[data-reasons-trigger]');
+  if (trigger) {
+    e.preventDefault();
+    openReasonsModalFor(trigger);
+  }
+});
+
+// Escape to close.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('reasons-modal').classList.contains('hidden')) {
+    closeReasonsModal();
+  }
+});
+</script>
 {% endblock %}
