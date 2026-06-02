@@ -103,7 +103,10 @@ def _strip_fences(s: str) -> str:
 
 
 async def _score_categories(
-    factor: str, items: list[dict], model: str
+    factor: str,
+    items: list[dict],
+    model: str,
+    criteria: Optional[str] = None,
 ) -> dict[str, float]:
     """Ask Claude to score each (name, description) for relevance to factor.
 
@@ -158,8 +161,17 @@ async def _score_categories(
         '  {"scores": [{"name": "<exact input name>", "relevance": <0..1>}, ...]}\n'
         "Include EVERY input category exactly once. No prose, no markdown."
     )
+    criteria_line = ""
+    if criteria and criteria.strip():
+        criteria_line = (
+            f"\nClassification criteria (additional context for what "
+            f"\"relevant\" means for this factor): \"{criteria.strip()}\"\n"
+            f"Apply this criteria as a tiebreaker when judging borderline\n"
+            f"matches — categories that align with the criteria score higher.\n"
+        )
     user = (
-        f'Competitive factor: "{factor}"\n\n'
+        f'Competitive factor: "{factor}"\n'
+        f'{criteria_line}\n'
         "Categories to score:\n"
         + "\n".join(
             f"- {it['name']}"
@@ -546,11 +558,13 @@ async def list_saved_cards(
             total_matched = len(result_payload)
         else:
             total_matched = 0
-        factors_list = _card_factors(c)
+        entries_list = _card_entries(c)
+        factors_list = [e["factor"] for e in entries_list]
         out.append({
             "id": c.id,
             "factor": c.factor,
             "factors": factors_list,
+            "entries": entries_list,
             "factor_count": len(factors_list),
             "label": c.label,
             "threshold": c.threshold,
@@ -574,7 +588,7 @@ async def get_saved_card(
 async def save_card(
     session: AsyncSession,
     *,
-    factors: list[str],
+    entries: list,
     label: Optional[str],
     input_csv: list[dict],
     result_payload: dict,
@@ -583,28 +597,16 @@ async def save_card(
 ) -> CompetitiveFactorCard:
     """Persist a multi-factor CSV-driven analysis as a new card.
 
-    `factors` is the full list; `result_payload` is the analyze_csv()
-    dict (with `groups` etc.) — saved as-is in result_rows so loads
-    can render without recomputing anything.
+    `entries` is the full list of {factor, criteria} dicts (or plain
+    strings — _normalize_entries handles both); `result_payload` is the
+    analyze_csv() dict (with `groups` etc.) — saved as-is in
+    result_rows so loads can render without recomputing anything.
     """
-    if not isinstance(factors, list) or not factors:
-        raise ValueError("at least one factor is required")
     if not isinstance(input_csv, list) or not isinstance(result_payload, dict):
         raise ValueError("input_csv must be a list and result_payload a dict")
-    # Drop empties + dedupe, mirror analyze_csv normalization.
-    cleaned_factors: list[str] = []
-    seen: set[str] = set()
-    for f in factors:
-        s = (str(f) if f is not None else "").strip()
-        if not s:
-            continue
-        key = s.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned_factors.append(s[:200])
-    if not cleaned_factors:
-        raise ValueError("at least one non-empty factor is required")
+    cleaned_entries = _normalize_entries(entries or [])
+    if not cleaned_entries:
+        raise ValueError("at least one factor is required")
 
     max_order = (
         await session.execute(
@@ -614,16 +616,16 @@ async def save_card(
         )
     ).scalar_one_or_none() or 0
 
-    primary_factor = cleaned_factors[0]
+    primary = cleaned_entries[0]["factor"]
     card = CompetitiveFactorCard(
-        factor=primary_factor[:200],
-        factors=cleaned_factors,
-        label=(label or primary_factor)[:200],
+        factor=primary[:200],
+        # Stored as list[{factor, criteria}] — both shapes survive in
+        # the JSON column; read paths use _card_entries to normalize.
+        factors=cleaned_entries,
+        label=(label or primary)[:200],
         threshold=float(threshold),
         model_used=(model_used or "")[:100] or None,
         input_csv=input_csv,
-        # result_payload contains `groups`, `total_matched_rows`, etc.
-        # Stored verbatim under result_rows so the load path is a no-op.
         result_rows=result_payload,
         universe_size=0,
         result={},
@@ -636,14 +638,39 @@ async def save_card(
     return card
 
 
-def _card_factors(card: CompetitiveFactorCard) -> list[str]:
-    """Read a card's factor list, tolerating the legacy single-factor
-    shape (no `factors` column populated)."""
+def _card_entries(card: CompetitiveFactorCard) -> list[dict]:
+    """Normalize a card's `factors` JSON to a list of
+    {factor: str, criteria: str|None}. Tolerates:
+      - new shape: list of dicts
+      - old shape (0018 commit): list of strings
+      - legacy shape (pre-0018): NULL factors, single `factor` column
+    """
     if card.factors:
-        return [str(f) for f in card.factors if str(f).strip()]
+        out: list[dict] = []
+        for it in card.factors:
+            if isinstance(it, dict):
+                factor = str(it.get("factor") or "").strip()
+                if not factor:
+                    continue
+                criteria = it.get("criteria")
+                out.append({
+                    "factor": factor,
+                    "criteria": (str(criteria).strip() or None) if criteria else None,
+                })
+            else:
+                s = str(it or "").strip()
+                if s:
+                    out.append({"factor": s, "criteria": None})
+        if out:
+            return out
     if card.factor:
-        return [card.factor]
+        return [{"factor": card.factor, "criteria": None}]
     return []
+
+
+def _card_factors(card: CompetitiveFactorCard) -> list[str]:
+    """Plain factor-string list for templates that don't need criteria."""
+    return [e["factor"] for e in _card_entries(card)]
 
 
 async def update_card_label(
@@ -697,13 +724,13 @@ async def reanalyze_card(
     if not input_csv:
         return card
     new = await analyze_csv(
-        factors=_card_factors(card),
+        entries=_card_entries(card),
         rows=input_csv,
         threshold=card.threshold,
         model=model,
     )
     card.result_rows = new
-    card.factors = new.get("factors")
+    card.factors = new.get("entries")
     if model:
         card.model_used = model[:100]
     card.updated_at = datetime.utcnow()
@@ -821,86 +848,81 @@ MAX_FACTORS = 10
 
 
 async def _score_factors_parallel(
-    factors: list[str],
+    entries: list[dict],
     items: list[dict],
     model: str,
-) -> dict[str, dict[str, float]]:
-    """Score each factor against the same category universe in parallel.
+) -> list[dict[str, float]]:
+    """Score each (factor, criteria) entry against the universe in parallel.
 
-    Returns {factor: {category_name_lower: relevance}}. Each factor
-    becomes one (or more, when len(items) > LLM_BATCH_SIZE) Claude
-    completion; asyncio.gather runs them concurrently so total wall-
-    clock ≈ slowest single factor instead of sum.
+    Returns a list of {category_name_lower: relevance} dicts, in the
+    SAME ORDER as `entries` (caller zips back by index — factor strings
+    aren't safe as dict keys because duplicate factors are already
+    deduped at the call site).
     """
     import asyncio
 
-    async def _one(factor: str) -> dict[str, float]:
+    async def _one(entry: dict) -> dict[str, float]:
         scores: dict[str, float] = {}
         for i in range(0, len(items), LLM_BATCH_SIZE):
             batch = items[i : i + LLM_BATCH_SIZE]
-            partial = await _score_categories(factor, batch, model)
+            partial = await _score_categories(
+                entry["factor"], batch, model, criteria=entry.get("criteria")
+            )
             scores.update(partial)
         return scores
 
-    results = await asyncio.gather(*(_one(f) for f in factors))
-    return dict(zip(factors, results))
+    return list(await asyncio.gather(*(_one(e) for e in entries)))
+
+
+def _normalize_entries(raw: list) -> list[dict]:
+    """Coerce a list of either strings or {factor, criteria} dicts into
+    a canonical list of {factor: str, criteria: str|None}. Dedup on
+    lowercased factor (criteria is metadata, not part of the key)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for it in raw or []:
+        if isinstance(it, dict):
+            factor = str(it.get("factor") or "").strip()
+            criteria = str(it.get("criteria") or "").strip() or None
+        else:
+            factor = str(it or "").strip()
+            criteria = None
+        if not factor:
+            continue
+        key = factor.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "factor": factor[:200],
+            "criteria": (criteria[:500] if criteria else None),
+        })
+        if len(out) >= MAX_FACTORS:
+            break
+    return out
 
 
 async def analyze_csv(
     *,
-    factors: list[str],
+    entries: list,
     rows: list[dict],
     threshold: float = DEFAULT_THRESHOLD,
     model: Optional[str] = None,
 ) -> dict:
-    """Score a CSV against MULTIPLE competitive factors and group the
-    matched rows under each factor.
+    """Score a CSV against multiple (factor, criteria) entries and group
+    matched rows under each entry.
 
-    Pipeline:
-      1. Normalize / dedup input factors (strip, max MAX_FACTORS).
-      2. Coerce CSV rows + filter to type='strength'.
-      3. Build the distinct category universe.
-      4. Parallel LLM calls (one per factor, batched within).
-      5. Per factor, filter rows ≥ threshold and sort relevance ↓
-         then pct ↓. A row that matches N factors appears N times
-         (once per group) — that's the user's intent: "classify into
-         each competitive factor".
-
-    Returns:
-      {
-        "factors": [str, ...],
-        "threshold": float,
-        "input_row_count": int,
-        "strength_input_count": int,
-        "groups": [
-          {"factor": str, "result_rows": [...], "matched_count": int}, ...
-        ],
-        "total_matched_rows": int,         # sum across groups (can double-count)
-        "universe_size": int,
-        "model": str,
-      }
+    `entries` is a list whose items are either:
+      - {"factor": str, "criteria": str|None}, the new shape, or
+      - plain strings (legacy), treated as {factor: str, criteria: None}.
+    `_normalize_entries` collapses both.
     """
-    # 1. Normalize factors
-    if not isinstance(factors, list):
-        raise ValueError("factors must be a list")
-    cleaned_factors: list[str] = []
-    seen: set[str] = set()
-    for f in factors:
-        s = (str(f) if f is not None else "").strip()
-        if not s:
-            continue
-        key = s.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned_factors.append(s[:200])
-        if len(cleaned_factors) >= MAX_FACTORS:
-            break
-    if not cleaned_factors:
+    cleaned_entries = _normalize_entries(entries)
+    if not cleaned_entries:
         raise ValueError("at least one factor is required")
     threshold = max(0.0, min(1.0, float(threshold)))
 
-    # 2. CSV row normalize + strength filter
+    # CSV row normalize + strength filter
     cleaned: list[dict] = []
     for r in rows or []:
         norm = _normalize_csv_row(r)
@@ -911,13 +933,15 @@ async def analyze_csv(
 
     if not strengths:
         return {
-            "factors": cleaned_factors,
+            "entries": cleaned_entries,
+            "factors": [e["factor"] for e in cleaned_entries],
             "threshold": threshold,
             "input_row_count": input_row_count,
             "strength_input_count": 0,
             "groups": [
-                {"factor": f, "result_rows": [], "matched_count": 0}
-                for f in cleaned_factors
+                {"factor": e["factor"], "criteria": e["criteria"],
+                 "result_rows": [], "matched_count": 0}
+                for e in cleaned_entries
             ],
             "total_matched_rows": 0,
             "universe_size": 0,
@@ -925,7 +949,7 @@ async def analyze_csv(
             "message": "no_strength_rows_in_csv",
         }
 
-    # 3. Distinct universe
+    # Distinct universe
     universe: dict[str, dict] = {}
     for r in strengths:
         key = r["category"].strip().lower()
@@ -937,17 +961,16 @@ async def analyze_csv(
         }
     items = list(universe.values())
 
-    # 4. Parallel LLM scoring per factor
+    # Parallel LLM scoring per entry (factor + criteria)
     chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
-    per_factor_scores = await _score_factors_parallel(
-        cleaned_factors, items, chosen_model
+    per_entry_scores = await _score_factors_parallel(
+        cleaned_entries, items, chosen_model
     )
 
-    # 5. Build per-factor groups
+    # Build per-entry groups
     groups: list[dict] = []
     total_matched = 0
-    for f in cleaned_factors:
-        scores = per_factor_scores.get(f, {})
+    for entry, scores in zip(cleaned_entries, per_entry_scores):
         matched: list[dict] = []
         for r in strengths:
             cat_key = r["category"].strip().lower()
@@ -960,14 +983,18 @@ async def analyze_csv(
             matched.append(out)
         matched.sort(key=lambda x: (x["relevance"], x["pct"]), reverse=True)
         groups.append({
-            "factor": f,
+            "factor": entry["factor"],
+            "criteria": entry["criteria"],
             "result_rows": matched,
             "matched_count": len(matched),
         })
         total_matched += len(matched)
 
     return {
-        "factors": cleaned_factors,
+        "entries": cleaned_entries,
+        # Legacy mirror — bare factor strings, for templates that haven't
+        # been updated to walk `entries` directly.
+        "factors": [e["factor"] for e in cleaned_entries],
         "threshold": threshold,
         "input_row_count": input_row_count,
         "strength_input_count": len(strengths),

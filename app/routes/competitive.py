@@ -42,8 +42,13 @@ from app.templating import render
 router = APIRouter()
 
 
+class FactorEntry(BaseModel):
+    factor: str = Field(..., min_length=1, max_length=200)
+    criteria: Optional[str] = Field(None, max_length=500)
+
+
 class SaveCardBody(BaseModel):
-    factors: list[str] = Field(..., min_length=1, max_length=10)
+    entries: list[FactorEntry] = Field(..., min_length=1, max_length=10)
     label: Optional[str] = Field(None, max_length=200)
     threshold: float = Field(DEFAULT_THRESHOLD, ge=0.0, le=1.0)
     model_used: Optional[str] = Field(None, max_length=100)
@@ -84,48 +89,62 @@ def _parse_uploaded_csv(content: bytes) -> list[dict]:
     return rows
 
 
-def _parse_factors_form(raw: str | list[str]) -> list[str]:
-    """Accept either a JSON-encoded array, a newline-/comma-separated
-    string, or already-parsed list. The page POSTs JSON; smoke tests
-    sometimes POST plain strings. Either way → list of trimmed factors."""
+def _parse_entries_form(raw) -> list[dict]:
+    """Accept JSON-encoded list of {factor, criteria}, a list of plain
+    strings (legacy), or a newline/comma-separated bare string. Returns
+    a list of dicts {factor, criteria}.
+
+    The page POSTs JSON; smoke tests / curl users may pass plain strings.
+    """
+    import json as _json
+    parsed: list = []
     if isinstance(raw, list):
-        items = [str(x) for x in raw]
+        parsed = list(raw)
     elif isinstance(raw, str):
         raw = raw.strip()
         if not raw:
-            items = []
+            parsed = []
         elif raw.startswith("["):
-            import json as _json
             try:
-                parsed = _json.loads(raw)
-                items = [str(x) for x in (parsed if isinstance(parsed, list) else [])]
+                tmp = _json.loads(raw)
+                parsed = list(tmp) if isinstance(tmp, list) else []
             except Exception:
-                items = [raw]
+                parsed = [raw]
         else:
-            # Split on newlines, then commas. Whitespace stripped per item.
+            # Newline / comma split — bare factor strings, no criteria.
             chunks: list[str] = []
             for line in raw.splitlines():
                 chunks.extend(p for p in line.split(",") if p.strip())
-            items = chunks or [raw]
-    else:
-        items = []
-    return [s.strip() for s in items if s and s.strip()]
+            parsed = chunks or [raw]
+    out: list[dict] = []
+    for it in parsed:
+        if isinstance(it, dict):
+            factor = str(it.get("factor") or "").strip()
+            criteria = str(it.get("criteria") or "").strip() or None
+        else:
+            factor = str(it or "").strip()
+            criteria = None
+        if not factor:
+            continue
+        out.append({"factor": factor, "criteria": criteria})
+    return out
 
 
 @router.post("/competitive/analyze-csv")
 async def competitive_analyze_csv(
     request: Request,
     file: UploadFile = File(...),
-    factors: str = Form(...),
+    entries: str = Form(...),
     threshold: float = Form(DEFAULT_THRESHOLD),
     model: Optional[str] = Form(None),
     session: AsyncSession = Depends(get_session),
 ):
-    """Multipart endpoint: takes the CSV file + factors (JSON array or
-    newline/comma-separated) + threshold, runs N parallel Claude calls
-    to score strength categories per factor, returns the HTML partial."""
-    factor_list = _parse_factors_form(factors)
-    if not factor_list:
+    """Multipart endpoint: takes the CSV file + entries (JSON array of
+    {factor, criteria}) + threshold, runs N parallel Claude calls and
+    returns the HTML partial. Legacy clients can pass a bare-string
+    `entries` field; _parse_entries_form coerces both."""
+    entry_list = _parse_entries_form(entries)
+    if not entry_list:
         return render(
             request,
             "_competitive_results.html",
@@ -151,7 +170,7 @@ async def competitive_analyze_csv(
 
     try:
         result = await analyze_csv(
-            factors=factor_list,
+            entries=entry_list,
             rows=rows,
             threshold=threshold,
             model=model,
@@ -218,9 +237,15 @@ async def competitive_card_save(
     session: AsyncSession = Depends(get_session),
 ):
     try:
+        # Pydantic gave us a list of FactorEntry models; convert to
+        # plain dicts for the service layer.
+        entry_dicts = [
+            {"factor": e.factor, "criteria": e.criteria}
+            for e in body.entries
+        ]
         await save_card(
             session,
-            factors=body.factors,
+            entries=entry_dicts,
             label=body.label,
             input_csv=body.input_csv,
             result_payload=body.result_payload,
@@ -240,10 +265,9 @@ async def competitive_card_save(
 
 def _build_load_result(card) -> dict:
     """Reconstitute the analyze_csv()-shaped dict from a saved card."""
-    # card.result_rows in the new schema is the full analyze_csv() dict.
-    # If it's a legacy bare list, wrap into a single group.
-    from app.services.competitive import _card_factors as _cf
-    factors_list = _cf(card)
+    from app.services.competitive import _card_entries as _ce
+    entries = _ce(card)
+    factor_strings = [e["factor"] for e in entries]
     payload = card.result_rows
     if isinstance(payload, dict) and "groups" in payload:
         groups = payload.get("groups") or []
@@ -252,19 +276,22 @@ def _build_load_result(card) -> dict:
         ))
     elif isinstance(payload, list):
         groups = [{
-            "factor": factors_list[0] if factors_list else card.factor,
+            "factor": factor_strings[0] if factor_strings else card.factor,
+            "criteria": entries[0]["criteria"] if entries else None,
             "result_rows": payload,
             "matched_count": len(payload),
         }]
         total = len(payload)
     else:
         groups = [
-            {"factor": f, "result_rows": [], "matched_count": 0}
-            for f in factors_list
+            {"factor": e["factor"], "criteria": e["criteria"],
+             "result_rows": [], "matched_count": 0}
+            for e in entries
         ]
         total = 0
     return {
-        "factors": factors_list,
+        "entries": entries,
+        "factors": factor_strings,
         "threshold": card.threshold,
         "input_row_count": len(card.input_csv or []),
         "strength_input_count": sum(
@@ -294,7 +321,8 @@ async def competitive_card_load(
             saved_card=None,
             csv_name=None,
         )
-    from app.services.competitive import _card_factors as _cf
+    from app.services.competitive import _card_entries as _ce
+    entries = _ce(card)
     return render(
         request,
         "_competitive_results.html",
@@ -304,7 +332,8 @@ async def competitive_card_load(
             "id": card.id,
             "label": card.label,
             "factor": card.factor,
-            "factors": _cf(card),
+            "factors": [e["factor"] for e in entries],
+            "entries": entries,
             "threshold": card.threshold,
             "model_used": card.model_used,
             "created_at": card.created_at.isoformat() if card.created_at else None,
@@ -342,7 +371,8 @@ async def competitive_card_reanalyze(
             saved_card=None,
             csv_name=None,
         )
-    from app.services.competitive import _card_factors as _cf
+    from app.services.competitive import _card_entries as _ce
+    entries = _ce(card)
     return render(
         request,
         "_competitive_results.html",
@@ -352,7 +382,8 @@ async def competitive_card_reanalyze(
             "id": card.id,
             "label": card.label,
             "factor": card.factor,
-            "factors": _cf(card),
+            "factors": [e["factor"] for e in entries],
+            "entries": entries,
             "threshold": card.threshold,
             "model_used": card.model_used,
             "created_at": card.created_at.isoformat() if card.created_at else None,

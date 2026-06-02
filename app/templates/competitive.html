@@ -79,33 +79,26 @@
                  class="hidden" onchange="onCsvSelected(this)" required>
         </div>
 
-        {# Factor chips + threshold #}
+        {# Factor entry rows + threshold #}
         <div>
-          <label for="factor-typeahead" class="block text-sm font-semibold text-gray-800 mb-2">
-            2. {% if lang == 'ko' %}경쟁력 요소 (여러 개 입력 가능, 최대 10개){% else %}Competitive factors (multiple, up to 10){% endif %}
+          <label class="block text-sm font-semibold text-gray-800 mb-2">
+            2. {% if lang == 'ko' %}경쟁력 요소 (최대 10개, 분류 기준은 선택){% else %}Competitive factors (up to 10; criteria is optional){% endif %}
           </label>
-          <div id="factor-chips-zone"
-               class="border border-gray-300 rounded-md px-2 py-1.5 flex flex-wrap items-center gap-1.5 min-h-[42px] focus-within:ring-2 focus-within:ring-blue-400 cursor-text"
-               onclick="document.getElementById('factor-typeahead').focus()">
-            {# Existing chips inserted by JS into this same flex row #}
-            <input id="factor-typeahead"
-                   type="text"
-                   maxlength="200"
-                   autocomplete="off"
-                   placeholder="{% if lang == 'ko' %}요소 입력 후 Enter (예: 음식 Vision AI 정확도){% else %}Type a factor, press Enter{% endif %}"
-                   class="flex-1 min-w-[180px] border-0 outline-none text-sm py-1" />
+          <div id="factor-entry-list" class="space-y-2">
+            {# JS populates 1 empty row on init; user clicks "+ 요소 추가"
+               to add more. Each row: factor + optional criteria + ×. #}
           </div>
-          {# Hidden form field — JSON-encoded array of factors, written by JS on every chip change. #}
-          <input type="hidden" name="factors" id="factors-hidden" value="[]" />
-
           <div class="flex items-center justify-between gap-2 mt-2">
-            <div class="text-[11px] text-gray-500">
-              {% if lang == 'ko' %}
-                Enter 또는 쉼표(,)로 칩 추가 · ×로 제거 · 같은 요소 중복 제거됨
-              {% else %}
-                Enter or comma adds a chip · click × to remove · duplicates ignored
-              {% endif %}
-            </div>
+            <button type="button" id="factor-add-btn" onclick="addFactorEntry()"
+                    class="text-[12px] font-medium text-blue-600 hover:text-blue-800 hover:underline">
+              + {% if lang == 'ko' %}요소 추가{% else %}Add factor{% endif %}
+            </button>
+            <span id="factor-count-label" class="text-[10px] text-gray-500 tabular-nums"></span>
+          </div>
+          {# Hidden field — JSON-encoded list of {factor, criteria}. #}
+          <input type="hidden" name="entries" id="entries-hidden" value="[]" />
+
+          <div class="flex items-center justify-end gap-2 mt-3">
             <label class="flex items-center gap-1.5 text-xs text-gray-600 shrink-0">
               {% if lang == 'ko' %}임계값{% else %}threshold{% endif %}
               <input id="threshold-input" name="threshold" type="number"
@@ -189,77 +182,107 @@ function clearCsvFile() {
 })();
 
 // ============================================================
-// Factor chips
+// Factor entry rows (factor + optional criteria, stacked)
 // ============================================================
 const MAX_FACTORS = 10;
-let _factors = [];
 
-function _serializeFactors() {
-  document.getElementById('factors-hidden').value = JSON.stringify(_factors);
+function _entryRowsAll() {
+  return [...document.querySelectorAll('#factor-entry-list .factor-entry-row')];
 }
-function _renderChips() {
-  const zone = document.getElementById('factor-chips-zone');
-  // Remove all existing chip nodes; the input is kept (it's the
-  // last child, identified by id).
-  zone.querySelectorAll('.factor-chip').forEach(n => n.remove());
-  const input = document.getElementById('factor-typeahead');
-  _factors.forEach((f, i) => {
-    const chip = document.createElement('span');
-    chip.className = 'factor-chip inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-medium border border-blue-200';
-    chip.innerHTML = '🎯 <span></span><button type="button" class="hover:text-red-600 ml-0.5 text-sm" aria-label="remove">×</button>';
-    chip.querySelector('span').textContent = f;
-    chip.querySelector('button').onclick = (ev) => {
-      ev.stopPropagation();
-      removeFactor(i);
-    };
-    zone.insertBefore(chip, input);
+function _collectEntries() {
+  const seen = new Set();
+  const out = [];
+  for (const row of _entryRowsAll()) {
+    const factor = (row.querySelector('.factor-input').value || '').trim().slice(0, 200);
+    if (!factor) continue;
+    const key = factor.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const criteria = (row.querySelector('.criteria-input').value || '').trim().slice(0, 500) || null;
+    out.push({ factor, criteria });
+  }
+  return out;
+}
+function _serializeEntries() {
+  const hidden = document.getElementById('entries-hidden');
+  const entries = _collectEntries();
+  hidden.value = JSON.stringify(entries);
+  const count = entries.length;
+  const total = _entryRowsAll().length;
+  const lbl = document.getElementById('factor-count-label');
+  if (lbl) lbl.textContent = '(' + count + '/' + total + ', max ' + MAX_FACTORS + ')';
+  // Disable + Add when at cap.
+  const addBtn = document.getElementById('factor-add-btn');
+  if (addBtn) {
+    if (total >= MAX_FACTORS) {
+      addBtn.classList.add('opacity-40', 'cursor-not-allowed');
+    } else {
+      addBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+    }
+  }
+}
+
+function _newEntryRow() {
+  const row = document.createElement('div');
+  row.className = 'factor-entry-row border border-gray-200 rounded-md p-2.5 bg-gray-50';
+  row.innerHTML = `
+    <div class="flex items-start gap-2">
+      <div class="flex-1 space-y-1.5">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] text-gray-500 shrink-0 w-16">🎯 {% if lang == 'ko' %}요소{% else %}factor{% endif %}</span>
+          <input type="text" maxlength="200" autocomplete="off"
+                 placeholder="{% if lang == 'ko' %}예) 음식 Vision AI 정확도{% else %}e.g. Food Vision AI accuracy{% endif %}"
+                 class="factor-input flex-1 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] text-gray-500 shrink-0 w-16">📋 {% if lang == 'ko' %}분류 기준{% else %}criteria{% endif %}</span>
+          <input type="text" maxlength="500" autocomplete="off"
+                 placeholder="{% if lang == 'ko' %}선택 — 예) 사진 인식 정확성에 초점, AI 모델 성능 평가{% else %}optional — e.g. focus on image recognition accuracy{% endif %}"
+                 class="criteria-input flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        </div>
+      </div>
+      <button type="button" class="entry-remove-btn shrink-0 text-gray-400 hover:text-red-600 text-xl leading-none px-1"
+              title="{% if lang == 'ko' %}이 요소 제거{% else %}Remove this factor{% endif %}">×</button>
+    </div>
+  `;
+  // Wire up live serialize + remove
+  row.querySelectorAll('input').forEach(i => i.addEventListener('input', _serializeEntries));
+  row.querySelector('.entry-remove-btn').addEventListener('click', () => {
+    if (_entryRowsAll().length <= 1) {
+      // Don't remove the last row — just blank it.
+      row.querySelector('.factor-input').value = '';
+      row.querySelector('.criteria-input').value = '';
+    } else {
+      row.remove();
+    }
+    _serializeEntries();
   });
-  _serializeFactors();
+  return row;
 }
-function addFactor(text) {
-  const v = (text || '').trim();
-  if (!v) return;
-  if (_factors.length >= MAX_FACTORS) {
+
+function addFactorEntry() {
+  if (_entryRowsAll().length >= MAX_FACTORS) {
     alert('{% if lang == "ko" %}최대 ' + MAX_FACTORS + '개까지 입력 가능합니다.{% else %}Up to ' + MAX_FACTORS + ' factors.{% endif %}');
     return;
   }
-  const lower = v.toLowerCase();
-  if (_factors.some(f => f.toLowerCase() === lower)) return;  // dedupe
-  _factors.push(v.slice(0, 200));
-  _renderChips();
-}
-function removeFactor(idx) {
-  _factors.splice(idx, 1);
-  _renderChips();
+  const list = document.getElementById('factor-entry-list');
+  const row = _newEntryRow();
+  list.appendChild(row);
+  row.querySelector('.factor-input').focus();
+  _serializeEntries();
 }
 
-(function() {
-  const inp = document.getElementById('factor-typeahead');
-  inp.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      addFactor(inp.value);
-      inp.value = '';
-    } else if (e.key === 'Backspace' && !inp.value && _factors.length) {
-      removeFactor(_factors.length - 1);
-    }
-  });
-  inp.addEventListener('blur', () => {
-    // Convert leftover typed text into a chip on focus loss so the
-    // user can't accidentally submit a partial entry as nothing.
-    if (inp.value.trim()) {
-      addFactor(inp.value);
-      inp.value = '';
-    }
-  });
-  // Guard form submit — also flush any pending typed text + require
-  // at least one chip.
+(function initFactorEntries() {
+  // Seed one empty row.
+  const list = document.getElementById('factor-entry-list');
+  list.appendChild(_newEntryRow());
+  _serializeEntries();
+
+  // Submit guard
   document.getElementById('competitive-form').addEventListener('submit', (e) => {
-    if (inp.value.trim()) {
-      addFactor(inp.value);
-      inp.value = '';
-    }
-    if (_factors.length === 0) {
+    _serializeEntries();
+    const entries = _collectEntries();
+    if (entries.length === 0) {
       e.preventDefault();
       alert('{% if lang == "ko" %}최소 1개 경쟁력 요소를 입력해주세요.{% else %}Enter at least one factor.{% endif %}');
     }

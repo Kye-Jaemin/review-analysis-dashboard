@@ -66,7 +66,7 @@
             </div>
             <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
               <span>{% if lang == 'ko' %}요소{% else %}factors{% endif %} ({{ saved_card.factors|length }}):
-                {% for f in saved_card.factors %}<span class="font-mono">{{ f }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+                {% for e in saved_card.entries %}<span class="font-mono" {% if e.criteria %}title="{% if lang == 'ko' %}분류 기준{% else %}criteria{% endif %}: {{ e.criteria }}"{% endif %}>{{ e.factor }}{% if e.criteria %} 📋{% endif %}</span>{% if not loop.last %}, {% endif %}{% endfor %}
               </span>
               <span>{% if lang == 'ko' %}임계값{% else %}threshold{% endif %} {{ '%.2f'|format(saved_card.threshold) }}</span>
               {% if saved_card.updated_at %}
@@ -102,7 +102,7 @@
            x-data="{ saved: false, saving: false }">
         <script id="competitive-save-payload" type="application/json">
           {{ {
-            "factors": result.get("factors") or [],
+            "entries": result.get("entries") or [],
             "label": (result.get("factors") or [""])[0],
             "threshold": result.threshold,
             "model_used": result.get("model"),
@@ -148,18 +148,23 @@
     {% endif %}
 
     {# ========== SUMMARY CHIP ROW ========== #}
-    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-      <span class="text-gray-500">{% if lang == 'ko' %}경쟁력 요소{% else %}factors{% endif %}</span>
-      {% for f in result.get('factors') or [] %}
-        <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-medium border border-blue-200">🎯 {{ f }}</span>
-      {% endfor %}
-      <span class="text-[11px] text-gray-500">
-        · {% if lang == 'ko' %}임계값{% else %}threshold{% endif %} {{ '%.2f'|format(result.threshold) }}
+    <div class="space-y-1">
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+        <span class="text-gray-500">{% if lang == 'ko' %}경쟁력 요소{% else %}factors{% endif %}</span>
+        {% for e in result.get('entries') or [] %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-medium border border-blue-200"
+                {% if e.criteria %}title="{% if lang == 'ko' %}분류 기준{% else %}criteria{% endif %}: {{ e.criteria }}"{% endif %}>
+            🎯 {{ e.factor }}{% if e.criteria %} <span class="ml-1 opacity-70">📋</span>{% endif %}
+          </span>
+        {% endfor %}
+      </div>
+      <div class="text-[11px] text-gray-500">
+        {% if lang == 'ko' %}임계값{% else %}threshold{% endif %} {{ '%.2f'|format(result.threshold) }}
         {% if result._csv_name %} · 📎 {{ result._csv_name }}{% endif %}
         · CSV {{ result.input_row_count }}{% if lang == 'ko' %}행{% else %} rows{% endif %}
         · {% if lang == 'ko' %}강점{% else %}strengths{% endif %} {{ result.strength_input_count }}
         · {% if lang == 'ko' %}매칭 합계{% else %}total matched{% endif %} <b class="text-blue-700">{{ result.total_matched_rows }}</b>
-      </span>
+      </div>
     </div>
 
     {# ========== PER-FACTOR GROUPS ========== #}
@@ -167,13 +172,24 @@
     {% if groups and result.total_matched_rows > 0 %}
       {% for g in groups %}
         <section class="border border-gray-200 rounded-lg overflow-hidden bg-white">
-          <header class="px-3 py-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
-            <span class="text-base">🎯</span>
-            <span class="font-semibold text-sm text-blue-900">{{ g.factor }}</span>
-            <span class="ml-auto text-[11px] text-blue-700/80 tabular-nums">
-              {% if lang == 'ko' %}매칭{% else %}matched{% endif %}
-              <b>{{ g.matched_count }}</b>
-            </span>
+          <header class="px-3 py-2 bg-blue-50 border-b border-blue-100">
+            <div class="flex items-center gap-2">
+              <span class="text-base">🎯</span>
+              <span class="font-semibold text-sm text-blue-900">{{ g.factor }}</span>
+              <span class="ml-auto text-[11px] text-blue-700/80 tabular-nums">
+                {% if lang == 'ko' %}매칭{% else %}matched{% endif %}
+                <b>{{ g.matched_count }}</b>
+              </span>
+            </div>
+            {% if g.criteria %}
+              <div class="text-[11px] text-blue-800/80 mt-0.5 pl-6 flex items-start gap-1">
+                <span>📋</span>
+                <span class="flex-1">
+                  <span class="text-blue-700/70">{% if lang == 'ko' %}분류 기준{% else %}criteria{% endif %}:</span>
+                  {{ g.criteria }}
+                </span>
+              </div>
+            {% endif %}
           </header>
           {% if g.result_rows %}
             <table class="w-full text-xs">
