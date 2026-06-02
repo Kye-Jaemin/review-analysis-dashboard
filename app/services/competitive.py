@@ -949,49 +949,59 @@ async def analyze_csv(
             "message": "no_strength_rows_in_csv",
         }
 
-    # Per-ROW matching candidates (new behavior, requested by user).
-    # The classifier scores each strength row against each factor using
-    # the row's SAVED REASONS text as the primary signal — the causal
-    # mechanisms uncovered by the /vendors per-strength analysis.
-    # Category name is kept as a secondary cue inside `description` so
-    # the LLM still has structural context, but the matching surface
-    # is the reasons cell. Rows with empty reasons fall back to the
-    # category name alone (and the UI flags them so the user can go
-    # back to /vendors and analyze that strength's reasons).
+    # Per-ROW matching candidates. Classifier scores each strength row
+    # against each factor using the SAVED REASONS as the primary signal
+    # (the causal mechanisms uncovered by the /vendors per-strength
+    # analysis) with the (vendor, category) header as the row identity.
     #
-    # Candidate `name` is a stable per-row key (`row_<idx>`) so dedup
-    # in _score_categories stays well-defined; the LLM never sees the
-    # key, only the description.
+    # CRITICAL: `name` must be the actual matching SUBJECT — the system
+    # prompt scores against the `name` field per its examples
+    # ("factor 'AI 코칭' vs category 'AI 코치 기능' → 0.95"). Using a
+    # placeholder like `row_<i>` made the LLM score everything ~0
+    # because the names looked meaningless to the rubric. The fix:
+    # name carries "{vendor} > {category}" (unique per row in the
+    # /vendors CSV; defensively disambiguated with a #N suffix if
+    # duplicates slip in). Reasons go in `description` as supporting
+    # context that the LLM weighs alongside the name.
     candidates: list[dict] = []
+    key_to_row_idx: dict[str, int] = {}
     rows_with_reasons_count = 0
     for i, r in enumerate(strengths):
         reasons = (r.get("reasons") or "").strip()
+        base_name = f"{r['vendor']} > {r['category']}"
+        name = base_name
+        suffix = 1
+        # Disambiguate by appending #N if the same (vendor, category)
+        # appears more than once in the CSV. _score_categories dedups
+        # on lowercased name; collisions would silently drop rows.
+        while name.lower() in key_to_row_idx:
+            suffix += 1
+            name = f"{base_name} #{suffix}"
+        key_to_row_idx[name.lower()] = i
         if reasons:
             rows_with_reasons_count += 1
-            desc = f"[{r['vendor']} > {r['category']}] {reasons}"
+            description = reasons[:500]
         else:
-            desc = f"[{r['vendor']} > {r['category']}] (no detail reasons available)"
-        candidates.append({
-            "name": f"row_{i}",
-            "description": desc[:600],
-        })
+            description = None
+        candidates.append({"name": name, "description": description})
 
     chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
     per_entry_scores = await _score_factors_parallel(
         cleaned_entries, candidates, chosen_model
     )
 
-    # Build per-entry groups. Matched rows carry their row index back
-    # through the lowercased name key the LLM echoes ("row_3").
+    # Build per-entry groups. Matched rows are looked up via the
+    # lowercased name key (same convention _score_categories uses).
     groups: list[dict] = []
     total_matched = 0
     rows_with_empty_reasons_matched = 0
     for entry, scores in zip(cleaned_entries, per_entry_scores):
         matched: list[dict] = []
-        for i, r in enumerate(strengths):
-            relevance = float(scores.get(f"row_{i}", 0.0))
+        for name_key, row_idx in key_to_row_idx.items():
+            relevance = float(scores.get(name_key, 0.0))
             if relevance < threshold:
                 continue
+            r = strengths[row_idx]
             out = dict(r)
             out["relevance"] = round(relevance, 3)
             out["match_score"] = round(relevance * r["wilson_score"], 4)
