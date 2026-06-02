@@ -31,6 +31,7 @@ async def init_db() -> None:
         auto_category,
         category,
         competitive_card,
+        competitive_v2_card,
         investigation,
         review,
         source,

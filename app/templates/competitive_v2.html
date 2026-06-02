@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('nav.competitive_v2') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-4">
+
+  {# ============= SIDEBAR ============= #}
+  <aside class="bg-white border border-gray-200 rounded-lg p-2 lg:sticky lg:top-2 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
+    <div id="competitive-v2-cards"
+         hx-get="/competitive-v2/cards"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+      <div class="text-[11px] text-gray-400 italic px-2 py-3">불러오는 중…</div>
+    </div>
+  </aside>
+
+  {# ============= MAIN ============= #}
+  <main class="space-y-6 min-w-0">
+
+    <div>
+      <h1 class="text-2xl font-semibold flex items-center gap-2">
+        <span>🧭</span>
+        <span>{% if lang == 'ko' %}경쟁력 분류 v2 (베타){% else %}Competitive factor v2 (beta){% endif %}</span>
+      </h1>
+      <p class="text-sm text-gray-600 mt-1 max-w-3xl">
+        {% if lang == 'ko' %}
+          <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 내보낸 CSV를 업로드하면,
+          별도 입력 없이 LLM이 모든 강점 row의 <b>세부 요인(reasons)</b>들을 읽고
+          <b>성공요인 카테고리</b>를 데이터로부터 직접 추출합니다.
+          v1과 달리 분류 기준을 직접 입력하지 않는 <b>bottom-up 발견형</b> 분석입니다.
+        {% else %}
+          Upload a CSV exported from
+          <a href="/vendors" class="text-blue-600 hover:underline">Vendor strengths/weaknesses</a>;
+          the LLM reads every strength row's <b>detail reasons</b> and clusters them into
+          <b>success-factor categories</b> discovered from the data itself —
+          a bottom-up alternative to the v1 top-down classifier.
+        {% endif %}
+      </p>
+    </div>
+
+    {# Upload form #}
+    <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+      <form id="competitive-v2-form"
+            hx-post="/competitive-v2/analyze-csv"
+            hx-encoding="multipart/form-data"
+            hx-target="#competitive-v2-results"
+            hx-swap="innerHTML"
+            hx-indicator="#competitive-v2-loading"
+            class="space-y-4">
+
+        <div>
+          <label class="block text-sm font-semibold text-gray-800 mb-2">
+            {% if lang == 'ko' %}CSV 업로드{% else %}Upload CSV{% endif %}
+            <span class="text-[11px] text-gray-500 font-normal ml-1">
+              {% if lang == 'ko' %}(저장된 원인 분석 포함 옵션이 켜져 있어야 합니다){% else %}(must be exported with include-reasons on){% endif %}
+            </span>
+          </label>
+          <div id="csv-drop-zone-v2"
+               class="border-2 border-dashed border-gray-300 rounded-md p-4 text-center hover:border-blue-400 transition-colors cursor-pointer"
+               onclick="document.getElementById('csv-file-input-v2').click()">
+            <div id="csv-empty-state-v2" class="text-xs text-gray-500">
+              <div class="text-2xl mb-1">📄</div>
+              {% if lang == 'ko' %}
+                CSV 파일을 끌어다 놓거나 클릭해서 선택<br>
+                <span class="text-[10px]">(/vendors CSV 내보내기 결과)</span>
+              {% else %}
+                Drop CSV file here or click to choose
+              {% endif %}
+            </div>
+            <div id="csv-loaded-state-v2" class="hidden text-left text-xs">
+              <span class="font-medium text-gray-800">📎 <span id="csv-loaded-name-v2"></span></span>
+              <span class="text-gray-500 ml-2">(<span id="csv-loaded-size-v2"></span> bytes)</span>
+              <button type="button" onclick="event.stopPropagation(); clearCsvFileV2()"
+                      class="ml-2 text-red-600 hover:underline">
+                {% if lang == 'ko' %}변경{% else %}change{% endif %}
+              </button>
+            </div>
+          </div>
+          <input id="csv-file-input-v2" type="file" name="file" accept=".csv,text/csv"
+                 class="hidden" onchange="onCsvSelectedV2(this)" required>
+        </div>
+
+        <div class="flex items-center justify-end">
+          <button type="submit"
+                  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium whitespace-nowrap">
+            🧭 {% if lang == 'ko' %}성공요인 분석{% else %}Cluster success factors{% endif %}
+          </button>
+        </div>
+      </form>
+
+      <div id="competitive-v2-loading" class="htmx-indicator mt-4 flex items-center gap-2 text-sm text-gray-500">
+        <svg class="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>
+        {% if lang == 'ko' %}LLM이 모든 reasons를 읽고 성공요인 카테고리를 추출 중…{% else %}Clustering reasons into success factors…{% endif %}
+      </div>
+    </div>
+
+    <div id="competitive-v2-results">
+      <div class="text-sm text-gray-500 italic">
+        {% if lang == 'ko' %}
+          좌측 사이드바에서 저장된 카드를 클릭하거나, 위에서 CSV를 업로드 후 [성공요인 분석]을 누르세요.
+        {% else %}
+          Click a saved card or upload a CSV and press Cluster.
+        {% endif %}
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<style>
+  .htmx-indicator { display: none; }
+  .htmx-request .htmx-indicator { display: flex; }
+  .htmx-request.htmx-indicator { display: flex; }
+  [x-cloak] { display: none !important; }
+  #csv-drop-zone-v2.is-dragover { border-color: #2563eb; background-color: #eff6ff; }
+</style>
+
+<script>
+function onCsvSelectedV2(input) {
+  const f = input.files && input.files[0];
+  if (!f) { clearCsvFileV2(); return; }
+  document.getElementById('csv-empty-state-v2').classList.add('hidden');
+  document.getElementById('csv-loaded-state-v2').classList.remove('hidden');
+  document.getElementById('csv-loaded-name-v2').textContent = f.name;
+  document.getElementById('csv-loaded-size-v2').textContent = f.size.toLocaleString();
+}
+function clearCsvFileV2() {
+  const inp = document.getElementById('csv-file-input-v2');
+  inp.value = '';
+  document.getElementById('csv-empty-state-v2').classList.remove('hidden');
+  document.getElementById('csv-loaded-state-v2').classList.add('hidden');
+}
+(function() {
+  const zone = document.getElementById('csv-drop-zone-v2');
+  if (!zone) return;
+  ['dragenter','dragover'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.classList.add('is-dragover');
+  }));
+  ['dragleave','drop'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.classList.remove('is-dragover');
+  }));
+  zone.addEventListener('drop', e => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files[0]) {
+      const inp = document.getElementById('csv-file-input-v2');
+      inp.files = files;
+      onCsvSelectedV2(inp);
+    }
+  });
+})();
+</script>
+{% endblock %}

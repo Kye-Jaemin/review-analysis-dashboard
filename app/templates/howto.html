@@ -49,6 +49,7 @@
     <li><a href="#dashboard">대시보드 패널</a></li>
     <li><a href="#vendors">업체 강/약점 분석 페이지 (구 "업체 분석")</a></li>
     <li><a href="#competitive">경쟁력 분류 페이지 (베타, 구 "경쟁력 분석")</a></li>
+    <li><a href="#competitive_v2">경쟁력 분류 v2 페이지 (베타, bottom-up 성공요인)</a></li>
     <li><a href="#mindmap">감성 원인 마인드맵</a></li>
     <li><a href="#reviews">전체 리뷰 보기 + 내보내기 + 번역 (구 "리뷰")</a></li>
     <li><a href="#workspace">워크스페이스 저장·불러오기</a></li>
@@ -336,6 +337,31 @@
 <div class="callout info">
   <strong>예시:</strong>
   /vendors에서 14개 업체 강점 CSV (50행) 내보내기 → 경쟁력 요소 "음식 Vision AI 정확도" 입력 → 매칭 8건 (Cal AI / BitePal / SnapCalorie 등의 AI 인식 관련 강점) → 각 행에 매칭도 + 인과 원인 표시.
+</div>
+
+<h2 id="competitive_v2">9.5 경쟁력 분류 v2 페이지 (베타) <span class="text-sm text-gray-500">(사이드바: <b>경쟁력 분류 v2(베타)</b>)</span></h2>
+<p><a href="/competitive-v2" class="text-blue-600 hover:underline">경쟁력 분류 v2(베타)</a> — v1과 같은 CSV를 받지만 <strong>사용자 입력 factor가 없음</strong>. LLM이 모든 reasons를 직접 읽고 <strong>성공요인 카테고리를 자동 발견</strong> (bottom-up clustering).</p>
+
+<ul>
+  <li><strong>흐름</strong>: /vendors에서 CSV 내보내기 → /competitive-v2에서 업로드 → [성공요인 분석] → 약 5개 카테고리 + 각 카테고리별 멤버 reason 펼침</li>
+  <li><strong>LLM 1회 호출</strong>: 모든 reasons (최대 400개) 를 한 번에 보내고 temperature=0으로 클러스터링. 같은 CSV는 같은 카테고리 반환</li>
+  <li><strong>출력</strong>: 카테고리별 — 이름 / 설명 / 멤버 reason 개수 / 벤더 수 / 총 리뷰 언급 수 / 멤버 리스트 (벤더 + 원본 카테고리 추적 가능)</li>
+  <li><strong>v1과 비교</strong>: v1 = top-down (입력한 factor에 row 분류), v2 = bottom-up (CSV에서 성공요인 자체 발견). 둘이 보완관계 — 어떤 경쟁력이 중요한지 모를 때 v2 → 발견된 카테고리를 v1 factor로 재활용 가능</li>
+  <li><strong>reasons 빈 row는 자동 스킵</strong>: 메타에 "스킵 N건"으로 표시. /vendors에서 해당 강점 원인 분석 + 저장 후 재내보내기 필요</li>
+  <li><strong>저장 / 다시 분석 / 이름 변경 / 삭제</strong>: v1과 동일 UX</li>
+</ul>
+
+<div class="callout info">
+  <strong>예시:</strong>
+  14개 벤더 CSV 업로드 → 30개 strength row × ~5 reasons = ~150 reasons → 5개 카테고리 발견:
+  <ol class="mt-1">
+    <li>사용자 입력 자동화 / 기록 마찰 감소 (32 mentions, 487 reviews)</li>
+    <li>AI 자동 인식 / 추적 정확도 (28 mentions, 312 reviews)</li>
+    <li>커뮤니티 / 동기부여 시스템 (18 mentions, 156 reviews)</li>
+    <li>맞춤 추천 / 코칭 알고리즘 (15 mentions, 98 reviews)</li>
+    <li>데이터 시각화 / 통계 (12 mentions, 78 reviews)</li>
+  </ol>
+  각 카테고리 펼치면 멤버 reason + 출처 벤더 추적 가능.
 </div>
 
 <h2 id="mindmap">10. 감성 원인 마인드맵</h2>

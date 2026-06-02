@@ -12,6 +12,7 @@ from app.routes import (
     auto_categories,
     categories,
     competitive,
+    competitive_v2,
     export,
     investigations,
     pages,
@@ -77,3 +78,4 @@ app.include_router(auto_categories.router)
 app.include_router(workspace.router)
 app.include_router(vendors.router)
 app.include_router(competitive.router)
+app.include_router(competitive_v2.router)

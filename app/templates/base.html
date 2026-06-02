@@ -522,6 +522,7 @@
           ('/reviews', 'nav.reviews'),
           ('/vendors', 'nav.vendors'),
           ('/competitive', 'nav.competitive'),
+          ('/competitive-v2', 'nav.competitive_v2'),
           ('/howto', 'nav.howto'),
         ] %}
         {% for path, key in nav %}
@@ -782,6 +783,9 @@
         if (method === 'POST' && path === '/competitive/analyze-csv') return true;
         // Competitive card re-analyze (Claude).
         if (method === 'POST' && /^\/competitive\/cards\/\d+\/reanalyze\/?$/.test(path)) return true;
+        // Competitive v2 — bottom-up success-factor clustering (Claude).
+        if (method === 'POST' && path === '/competitive-v2/analyze-csv') return true;
+        if (method === 'POST' && /^\/competitive-v2\/cards\/\d+\/reanalyze\/?$/.test(path)) return true;
         // Vendor "why?" extraction (Claude). The card load / save
         // routes are NOT gated — they're pure DB reads.
         if (method === 'GET' && path === '/api/vendor-reasons') return true;

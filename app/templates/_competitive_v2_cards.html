@@ -1,0 +1,72 @@
+{# Sidebar partial — saved v2 cards. #}
+
+<div class="space-y-1">
+  <div class="flex items-baseline gap-2 px-2 py-1">
+    <span class="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+      {% if lang == 'ko' %}저장된 카드{% else %}saved cards{% endif %}
+    </span>
+    <span class="ml-auto text-[10px] text-gray-500 tabular-nums">{{ cards|length }}</span>
+  </div>
+
+  {% if not cards %}
+    <div class="text-[11px] text-gray-500 italic px-2 py-3">
+      {% if lang == 'ko' %}
+        아직 저장된 분석이 없습니다.<br>
+        결과 상단의 <b>💾 카드로 저장</b>을 눌러 캐시할 수 있습니다.
+      {% else %}
+        No saved analyses yet.
+      {% endif %}
+    </div>
+  {% else %}
+    <ul class="space-y-1">
+      {% for c in cards %}
+        <li class="group">
+          <div class="flex items-stretch gap-1 px-1.5 py-1.5 rounded hover:bg-blue-50 transition-colors {% if c.hidden %}opacity-60{% endif %}">
+            <button type="button"
+                    hx-get="/competitive-v2/cards/{{ c.id }}/load"
+                    hx-target="#competitive-v2-results"
+                    hx-swap="innerHTML"
+                    hx-indicator="#competitive-v2-loading"
+                    class="flex-1 min-w-0 text-left">
+              <div class="text-[12px] font-medium text-gray-900 truncate" title="{{ c.label }}">
+                {% if c.hidden %}🙈{% else %}🧭{% endif %}
+                {{ c.label }}
+              </div>
+              <div class="text-[10px] text-gray-500 flex items-center gap-1.5 mt-0.5">
+                <span class="tabular-nums" title="CSV 행 수">📄 {{ c.input_row_count }}</span>
+                <span class="text-gray-400">→</span>
+                <span class="tabular-nums" title="추출된 reason 수">{{ c.reason_count }}</span>
+                <span class="text-gray-400">→</span>
+                <span class="tabular-nums" title="발견된 성공요인 카테고리">🎯 {{ c.category_count }}</span>
+              </div>
+            </button>
+            <button type="button"
+                    hx-delete="/competitive-v2/cards/{{ c.id }}"
+                    hx-confirm="{% if lang == 'ko' %}이 카드를 영구 삭제하시겠습니까?{% else %}Permanently delete this card?{% endif %}"
+                    hx-target="#competitive-v2-cards"
+                    hx-swap="innerHTML"
+                    hx-on::after-request="if (event.detail.successful) { htmx.ajax('GET', '/competitive-v2/cards', '#competitive-v2-cards'); }"
+                    title="{% if lang == 'ko' %}삭제{% else %}delete{% endif %}"
+                    class="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-600 text-xs px-1">
+              ✕
+            </button>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <div class="pt-2 mt-2 border-t border-gray-200">
+    {% if include_hidden %}
+      <button type="button" hx-get="/competitive-v2/cards" hx-target="#competitive-v2-cards" hx-swap="innerHTML"
+              class="text-[10px] text-gray-500 hover:text-gray-700 px-2 py-1 w-full text-left">
+        ▴ {% if lang == 'ko' %}숨김 카드 가리기{% else %}hide hidden{% endif %}
+      </button>
+    {% else %}
+      <button type="button" hx-get="/competitive-v2/cards?include_hidden=1" hx-target="#competitive-v2-cards" hx-swap="innerHTML"
+              class="text-[10px] text-gray-500 hover:text-gray-700 px-2 py-1 w-full text-left">
+        ▾ {% if lang == 'ko' %}숨김 카드 보기{% else %}show hidden{% endif %}
+      </button>
+    {% endif %}
+  </div>
+</div>
