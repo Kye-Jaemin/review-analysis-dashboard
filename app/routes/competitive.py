@@ -1,39 +1,38 @@
 """Competitive-factor analysis page + API.
 
-Three endpoints:
+NEW (post-0017): the analysis is now CSV-driven. The user uploads a
+CSV exported from /vendors and the route classifies its strength rows
+against a free-form competitive factor.
 
-  GET  /competitive                     SSR page (input form, empty results)
-  GET  /competitive/results?factor=...  HTML partial (HTMX swap target)
-  GET  /api/competitive-rank?factor=... JSON (machine-readable)
+Endpoints:
 
-The page never reloads — the form `hx-get`s the /results partial and
-swaps it into the result panel. The JSON endpoint is exposed for
-external use / debugging.
-
-LLM cost is one Claude completion per submit; the result is computed
-fresh each time (no cache in v1 — search is free-form so hit rate is
-low). Sample reviews are fetched eagerly so expanding them in the UI
-is a zero-RTT toggle.
+  GET  /competitive                       SSR page (upload + form, empty results)
+  POST /competitive/analyze-csv           HTML partial — takes (file, factor, threshold)
+  GET  /competitive/cards                 sidebar partial (saved-card list)
+  POST /competitive/cards                 save current analysis to DB
+  GET  /competitive/cards/{id}/load       render saved card without LLM
+  POST /competitive/cards/{id}/reanalyze  re-run LLM on saved CSV
+  PATCH  /competitive/cards/{id}          rename / hide
+  DELETE /competitive/cards/{id}          hard delete
 """
 from __future__ import annotations
 
+import csv as _csv
+import io
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.services.competitive import (
     DEFAULT_THRESHOLD,
-    SAMPLE_LIMIT,
-    compute_drift,
+    analyze_csv,
     delete_card,
     get_saved_card,
     list_saved_cards,
-    rank_vendors_by_factor,
     reanalyze_card,
-    reorder_cards,
     save_card,
     toggle_card_hidden,
     update_card_label,
@@ -48,7 +47,8 @@ class SaveCardBody(BaseModel):
     label: Optional[str] = Field(None, max_length=200)
     threshold: float = Field(DEFAULT_THRESHOLD, ge=0.0, le=1.0)
     model_used: Optional[str] = Field(None, max_length=100)
-    result: dict
+    input_csv: list[dict]
+    result_rows: list[dict]
 
 
 class PatchCardBody(BaseModel):
@@ -56,13 +56,14 @@ class PatchCardBody(BaseModel):
     hidden: Optional[bool] = None
 
 
-class ReorderBody(BaseModel):
-    ids: list[int] = Field(default_factory=list)
+# ----------------------------------------------------------------------------
+# Page + CSV analysis
+# ----------------------------------------------------------------------------
 
 
 @router.get("/competitive")
 async def competitive_page(request: Request):
-    """Landing page — input only, results loaded via HTMX into a partial."""
+    """Landing page — upload + input form. Results swap into a partial via HTMX."""
     return render(
         request,
         "competitive.html",
@@ -70,74 +71,107 @@ async def competitive_page(request: Request):
     )
 
 
-@router.get("/competitive/results")
-async def competitive_results_partial(
+def _parse_uploaded_csv(content: bytes) -> list[dict]:
+    """Parse the /vendors export CSV (UTF-8 with optional BOM)."""
+    text = content.decode("utf-8-sig", errors="replace")
+    reader = _csv.DictReader(io.StringIO(text))
+    rows: list[dict] = []
+    for r in reader:
+        # csv.DictReader gives plain dicts with string values; the
+        # service-layer _normalize_csv_row coerces types so leave
+        # everything as-string here.
+        rows.append(dict(r))
+    return rows
+
+
+@router.post("/competitive/analyze-csv")
+async def competitive_analyze_csv(
     request: Request,
-    factor: str = Query(..., min_length=1, max_length=200),
-    threshold: float = Query(DEFAULT_THRESHOLD, ge=0.0, le=1.0),
-    model: Optional[str] = None,
+    file: UploadFile = File(...),
+    factor: str = Form(...),
+    threshold: float = Form(DEFAULT_THRESHOLD),
+    model: Optional[str] = Form(None),
     session: AsyncSession = Depends(get_session),
 ):
-    """HTML fragment for HTMX swap. Returns the results card directly.
-
-    Errors render as an inline error block in the same swap target so
-    the user sees what went wrong without a popup.
-    """
+    """Multipart endpoint: takes the CSV file + factor + threshold, runs
+    one Claude call to score strength categories, returns the HTML
+    partial with the result table."""
     factor = (factor or "").strip()
     if not factor:
         return render(
             request,
             "_competitive_results.html",
             error="경쟁력 요소를 입력해주세요.",
-            factor="",
             result=None,
+            saved_card=None,
+            csv_name=None,
         )
     try:
-        result = await rank_vendors_by_factor(
-            session,
-            factor,
-            model=model,
+        raw = await file.read()
+        if not raw:
+            raise ValueError("uploaded file is empty")
+        rows = _parse_uploaded_csv(raw)
+    except Exception as e:  # noqa: BLE001
+        return render(
+            request,
+            "_competitive_results.html",
+            error=f"CSV 읽기 실패: {e}",
+            result=None,
+            saved_card=None,
+            csv_name=file.filename or "",
+        )
+
+    try:
+        result = await analyze_csv(
+            factor=factor,
+            rows=rows,
             threshold=threshold,
-            sample_limit=SAMPLE_LIMIT,
+            model=model,
         )
     except RuntimeError as e:
-        # No API key on the deployment — same surface as a soft error.
         return render(
             request,
             "_competitive_results.html",
             error=f"LLM 분석 불가: {e}",
-            factor=factor,
             result=None,
+            saved_card=None,
+            csv_name=file.filename or "",
         )
     except ValueError as e:
         return render(
             request,
             "_competitive_results.html",
             error=str(e),
-            factor=factor,
             result=None,
+            saved_card=None,
+            csv_name=file.filename or "",
         )
-    except Exception as e:  # noqa: BLE001 — surface any backend bug as-is
-        return render(
-            request,
-            "_competitive_results.html",
-            error=f"예기치 못한 오류: {type(e).__name__}: {e}",
-            factor=factor,
-            result=None,
-        )
+
+    # Attach the CSV name so the partial can show "vendor_analysis.csv (50행)"
+    # AND embed the parsed input rows in a hidden script tag so the save
+    # button can POST them back without re-uploading.
+    result["_csv_name"] = file.filename or "vendor_analysis.csv"
+    # Stash the cleaned rows the LLM actually saw (post-normalization)
+    # so saving from the page records exactly what was analyzed.
+    cleaned_rows: list[dict] = []
+    for r in rows or []:
+        # Replicate service-layer normalization shape (we just stash
+        # what we got — service will re-normalize on reanalyze).
+        if isinstance(r, dict):
+            cleaned_rows.append({k: v for k, v in r.items()})
     return render(
         request,
         "_competitive_results.html",
         result=result,
-        factor=factor,
-        error=None,
+        input_csv=cleaned_rows,
         saved_card=None,
-        drift=None,
+        csv_name=file.filename or "vendor_analysis.csv",
+        error=None,
     )
 
 
 # ----------------------------------------------------------------------------
-# Saved-card endpoints
+# Saved cards
 # ----------------------------------------------------------------------------
 
 
@@ -147,7 +181,6 @@ async def competitive_cards_partial(
     include_hidden: int = 0,
     session: AsyncSession = Depends(get_session),
 ):
-    """Sidebar partial — card list (HTMX target). Metadata only."""
     cards = await list_saved_cards(session, include_hidden=bool(include_hidden))
     return render(
         request,
@@ -163,14 +196,13 @@ async def competitive_card_save(
     body: SaveCardBody,
     session: AsyncSession = Depends(get_session),
 ):
-    """Persist the current analysis. HTMX-friendly: returns the new card
-    list partial so the sidebar refreshes in one round-trip."""
     try:
         await save_card(
             session,
             factor=body.factor,
             label=body.label,
-            result=body.result,
+            input_csv=body.input_csv,
+            result_rows=body.result_rows,
             threshold=body.threshold,
             model_used=body.model_used,
         )
@@ -191,28 +223,33 @@ async def competitive_card_load(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    """Load a saved card → render the results partial from the cached
-    JSON. No LLM call. Same partial template as fresh analyses, with
-    `saved_card` populated so the meta bar shows the saved-state header
-    instead of the save button."""
     card = await get_saved_card(session, card_id)
     if not card:
         return render(
             request,
             "_competitive_results.html",
             error=f"카드를 찾을 수 없습니다 (id={card_id})",
-            factor="",
             result=None,
             saved_card=None,
-            drift=None,
+            csv_name=None,
         )
-    drift = await compute_drift(session, card)
+    result = {
+        "factor": card.factor,
+        "threshold": card.threshold,
+        "input_row_count": len(card.input_csv or []),
+        "strength_input_count": sum(
+            1 for r in (card.input_csv or [])
+            if (r.get("type") or "").strip().lower() == "strength"
+        ),
+        "result_rows": card.result_rows or [],
+        "model": card.model_used,
+        "_csv_name": "(저장된 CSV)",
+    }
     return render(
         request,
         "_competitive_results.html",
-        result=card.result,
-        factor=card.factor,
-        error=None,
+        result=result,
+        input_csv=card.input_csv or [],
         saved_card={
             "id": card.id,
             "label": card.label,
@@ -222,7 +259,8 @@ async def competitive_card_load(
             "created_at": card.created_at.isoformat() if card.created_at else None,
             "updated_at": card.updated_at.isoformat() if card.updated_at else None,
         },
-        drift=drift,
+        csv_name=None,
+        error=None,
     )
 
 
@@ -233,9 +271,6 @@ async def competitive_card_reanalyze(
     model: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    """Re-run rank_vendors_by_factor() with the card's saved factor,
-    overwrite this row's result, and return the updated results partial.
-    No access gate — single Claude call is light."""
     try:
         card = await reanalyze_card(session, card_id, model=model)
     except RuntimeError as e:
@@ -243,28 +278,36 @@ async def competitive_card_reanalyze(
             request,
             "_competitive_results.html",
             error=f"LLM 분석 불가: {e}",
-            factor="",
             result=None,
             saved_card=None,
-            drift=None,
+            csv_name=None,
         )
     if not card:
         return render(
             request,
             "_competitive_results.html",
             error=f"카드를 찾을 수 없습니다 (id={card_id})",
-            factor="",
             result=None,
             saved_card=None,
-            drift=None,
+            csv_name=None,
         )
-    drift = await compute_drift(session, card)
+    result = {
+        "factor": card.factor,
+        "threshold": card.threshold,
+        "input_row_count": len(card.input_csv or []),
+        "strength_input_count": sum(
+            1 for r in (card.input_csv or [])
+            if (r.get("type") or "").strip().lower() == "strength"
+        ),
+        "result_rows": card.result_rows or [],
+        "model": card.model_used,
+        "_csv_name": "(저장된 CSV)",
+    }
     return render(
         request,
         "_competitive_results.html",
-        result=card.result,
-        factor=card.factor,
-        error=None,
+        result=result,
+        input_csv=card.input_csv or [],
         saved_card={
             "id": card.id,
             "label": card.label,
@@ -273,10 +316,10 @@ async def competitive_card_reanalyze(
             "model_used": card.model_used,
             "created_at": card.created_at.isoformat() if card.created_at else None,
             "updated_at": card.updated_at.isoformat() if card.updated_at else None,
-            # Re-analyze marker so the UI can flash a "방금 재분석됨" badge
             "just_reanalyzed": True,
         },
-        drift=drift,
+        csv_name=None,
+        error=None,
     )
 
 
@@ -286,8 +329,6 @@ async def competitive_card_patch(
     body: PatchCardBody,
     session: AsyncSession = Depends(get_session),
 ):
-    """Rename or toggle hidden. JSON response, not HTML — the UI either
-    refreshes the sidebar via a follow-up call or rebuilds inline."""
     card = None
     if body.label is not None:
         try:
@@ -318,37 +359,3 @@ async def competitive_card_delete(
     if not ok:
         raise HTTPException(404, "card not found")
     return {"deleted": card_id}
-
-
-@router.post("/competitive/cards/reorder")
-async def competitive_cards_reorder(
-    body: ReorderBody,
-    session: AsyncSession = Depends(get_session),
-):
-    n = await reorder_cards(session, body.ids)
-    return {"updated": n}
-
-
-@router.get("/api/competitive-rank")
-async def competitive_rank_api(
-    factor: str = Query(..., min_length=1, max_length=200),
-    threshold: float = Query(DEFAULT_THRESHOLD, ge=0.0, le=1.0),
-    model: Optional[str] = None,
-    session: AsyncSession = Depends(get_session),
-):
-    """JSON ranking — same payload the partial template iterates over."""
-    factor = (factor or "").strip()
-    if not factor:
-        raise HTTPException(400, "factor is required")
-    try:
-        return await rank_vendors_by_factor(
-            session,
-            factor,
-            model=model,
-            threshold=threshold,
-            sample_limit=SAMPLE_LIMIT,
-        )
-    except RuntimeError as e:
-        raise HTTPException(503, str(e))
-    except ValueError as e:
-        raise HTTPException(400, str(e))

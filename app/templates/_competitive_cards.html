@@ -36,10 +36,9 @@
                 {{ c.label }}
               </div>
               <div class="text-[10px] text-gray-500 flex items-center gap-1.5 mt-0.5">
-                <span class="tabular-nums">💪 {{ c.strength_count }}</span>
-                <span class="tabular-nums">🚩 {{ c.weakness_count }}</span>
-                <span class="text-gray-400">·</span>
-                <span class="tabular-nums">{{ c.universe_size }}개</span>
+                <span class="tabular-nums" title="CSV 행 수">📄 {{ c.input_row_count }}</span>
+                <span class="text-gray-400">→</span>
+                <span class="tabular-nums" title="매칭된 강점 수">💪 {{ c.result_row_count }}</span>
               </div>
               {% if c.factor != c.label %}
                 <div class="text-[10px] text-gray-400 truncate italic" title="원본 입력: {{ c.factor }}">

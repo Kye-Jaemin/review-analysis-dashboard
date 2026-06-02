@@ -778,9 +778,8 @@
         if (method === 'POST' && path === '/api/translate-review') return true;
         // One-shot category-name neutralize (Claude).
         if (method === 'POST' && path === '/api/auto-categories/neutralize-names') return true;
-        // Competitive-factor LLM scoring (page partial + raw JSON).
-        if (method === 'GET' && path === '/competitive/results') return true;
-        if (method === 'GET' && path === '/api/competitive-rank') return true;
+        // Competitive-factor CSV-driven LLM scoring (multipart upload).
+        if (method === 'POST' && path === '/competitive/analyze-csv') return true;
         // Competitive card re-analyze (Claude).
         if (method === 'POST' && /^\/competitive\/cards\/\d+\/reanalyze\/?$/.test(path)) return true;
         // Vendor "why?" extraction (Claude). The card load / save

@@ -520,12 +520,7 @@ async def rank_vendors_by_factor(
 async def list_saved_cards(
     session: AsyncSession, *, include_hidden: bool = False
 ) -> list[dict]:
-    """Sidebar listing — metadata only, no `result` JSON in the payload.
-
-    Keeps the response small (~200 bytes/row) so the sidebar can refresh
-    on every save/delete without hauling around the full result blobs.
-    The full row is fetched on click via `get_saved_card`.
-    """
+    """Sidebar listing — metadata only, no row payload."""
     stmt = select(CompetitiveFactorCard)
     if not include_hidden:
         stmt = stmt.where(CompetitiveFactorCard.hidden.is_(False))
@@ -536,23 +531,22 @@ async def list_saved_cards(
     rows = (await session.execute(stmt)).scalars().all()
     out: list[dict] = []
     for c in rows:
-        result = c.result or {}
+        input_csv = c.input_csv or []
+        result_rows = c.result_rows or []
         out.append({
             "id": c.id,
             "factor": c.factor,
             "label": c.label,
             "threshold": c.threshold,
-            "universe_size": c.universe_size,
             "model_used": c.model_used,
             "hidden": c.hidden,
             "display_order": c.display_order,
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-            # Pre-computed counts so the sidebar can render the
-            # "N vendors" / "M weakness signals" pills without parsing
-            # the result JSON in the template.
-            "strength_count": len(result.get("strength_ranking") or []),
-            "weakness_count": len(result.get("weakness_ranking") or []),
+            # Pre-computed counts so the sidebar can render "N행 → M매칭"
+            # pills without parsing the full payloads in the template.
+            "input_row_count": len(input_csv),
+            "result_row_count": len(result_rows),
         })
     return out
 
@@ -568,24 +562,23 @@ async def save_card(
     *,
     factor: str,
     label: Optional[str],
-    result: dict,
+    input_csv: list[dict],
+    result_rows: list[dict],
     threshold: float,
     model_used: Optional[str],
 ) -> CompetitiveFactorCard:
-    """Persist a fresh analysis. Always creates a new row (no upsert).
+    """Persist a fresh CSV-driven analysis as a new card.
 
-    `universe_size` and the embedded threshold are pulled out of
-    `result` if not provided explicitly so the caller can just pass the
-    rank_vendors_by_factor() return verbatim.
+    Stores the raw CSV row set (`input_csv`) AND the relevance-filtered
+    rows (`result_rows`) so loading the card never needs the LLM and
+    re-analyzing re-uses the exact same input set.
     """
     factor = (factor or "").strip()
     if not factor:
         raise ValueError("factor is required")
-    if not isinstance(result, dict):
-        raise ValueError("result must be a dict")
+    if not isinstance(input_csv, list) or not isinstance(result_rows, list):
+        raise ValueError("input_csv and result_rows must be lists")
 
-    # Place new cards at the end of the visible list. Read max+1
-    # rather than COUNT(*) so hidden cards don't disturb ordering.
     max_order = (
         await session.execute(
             select(CompetitiveFactorCard.display_order)
@@ -599,8 +592,13 @@ async def save_card(
         label=(label or factor)[:200],
         threshold=float(threshold),
         model_used=(model_used or "")[:100] or None,
-        universe_size=int(result.get("universe_size") or 0),
-        result=result,
+        input_csv=input_csv,
+        result_rows=result_rows,
+        # Legacy columns intentionally written with dummy values — kept
+        # in the schema (nullable) so the table didn't need to be
+        # rebuilt for the migration.
+        universe_size=0,
+        result={},
         hidden=False,
         display_order=int(max_order) + 1,
     )
@@ -652,24 +650,22 @@ async def reanalyze_card(
     *,
     model: Optional[str] = None,
 ) -> Optional[CompetitiveFactorCard]:
-    """Re-run rank_vendors_by_factor() with the card's saved factor +
-    threshold and overwrite this row's `result` + bump `updated_at`.
-
-    The model arg lets the user pick a different Claude tier without
-    losing the saved threshold or factor. universe_size is refreshed
-    from the new run so the drift indicator stays accurate."""
+    """Re-run analyze_csv() using the card's saved input_csv + factor +
+    threshold; overwrite result_rows + bump updated_at."""
     card = await session.get(CompetitiveFactorCard, card_id)
     if not card:
         return None
-    new_result = await rank_vendors_by_factor(
-        session,
-        card.factor,
-        model=model,
+    input_csv = card.input_csv or []
+    if not input_csv:
+        # Legacy card without a saved CSV — nothing to re-analyze.
+        return card
+    new = await analyze_csv(
+        factor=card.factor,
+        rows=input_csv,
         threshold=card.threshold,
-        sample_limit=SAMPLE_LIMIT,
+        model=model,
     )
-    card.result = new_result
-    card.universe_size = int(new_result.get("universe_size") or 0)
+    card.result_rows = new.get("result_rows") or []
     if model:
         card.model_used = model[:100]
     card.updated_at = datetime.utcnow()
@@ -726,3 +722,166 @@ async def reorder_cards(session: AsyncSession, ordered_ids: list[int]) -> int:
     if n_updated:
         await session.commit()
     return n_updated
+
+
+# ============================================================================
+# CSV-driven analysis (new flow)
+# ============================================================================
+#
+# Replaces the DB-querying rank_vendors_by_factor flow with one that
+# operates entirely on a user-uploaded CSV (typically the output of
+# /vendors/export.csv). The benefit: the user picks exactly which
+# vendors + which sides go into the comparison, and the analysis stays
+# tied to a snapshot regardless of how the underlying DB drifts.
+
+
+def _normalize_csv_row(raw: dict) -> Optional[dict]:
+    """Coerce / validate one CSV row.
+
+    Returns the cleaned dict, or None if the row is malformed beyond
+    repair (missing vendor or category). All keys preserved verbatim
+    in the output so the UI can render the rest of the columns even
+    if some are empty.
+    """
+    if not isinstance(raw, dict):
+        return None
+    vendor = str(raw.get("vendor") or "").strip()
+    category = str(raw.get("category") or "").strip()
+    if not vendor or not category:
+        return None
+    row_type = str(raw.get("type") or "").strip().lower()
+    try:
+        pct = float(raw.get("pct") or 0)
+    except (TypeError, ValueError):
+        pct = 0.0
+    try:
+        count = int(raw.get("count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    try:
+        wilson_score = float(raw.get("wilson_score") or 0)
+    except (TypeError, ValueError):
+        wilson_score = 0.0
+    return {
+        "vendor": vendor[:200],
+        "type": row_type[:32] if row_type else "strength",
+        "category": category[:200],
+        "pct": pct,
+        "count": count,
+        "wilson_score": wilson_score,
+        "description": str(raw.get("description") or "").strip()[:500],
+        "small_sample": bool(raw.get("small_sample")) if not isinstance(raw.get("small_sample"), str) else (raw.get("small_sample") or "").strip().upper() == "Y",
+        "reasons": str(raw.get("reasons") or "").strip()[:2000],
+    }
+
+
+async def analyze_csv(
+    *,
+    factor: str,
+    rows: list[dict],
+    threshold: float = DEFAULT_THRESHOLD,
+    model: Optional[str] = None,
+) -> dict:
+    """Score a user-uploaded CSV (/vendors export shape) against a
+    competitive factor.
+
+    Pipeline:
+      1. Coerce/validate every row. Drop the obvious junk.
+      2. Filter to type='strength' — weakness rows are intentionally
+         out of scope for this analysis (user-level decision).
+      3. Build a distinct (category, description) universe so each
+         unique category is scored only once even when several
+         vendors share it.
+      4. ONE LLM call (re-uses _score_categories) returns
+         {name.lower(): relevance ∈ [0,1]} for every category.
+      5. Attach the relevance back onto each strength row, compute
+         match_score = relevance × wilson_score, keep rows whose
+         relevance ≥ threshold, sort relevance ↓ then pct ↓.
+
+    Returns:
+      {
+        "factor": str,
+        "threshold": float,
+        "input_row_count": int,
+        "strength_input_count": int,
+        "result_rows": [...],
+        "universe_size": int,
+        "model": str,
+      }
+    """
+    factor = (factor or "").strip()
+    if not factor:
+        raise ValueError("factor is required")
+    threshold = max(0.0, min(1.0, float(threshold)))
+
+    # 1. Normalize input
+    cleaned: list[dict] = []
+    for r in rows or []:
+        norm = _normalize_csv_row(r)
+        if norm:
+            cleaned.append(norm)
+    input_row_count = len(cleaned)
+
+    # 2. Strength-only filter
+    strengths = [r for r in cleaned if r["type"] == "strength"]
+
+    if not strengths:
+        return {
+            "factor": factor,
+            "threshold": threshold,
+            "input_row_count": input_row_count,
+            "strength_input_count": 0,
+            "result_rows": [],
+            "universe_size": 0,
+            "model": (model or settings.ANTHROPIC_MODEL),
+            "message": "no_strength_rows_in_csv",
+        }
+
+    # 3. Distinct universe (preserve description if the same category
+    #    name has different descriptions across vendors; we just keep
+    #    the first one we see — close enough for LLM matching).
+    universe: dict[str, dict] = {}
+    for r in strengths:
+        key = r["category"].strip().lower()
+        if key in universe:
+            continue
+        universe[key] = {
+            "name": r["category"],
+            "description": r["description"] or None,
+        }
+    items = list(universe.values())
+
+    # 4. LLM scoring (batched, temperature=0)
+    chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
+    scores: dict[str, float] = {}
+    for i in range(0, len(items), LLM_BATCH_SIZE):
+        batch = items[i : i + LLM_BATCH_SIZE]
+        partial = await _score_categories(factor, batch, chosen_model)
+        scores.update(partial)
+
+    # 5. Attach + filter + sort
+    result_rows: list[dict] = []
+    for r in strengths:
+        cat_key = r["category"].strip().lower()
+        relevance = float(scores.get(cat_key, 0.0))
+        if relevance < threshold:
+            continue
+        match_score = relevance * r["wilson_score"]
+        out = dict(r)
+        out["relevance"] = round(relevance, 3)
+        out["match_score"] = round(match_score, 4)
+        result_rows.append(out)
+    result_rows.sort(
+        key=lambda x: (x["relevance"], x["pct"]),
+        reverse=True,
+    )
+
+    return {
+        "factor": factor,
+        "threshold": threshold,
+        "input_row_count": input_row_count,
+        "strength_input_count": len(strengths),
+        "result_rows": result_rows,
+        "universe_size": len(universe),
+        "model": chosen_model,
+    }

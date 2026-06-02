@@ -1,72 +1,74 @@
-{# Partial rendered by HTMX into #competitive-results.
+{# Result partial for /competitive.
 
    Inputs:
-     factor       the user's input string
-     result       the rank_vendors_by_factor() return dict (or None on error)
-     error        optional error string
-     saved_card   optional dict {id, label, factor, threshold, model_used,
-                  created_at, updated_at, just_reanalyzed?} when this view
-                  comes from a saved card (not a fresh analysis)
-     drift        optional dict {saved_universe, current_universe, delta}
-                  populated only when saved_card is set #}
+     factor        the user's input string (echoed in meta line)
+     result        analyze_csv() return dict (or None on error)
+       {factor, threshold, input_row_count, strength_input_count,
+        result_rows, universe_size, model, _csv_name}
+     input_csv     full row set (cleaned) used by the save button
+     saved_card    None for fresh runs; otherwise {id, label, factor,
+                   threshold, model_used, created_at, updated_at,
+                   just_reanalyzed?}
+     csv_name      original upload filename (only for fresh runs)
+     error         optional error string
+
+   Layout:
+     [meta bar] — save/rename/reanalyze/delete + drift info
+     [summary chip row] — N rows in CSV → M matched
+     [results table] — vendor / strength category / pct / reasons / relevance
+     [empty state if no matches] #}
 
 {% if error %}
   <div class="border border-rose-200 bg-rose-50 rounded-md p-4 text-sm text-rose-800">
-    <div class="font-semibold mb-1">분석을 완료하지 못했습니다.</div>
+    <div class="font-semibold mb-1">{% if lang == 'ko' %}분석을 완료하지 못했습니다.{% else %}Analysis failed.{% endif %}</div>
     <div>{{ error }}</div>
   </div>
 {% elif result %}
-  <div class="space-y-4" x-data="{ showWeak: false, renaming: false }">
+  <div class="space-y-4" x-data="{ renaming: false }">
 
-    {# ========== META BAR ==========
-       Two modes:
-         A. Fresh analysis (saved_card is None) → show 💾 save button
-         B. Loaded saved card                   → show drift + rename + reanalyze + delete #}
+    {# ========== META BAR ========== #}
     {% if saved_card %}
       <div class="border border-blue-200 bg-blue-50/60 rounded-md p-3">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-base">📅</span>
           <div class="flex-1 min-w-0">
-            {# Inline rename input — toggled via Alpine renaming flag #}
             <div x-show="!renaming" class="flex items-center gap-2 flex-wrap">
               <span class="font-semibold text-sm text-gray-900 truncate">{{ saved_card.label }}</span>
               <button type="button" @click="renaming = true; $nextTick(() => $refs.renameInput.focus())"
                       class="text-[11px] text-blue-600 hover:underline">
-                🏷️ 이름 변경
+                🏷️ {% if lang == 'ko' %}이름 변경{% else %}rename{% endif %}
               </button>
               {% if saved_card.just_reanalyzed %}
                 <span class="px-1.5 py-0.5 text-[10px] rounded-full bg-emerald-100 text-emerald-800 font-semibold">
-                  ✓ 방금 재분석됨
+                  ✓ {% if lang == 'ko' %}방금 재분석됨{% else %}just reanalyzed{% endif %}
                 </span>
               {% endif %}
             </div>
             <div x-show="renaming" class="flex items-center gap-2" x-cloak>
               <input type="text" maxlength="200" x-ref="renameInput"
-                     :value="$refs.renameInput?.value || '{{ saved_card.label|e }}'"
+                     value="{{ saved_card.label|e }}"
                      class="flex-1 min-w-0 border border-blue-300 rounded px-2 py-1 text-sm"
                      @keydown.enter.prevent="
                        fetch('/competitive/cards/{{ saved_card.id }}', {
                          method:'PATCH', headers:{'Content-Type':'application/json'},
                          body: JSON.stringify({label: $refs.renameInput.value})
-                       }).then(r => r.ok ? (renaming = false, htmx.ajax('GET','/competitive/cards','#competitive-cards')) : alert('이름 변경 실패'));
-                     "
+                       }).then(r => r.ok ? (renaming = false, htmx.ajax('GET','/competitive/cards','#competitive-cards')) : alert('이름 변경 실패'));"
                      @keydown.escape="renaming = false" />
               <button type="button"
                       @click="
                         fetch('/competitive/cards/{{ saved_card.id }}', {
                           method:'PATCH', headers:{'Content-Type':'application/json'},
                           body: JSON.stringify({label: $refs.renameInput.value})
-                        }).then(r => r.ok ? (renaming = false, htmx.ajax('GET','/competitive/cards','#competitive-cards')) : alert('이름 변경 실패'));
-                      "
-                      class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded">저장</button>
+                        }).then(r => r.ok ? (renaming = false, htmx.ajax('GET','/competitive/cards','#competitive-cards')) : alert('이름 변경 실패'));"
+                      class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded">{% if lang == 'ko' %}저장{% else %}save{% endif %}</button>
               <button type="button" @click="renaming = false"
-                      class="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded">취소</button>
+                      class="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded">{% if lang == 'ko' %}취소{% else %}cancel{% endif %}</button>
             </div>
             <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-              <span title="저장 시 입력값">원본: <span class="font-mono">{{ saved_card.factor }}</span></span>
-              <span>임계값 {{ '%.2f'|format(saved_card.threshold) }}</span>
+              <span>{% if lang == 'ko' %}원본 요소{% else %}factor{% endif %}: <span class="font-mono">{{ saved_card.factor }}</span></span>
+              <span>{% if lang == 'ko' %}임계값{% else %}threshold{% endif %} {{ '%.2f'|format(saved_card.threshold) }}</span>
               {% if saved_card.updated_at %}
-                <span>마지막 분석: <span class="font-mono">{{ saved_card.updated_at[:16].replace('T',' ') }}</span></span>
+                <span>{% if lang == 'ko' %}마지막 분석{% else %}last analyzed{% endif %}: <span class="font-mono">{{ saved_card.updated_at[:16].replace('T',' ') }}</span></span>
               {% endif %}
             </div>
           </div>
@@ -78,43 +80,22 @@
                     hx-indicator="#competitive-loading"
                     hx-on::after-request="if (event.detail.successful) { htmx.ajax('GET', '/competitive/cards', '#competitive-cards'); }"
                     class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium">
-              🔄 다시 분석
+              🔄 {% if lang == 'ko' %}다시 분석{% else %}re-analyze{% endif %}
             </button>
             <button type="button"
                     hx-delete="/competitive/cards/{{ saved_card.id }}"
-                    hx-confirm="이 카드를 영구 삭제하시겠습니까?"
+                    hx-confirm="{% if lang == 'ko' %}이 카드를 영구 삭제하시겠습니까?{% else %}Permanently delete this card?{% endif %}"
                     hx-target="#competitive-results"
                     hx-swap="innerHTML"
-                    hx-on::after-request="if (event.detail.successful) { document.getElementById('competitive-results').innerHTML = '<div class=\'text-sm text-gray-500 italic\'>카드를 삭제했습니다.</div>'; htmx.ajax('GET', '/competitive/cards', '#competitive-cards'); }"
-                    title="삭제"
+                    hx-on::after-request="if (event.detail.successful) { document.getElementById('competitive-results').innerHTML = '<div class=\'text-sm text-gray-500 italic\'>{% if lang == 'ko' %}카드를 삭제했습니다.{% else %}Card deleted.{% endif %}</div>'; htmx.ajax('GET', '/competitive/cards', '#competitive-cards'); }"
                     class="px-2 py-1.5 text-xs bg-gray-200 hover:bg-red-100 hover:text-red-700 rounded">
               ❌
             </button>
           </div>
         </div>
-        {# Drift indicator — flag when the universe has changed #}
-        {% if drift and drift.delta != 0 %}
-          <div class="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-            ⚠ 자동 카테고리 풀 변화:
-            저장 시점 <b>{{ drift.saved_universe }}</b>개 →
-            현재 <b>{{ drift.current_universe }}</b>개
-            ({% if drift.delta > 0 %}+{{ drift.delta }}{% else %}{{ drift.delta }}{% endif %})
-            — 새로 추가된 카테고리는 <b>🔄 다시 분석</b>을 눌러야 매칭됩니다.
-          </div>
-        {% endif %}
       </div>
     {% else %}
-      {# Fresh analysis — offer to save. Save button POSTs the full
-         result JSON; on success the sidebar refreshes and the button
-         flips to "✓ 저장됨".
-
-         Quote-escaping: we can't drop {{ result|tojson }} straight into
-         an @click="..." handler — tojson emits literal `"` which would
-         close the surrounding HTML attribute and break the JS. Instead
-         we embed the payload in a hidden <script type="application/json">
-         tag (which has no quote-escaping concerns since browsers parse
-         it as opaque text), read it once at click time via
-         document.getElementById(...).textContent, and JSON.parse it. #}
+      {# Fresh analysis — save button #}
       <div class="border border-emerald-200 bg-emerald-50/40 rounded-md p-3 flex items-center gap-3"
            x-data="{ saved: false, saving: false }">
         <script id="competitive-save-payload" type="application/json">
@@ -122,13 +103,15 @@
             "factor": result.factor,
             "label": result.factor,
             "threshold": result.threshold,
-            "model_used": none,
-            "result": result,
+            "model_used": result.get("model"),
+            "input_csv": input_csv,
+            "result_rows": result.get("result_rows") or [],
           } | tojson }}
         </script>
         <span class="text-base">💾</span>
         <div class="flex-1 text-xs text-gray-700">
-          <b>이 분석을 카드로 저장</b>하면 다음에 LLM 호출 없이 같은 결과를 볼 수 있습니다.
+          <b>{% if lang == 'ko' %}이 분석을 카드로 저장{% else %}Save this analysis{% endif %}</b>
+          — {% if lang == 'ko' %}CSV + 결과가 함께 보존되어 다음에 LLM 호출 없이 같은 결과를 봅니다.{% else %}CSV + result both persisted; next view costs no Claude call.{% endif %}
         </div>
         <button type="button"
                 x-show="!saved"
@@ -147,371 +130,108 @@
                       htmx.ajax('GET', '/competitive/cards', '#competitive-cards');
                     } else {
                       const t = await r.text().catch(() => '');
-                      alert('카드 저장 실패 (HTTP ' + r.status + ')' + (t ? '\n' + t.slice(0, 300) : ''));
+                      alert('{% if lang == 'ko' %}카드 저장 실패{% else %}Save failed{% endif %} (HTTP ' + r.status + ')' + (t ? '\n' + t.slice(0,300) : ''));
                     }
                   })
-                  .catch(err => { saving = false; alert('카드 저장 실패: ' + err); });
+                  .catch(err => { saving = false; alert('{% if lang == 'ko' %}카드 저장 실패{% else %}Save failed{% endif %}: ' + err); });
                 "
                 class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded font-medium whitespace-nowrap">
-          <span x-show="!saving">💾 카드로 저장</span>
-          <span x-show="saving">저장 중…</span>
+          <span x-show="!saving">💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}</span>
+          <span x-show="saving">{% if lang == 'ko' %}저장 중…{% else %}saving…{% endif %}</span>
         </button>
         <span x-show="saved" x-cloak class="px-3 py-1.5 text-xs bg-emerald-700 text-white rounded font-semibold">
-          ✓ 저장됨
+          ✓ {% if lang == 'ko' %}저장됨{% else %}saved{% endif %}
         </span>
       </div>
     {% endif %}
 
-    <!-- Result header echo -->
-    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <span class="text-xs text-gray-500">분석 대상 요소</span>
+    {# ========== SUMMARY CHIP ROW ========== #}
+    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+      <span class="text-gray-500">{% if lang == 'ko' %}경쟁력 요소{% else %}factor{% endif %}</span>
       <span class="text-lg font-semibold text-gray-900">{{ result.factor }}</span>
       <span class="text-[11px] text-gray-500">
-        · 검색 카테고리 풀: {{ result.universe_size }}개
-        · 임계값 {{ '%.2f'|format(result.threshold) }}
+        · {% if lang == 'ko' %}임계값{% else %}threshold{% endif %} {{ '%.2f'|format(result.threshold) }}
+        {% if result._csv_name %} · 📎 {{ result._csv_name }}{% endif %}
+        · CSV {{ result.input_row_count }}{% if lang == 'ko' %}행{% else %} rows{% endif %}
+        · {% if lang == 'ko' %}강점{% else %}strengths{% endif %} {{ result.strength_input_count }}
+        · {% if lang == 'ko' %}매칭{% else %}matched{% endif %} <b class="text-blue-700">{{ result.result_rows|length }}</b>
       </span>
     </div>
 
-    {# ========== STRENGTH RANKING (always open) ========== #}
-    <div class="border border-green-200 rounded-lg bg-gradient-to-br from-green-50 to-emerald-50/40 shadow-sm">
-      <div class="px-4 py-3 border-b border-green-200/70 flex items-center gap-2">
-        <span class="text-xl">💪</span>
-        <span class="font-bold text-green-900">강점 보유 업체 랭킹</span>
-        <span class="text-[11px] text-green-700/80 ml-auto">
-          {{ result.strength_ranking|length }}개 업체 매칭
-        </span>
-      </div>
-
-      {% if not result.strength_ranking %}
-        <div class="px-4 py-6 text-sm text-gray-600">
-          이 요소를 명확한 강점으로 가진 업체가 없습니다.
-          더 일반적인 표현으로 다시 시도해보거나, 임계값을 낮춰 검색해보세요.
-        </div>
-      {% else %}
-        <ol class="divide-y divide-green-100">
-          {% for row in result.strength_ranking %}
-            {% set rank = loop.index %}
-            {% set medal = '🥇' if rank == 1 else ('🥈' if rank == 2 else ('🥉' if rank == 3 else '#' ~ rank)) %}
-            <li class="px-4 py-4">
-              {# Vendor header line #}
-              <div class="flex items-start gap-3">
-                <span class="text-lg shrink-0 w-8 text-center">{{ medal }}</span>
-                {% if row.vendor.icon_url %}
-                  <img src="{{ row.vendor.icon_url }}" alt=""
-                       class="w-8 h-8 rounded shrink-0 object-cover border border-gray-200"
-                       onerror="this.style.display='none'" />
-                {% endif %}
-                <div class="flex-1 min-w-0">
-                  <div class="font-semibold text-sm text-gray-900 truncate">
-                    {{ row.vendor.display }}
-                  </div>
-                  <div class="text-[11px] text-gray-500 flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
-                    {% for p in row.vendor.platforms %}
-                      <span class="px-1.5 py-0.5 rounded bg-gray-100">{{ p }}</span>
-                    {% endfor %}
-                    <span>리뷰 {{ '{:,}'.format(row.vendor.review_count or 0) }}개</span>
-                    {% if row.vendor.avg_rating %}
-                      <span>평균 {{ row.vendor.avg_rating }} ★</span>
-                    {% endif %}
-                  </div>
-                </div>
-                {# Vendor score badge + breakdown #}
-                <div class="text-right shrink-0">
-                  <div class="text-xl font-bold text-green-700 tabular-nums">
-                    {{ '%.2f'|format(row.score) }}
-                  </div>
-                  <div class="text-[10px] text-gray-500 tabular-nums">
-                    {{ '%.2f'|format(row.score_breakdown.relevance) }}
-                    × {{ '%.2f'|format(row.score_breakdown.pos_score) }}
-                  </div>
-                  <div class="text-[10px] text-gray-400 truncate max-w-[8rem]"
-                       title="{{ row.score_breakdown.category }}">
-                    {{ row.score_breakdown.category }}
-                  </div>
-                </div>
-              </div>
-
-              {# Per-match cards (positive band) #}
-              <ul class="mt-3 space-y-2">
-                {% for m in row.matches %}
-                  <li x-data="{ open: false }"
-                      class="bg-white rounded-md border border-green-100 p-3 hover:border-green-300 transition-colors">
-                    <div class="flex items-center gap-2">
-                      <span class="text-base">✅</span>
-                      <span class="flex-1 min-w-0 font-medium text-sm text-gray-900 truncate"
-                            title="{{ m.name }}">{{ m.name }}</span>
-                      <div class="text-right shrink-0">
-                        <div class="text-xs tabular-nums">
-                          <span class="text-gray-600">매칭</span>
-                          <span class="font-semibold text-blue-700">{{ (m.relevance * 100)|round(0, 'common')|int }}%</span>
-                          ·
-                          <span class="text-gray-600">긍정</span>
-                          <span class="font-semibold text-green-700">{{ (m.pos_pct * 100)|round(0, 'common')|int }}%</span>
-                          <span class="text-gray-500">({{ m.total }})</span>
-                        </div>
-                        <div class="text-[10px] text-gray-500 tabular-nums" title="매칭도 × Wilson 긍정 점수">
-                          = {{ '%.3f'|format(m.match_score) }}
-                        </div>
-                      </div>
-                    </div>
-                    {# Progress bar visualizing pos_pct #}
-                    <div class="mt-2 h-1.5 bg-green-100 rounded-full overflow-hidden">
-                      <div class="h-full bg-gradient-to-r from-green-400 to-emerald-500 rounded-full"
-                           style="width: {{ (m.pos_pct * 100)|round(1) }}%"></div>
-                    </div>
-                    {% if m.description %}
-                      <div class="text-[11px] text-gray-600 line-clamp-2 mt-1.5">{{ m.description }}</div>
-                    {% endif %}
-                    {% if m.small_sample %}
-                      <div class="mt-1.5">
-                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800">
-                          ⚠ 표본 적음 (n &lt; 30)
-                        </span>
-                      </div>
-                    {% endif %}
-                    {# Review samples toggle #}
-                    {% if m.samples %}
-                      <div class="mt-2">
-                        <button type="button" @click="open = !open"
-                                class="text-[11px] text-blue-700 hover:underline">
-                          <span x-show="!open">💬 리뷰 샘플 보기 ({{ m.samples|length }})</span>
-                          <span x-show="open">▲ 리뷰 샘플 숨기기</span>
-                        </button>
-                        <div x-show="open" x-collapse class="mt-2 space-y-2">
-                          {% for s in m.samples %}
-                            <div class="bg-green-50/60 border border-green-100 rounded p-2">
-                              <div class="flex items-center gap-2 text-[10px] text-gray-600 mb-1">
-                                {% if s.rating %}<span>{{ '★' * s.rating }}</span>{% endif %}
-                                <span class="px-1.5 py-0.5 rounded bg-green-100 text-green-800">
-                                  {{ s.sentiment }}
-                                </span>
-                                <span class="text-gray-400">#{{ s.id }}</span>
-                              </div>
-                              <div class="text-[12px] text-gray-800 whitespace-pre-line break-words">{{ s.text }}</div>
-                            </div>
-                          {% endfor %}
-                        </div>
-                      </div>
-                    {% endif %}
-                  </li>
-                {% endfor %}
-              </ul>
-            </li>
-          {% endfor %}
-        </ol>
-      {% endif %}
-    </div>
-
-    {# ========== WEAKNESS RANKING (collapsed by default) ========== #}
-    <div class="border border-rose-200 rounded-lg bg-gradient-to-br from-rose-50 to-red-50/40 shadow-sm">
-      <button type="button" @click="showWeak = !showWeak"
-              class="w-full px-4 py-3 border-b border-rose-200/70 flex items-center gap-2 text-left hover:bg-rose-100/40 transition-colors"
-              :class="showWeak ? 'border-b border-rose-200/70' : 'border-b-0'">
-        <span class="text-xl">🚩</span>
-        <span class="font-bold text-rose-900">약점 시그널 (같은 요소가 약점으로 잡힌 업체)</span>
-        <span class="text-[11px] text-rose-700/80 ml-auto">
-          {{ result.weakness_ranking|length }}개 업체
-          <span x-text="showWeak ? '▲' : '▼'" class="ml-1"></span>
-        </span>
-      </button>
-
-      <div x-show="showWeak" x-collapse>
-        {% if not result.weakness_ranking %}
-          <div class="px-4 py-6 text-sm text-gray-600">
-            이 요소를 약점으로 가진 업체가 없습니다.
-          </div>
-        {% else %}
-          <ol class="divide-y divide-rose-100">
-            {% for row in result.weakness_ranking %}
-              <li class="px-4 py-4">
-                <div class="flex items-start gap-3">
-                  <span class="text-lg shrink-0 w-8 text-center">{{ loop.index }}</span>
-                  {% if row.vendor.icon_url %}
-                    <img src="{{ row.vendor.icon_url }}" alt=""
-                         class="w-8 h-8 rounded shrink-0 object-cover border border-gray-200"
-                         onerror="this.style.display='none'" />
+    {# ========== RESULT TABLE ========== #}
+    {% if result.result_rows %}
+      <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-600">
+            <tr>
+              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}매칭{% else %}match{% endif %}</th>
+              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}업체{% else %}vendor{% endif %}</th>
+              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}강점 요소{% else %}strength category{% endif %}</th>
+              <th class="px-3 py-2 text-right">{% if lang == 'ko' %}긍정%{% else %}pos %{% endif %}</th>
+              <th class="px-3 py-2 text-right">n</th>
+              <th class="px-3 py-2 text-right">{% if lang == 'ko' %}Wilson{% else %}wilson{% endif %}</th>
+              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}세부 요인 (인과){% else %}detail reasons{% endif %}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {% for r in result.result_rows %}
+              <tr class="hover:bg-blue-50/30">
+                <td class="px-3 py-2 tabular-nums">
+                  <span class="inline-flex items-center gap-1">
+                    <span class="font-bold text-blue-700">{{ (r.relevance * 100)|round(0, 'common')|int }}%</span>
+                  </span>
+                </td>
+                <td class="px-3 py-2 font-medium text-gray-900 truncate max-w-[12rem]"
+                    title="{{ r.vendor }}">{{ r.vendor }}</td>
+                <td class="px-3 py-2 text-gray-800"
+                    title="{{ r.description or '' }}">
+                  💪 {{ r.category }}
+                  {% if r.small_sample %}
+                    <span class="ml-1 text-[9px] px-1 py-0 rounded-full bg-amber-100 text-amber-800 align-middle">
+                      {% if lang == 'ko' %}표본 적음{% else %}small n{% endif %}
+                    </span>
                   {% endif %}
-                  <div class="flex-1 min-w-0">
-                    <div class="font-semibold text-sm text-gray-900 truncate">{{ row.vendor.display }}</div>
-                    <div class="text-[11px] text-gray-500 flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
-                      {% for p in row.vendor.platforms %}
-                        <span class="px-1.5 py-0.5 rounded bg-gray-100">{{ p }}</span>
-                      {% endfor %}
-                      <span>리뷰 {{ '{:,}'.format(row.vendor.review_count or 0) }}개</span>
-                    </div>
-                  </div>
-                  <div class="text-right shrink-0">
-                    <div class="text-xl font-bold text-rose-700 tabular-nums">{{ '%.2f'|format(row.score) }}</div>
-                    <div class="text-[10px] text-gray-500 tabular-nums">
-                      {{ '%.2f'|format(row.score_breakdown.relevance) }}
-                      × {{ '%.2f'|format(row.score_breakdown.neg_score) }}
-                    </div>
-                    <div class="text-[10px] text-gray-400 truncate max-w-[8rem]"
-                         title="{{ row.score_breakdown.category }}">
-                      {{ row.score_breakdown.category }}
-                    </div>
-                  </div>
-                </div>
-
-                <ul class="mt-3 space-y-2">
-                  {% for m in row.matches %}
-                    <li x-data="{ open: false }"
-                        class="bg-white rounded-md border border-rose-100 p-3 hover:border-rose-300 transition-colors">
-                      <div class="flex items-center gap-2">
-                        <span class="text-base">⚠️</span>
-                        <span class="flex-1 min-w-0 font-medium text-sm text-gray-900 truncate"
-                              title="{{ m.name }}">{{ m.name }}</span>
-                        <div class="text-right shrink-0">
-                          <div class="text-xs tabular-nums">
-                            <span class="text-gray-600">매칭</span>
-                            <span class="font-semibold text-blue-700">{{ (m.relevance * 100)|round(0, 'common')|int }}%</span>
-                            ·
-                            <span class="text-gray-600">부정</span>
-                            <span class="font-semibold text-rose-700">{{ (m.neg_pct * 100)|round(0, 'common')|int }}%</span>
-                            <span class="text-gray-500">({{ m.total }})</span>
-                          </div>
-                          <div class="text-[10px] text-gray-500 tabular-nums" title="매칭도 × Wilson 부정 점수">
-                            = {{ '%.3f'|format(m.match_score) }}
-                          </div>
-                        </div>
-                      </div>
-                      <div class="mt-2 h-1.5 bg-rose-100 rounded-full overflow-hidden">
-                        <div class="h-full bg-gradient-to-r from-rose-400 to-red-500 rounded-full"
-                             style="width: {{ (m.neg_pct * 100)|round(1) }}%"></div>
-                      </div>
-                      {% if m.description %}
-                        <div class="text-[11px] text-gray-600 line-clamp-2 mt-1.5">{{ m.description }}</div>
-                      {% endif %}
-                      {% if m.small_sample %}
-                        <div class="mt-1.5">
-                          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800">
-                            ⚠ 표본 적음 (n &lt; 30)
-                          </span>
-                        </div>
-                      {% endif %}
-                      {% if m.samples %}
-                        <div class="mt-2">
-                          <button type="button" @click="open = !open"
-                                  class="text-[11px] text-rose-700 hover:underline">
-                            <span x-show="!open">💬 리뷰 샘플 보기 ({{ m.samples|length }})</span>
-                            <span x-show="open">▲ 리뷰 샘플 숨기기</span>
-                          </button>
-                          <div x-show="open" x-collapse class="mt-2 space-y-2">
-                            {% for s in m.samples %}
-                              <div class="bg-rose-50/60 border border-rose-100 rounded p-2">
-                                <div class="flex items-center gap-2 text-[10px] text-gray-600 mb-1">
-                                  {% if s.rating %}<span>{{ '★' * s.rating }}</span>{% endif %}
-                                  <span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">
-                                    {{ s.sentiment }}
-                                  </span>
-                                  <span class="text-gray-400">#{{ s.id }}</span>
-                                </div>
-                                <div class="text-[12px] text-gray-800 whitespace-pre-line break-words">{{ s.text }}</div>
-                              </div>
-                            {% endfor %}
-                          </div>
-                        </div>
-                      {% endif %}
-                    </li>
-                  {% endfor %}
-                </ul>
-              </li>
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums {% if r.pct < 30 %}text-gray-400{% else %}text-green-700 font-semibold{% endif %}">
+                  {{ '%.1f'|format(r.pct) }}%
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums text-gray-600">{{ '{:,}'.format(r.count) }}</td>
+                <td class="px-3 py-2 text-right tabular-nums text-gray-600">{{ '%.2f'|format(r.wilson_score) }}</td>
+                <td class="px-3 py-2 text-[11px] text-gray-700 max-w-md break-words">
+                  {% if r.reasons %}
+                    {{ r.reasons }}
+                  {% else %}
+                    <span class="text-gray-400 italic">
+                      {% if lang == 'ko' %}— (CSV 내보낼 때 "저장된 원인 분석 포함" 체크해야 채워짐){% else %}— (export with "include reasons" to populate){% endif %}
+                    </span>
+                  {% endif %}
+                </td>
+              </tr>
             {% endfor %}
-          </ol>
-        {% endif %}
+          </tbody>
+        </table>
       </div>
-    </div>
-
-    {# ========== PARTIAL MATCHES (collapsed by default) ==========
-       Vendors whose best category fell in [0.3, threshold). Lets the
-       user audit "why was vendor X not in the main ranking?" —
-       directly shows the LLM-assigned relevance so the dimension
-       mismatch (편의 vs 정확도 등) is visible. #}
-    {% set ps = result.get('partial_strength_matches', []) %}
-    {% set pw = result.get('partial_weakness_matches', []) %}
-    {% if ps or pw %}
-      <div class="border border-gray-200 rounded-lg bg-gray-50/40" x-data="{ show: false }">
-        <button type="button" @click="show = !show"
-                class="w-full px-4 py-3 flex items-center gap-2 text-left hover:bg-gray-100/60 transition-colors">
-          <span class="text-base">🔍</span>
-          <span class="font-semibold text-gray-800 text-sm">
-            부분 매칭 후보 (임계값 {{ '%.2f'|format(result.threshold) }} 미만, ≥ 0.30)
-          </span>
-          <span class="text-[11px] text-gray-500 ml-auto">
-            강점 {{ ps|length }} · 약점 {{ pw|length }}
-            <span x-text="show ? '▲' : '▼'" class="ml-1"></span>
-          </span>
-        </button>
-        <div x-show="show" x-collapse class="border-t border-gray-200 divide-y divide-gray-200">
-          {% if ps %}
-            <div class="px-4 py-3">
-              <div class="text-[11px] font-semibold text-green-800 mb-2">💪 강점 측 부분 매칭</div>
-              <ul class="space-y-1.5">
-                {% for row in ps %}
-                  <li class="flex items-center gap-2 text-xs">
-                    {% if row.vendor.icon_url %}
-                      <img src="{{ row.vendor.icon_url }}" alt=""
-                           class="w-5 h-5 rounded shrink-0 object-cover"
-                           onerror="this.style.display='none'" />
-                    {% endif %}
-                    <span class="font-medium text-gray-900 truncate" style="max-width:12rem"
-                          title="{{ row.vendor.display }}">{{ row.vendor.display }}</span>
-                    <span class="text-gray-400">·</span>
-                    <span class="text-gray-700 truncate flex-1 min-w-0"
-                          title="{{ row.top_partial.name }}">{{ row.top_partial.name }}</span>
-                    <span class="text-right shrink-0 tabular-nums">
-                      <span class="text-blue-700 font-semibold">매칭 {{ (row.top_partial.relevance * 100)|round(0, 'common')|int }}%</span>
-                      <span class="text-gray-500">·</span>
-                      <span class="text-green-700">긍정 {{ (row.top_partial.pos_pct * 100)|round(0, 'common')|int }}%</span>
-                      <span class="text-gray-500">({{ row.top_partial.total }})</span>
-                    </span>
-                  </li>
-                {% endfor %}
-              </ul>
-            </div>
-          {% endif %}
-          {% if pw %}
-            <div class="px-4 py-3">
-              <div class="text-[11px] font-semibold text-rose-800 mb-2">🚩 약점 측 부분 매칭</div>
-              <ul class="space-y-1.5">
-                {% for row in pw %}
-                  <li class="flex items-center gap-2 text-xs">
-                    {% if row.vendor.icon_url %}
-                      <img src="{{ row.vendor.icon_url }}" alt=""
-                           class="w-5 h-5 rounded shrink-0 object-cover"
-                           onerror="this.style.display='none'" />
-                    {% endif %}
-                    <span class="font-medium text-gray-900 truncate" style="max-width:12rem"
-                          title="{{ row.vendor.display }}">{{ row.vendor.display }}</span>
-                    <span class="text-gray-400">·</span>
-                    <span class="text-gray-700 truncate flex-1 min-w-0"
-                          title="{{ row.top_partial.name }}">{{ row.top_partial.name }}</span>
-                    <span class="text-right shrink-0 tabular-nums">
-                      <span class="text-blue-700 font-semibold">매칭 {{ (row.top_partial.relevance * 100)|round(0, 'common')|int }}%</span>
-                      <span class="text-gray-500">·</span>
-                      <span class="text-rose-700">부정 {{ (row.top_partial.neg_pct * 100)|round(0, 'common')|int }}%</span>
-                      <span class="text-gray-500">({{ row.top_partial.total }})</span>
-                    </span>
-                  </li>
-                {% endfor %}
-              </ul>
-            </div>
-          {% endif %}
-          <div class="px-4 py-2 text-[10px] text-gray-500 italic">
-            여기 표시된 항목은 LLM이 메인 랭킹 임계값(0.5) 아래로 점수화한 카테고리입니다.
-            대개 같은 토픽이라도 <b>차원이 다를 때</b>(편의↔정확도, 가격↔접근성 등)
-            점수가 낮아집니다. 검색어를 정확/편의/가격 등의 차원으로 더 구체화하면
-            매칭이 명확해집니다.
-          </div>
-        </div>
+    {% else %}
+      <div class="border border-gray-200 bg-gray-50 rounded-md p-6 text-center text-sm text-gray-600">
+        {% if lang == 'ko' %}
+          이 경쟁력 요소에 임계값({{ '%.2f'|format(result.threshold) }}) 이상으로 매칭되는 강점 row가 없습니다.<br>
+          <span class="text-xs text-gray-500">더 일반적인 표현으로 다시 시도하거나, 임계값을 낮춰서 다시 분석해보세요.</span>
+        {% else %}
+          No strength rows matched this factor at threshold {{ '%.2f'|format(result.threshold) }}.<br>
+          <span class="text-xs text-gray-500">Try a broader factor or lower the threshold.</span>
+        {% endif %}
       </div>
     {% endif %}
 
-    {# Bottom footnote #}
     <div class="text-[11px] text-gray-500 italic">
-      매칭도는 LLM이 카테고리 이름과 설명을 의미 기반으로 평가한 0–1 점수입니다.
-      Wilson 점수는 표본수를 반영한 긍정/부정 비율의 95% 신뢰구간 하한입니다.
-      LLM은 <code class="font-mono bg-gray-100 px-1 rounded">temperature=0</code>으로 호출되어 같은 입력은 같은 점수를 반환합니다.
+      {% if lang == 'ko' %}
+        매칭도는 LLM(Claude)이 카테고리 이름·설명을 의미 기반으로 평가한 0–1 점수입니다.
+        같은 요소로 다시 호출하면 같은 점수가 나옵니다 (temperature=0).
+        세부 요인은 CSV의 <code class="bg-gray-100 px-1 rounded">reasons</code> 열을 그대로 가져옵니다.
+      {% else %}
+        Relevance is LLM-judged 0–1 semantic match. Calls with the same input return the same scores (temperature=0).
+        Detail reasons are pulled verbatim from the CSV's <code class="bg-gray-100 px-1 rounded">reasons</code> column.
+      {% endif %}
     </div>
   </div>
 {% endif %}
