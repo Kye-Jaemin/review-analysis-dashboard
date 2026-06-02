@@ -65,7 +65,9 @@
                       class="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded">{% if lang == 'ko' %}취소{% else %}cancel{% endif %}</button>
             </div>
             <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-              <span>{% if lang == 'ko' %}원본 요소{% else %}factor{% endif %}: <span class="font-mono">{{ saved_card.factor }}</span></span>
+              <span>{% if lang == 'ko' %}요소{% else %}factors{% endif %} ({{ saved_card.factors|length }}):
+                {% for f in saved_card.factors %}<span class="font-mono">{{ f }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+              </span>
               <span>{% if lang == 'ko' %}임계값{% else %}threshold{% endif %} {{ '%.2f'|format(saved_card.threshold) }}</span>
               {% if saved_card.updated_at %}
                 <span>{% if lang == 'ko' %}마지막 분석{% else %}last analyzed{% endif %}: <span class="font-mono">{{ saved_card.updated_at[:16].replace('T',' ') }}</span></span>
@@ -100,12 +102,12 @@
            x-data="{ saved: false, saving: false }">
         <script id="competitive-save-payload" type="application/json">
           {{ {
-            "factor": result.factor,
-            "label": result.factor,
+            "factors": result.get("factors") or [],
+            "label": (result.get("factors") or [""])[0],
             "threshold": result.threshold,
             "model_used": result.get("model"),
             "input_csv": input_csv,
-            "result_rows": result.get("result_rows") or [],
+            "result_payload": result,
           } | tojson }}
         </script>
         <span class="text-base">💾</span>
@@ -147,78 +149,99 @@
 
     {# ========== SUMMARY CHIP ROW ========== #}
     <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-      <span class="text-gray-500">{% if lang == 'ko' %}경쟁력 요소{% else %}factor{% endif %}</span>
-      <span class="text-lg font-semibold text-gray-900">{{ result.factor }}</span>
+      <span class="text-gray-500">{% if lang == 'ko' %}경쟁력 요소{% else %}factors{% endif %}</span>
+      {% for f in result.get('factors') or [] %}
+        <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-medium border border-blue-200">🎯 {{ f }}</span>
+      {% endfor %}
       <span class="text-[11px] text-gray-500">
         · {% if lang == 'ko' %}임계값{% else %}threshold{% endif %} {{ '%.2f'|format(result.threshold) }}
         {% if result._csv_name %} · 📎 {{ result._csv_name }}{% endif %}
         · CSV {{ result.input_row_count }}{% if lang == 'ko' %}행{% else %} rows{% endif %}
         · {% if lang == 'ko' %}강점{% else %}strengths{% endif %} {{ result.strength_input_count }}
-        · {% if lang == 'ko' %}매칭{% else %}matched{% endif %} <b class="text-blue-700">{{ result.result_rows|length }}</b>
+        · {% if lang == 'ko' %}매칭 합계{% else %}total matched{% endif %} <b class="text-blue-700">{{ result.total_matched_rows }}</b>
       </span>
     </div>
 
-    {# ========== RESULT TABLE ========== #}
-    {% if result.result_rows %}
-      <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
-        <table class="w-full text-xs">
-          <thead class="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-600">
-            <tr>
-              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}매칭{% else %}match{% endif %}</th>
-              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}업체{% else %}vendor{% endif %}</th>
-              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}강점 요소{% else %}strength category{% endif %}</th>
-              <th class="px-3 py-2 text-right">{% if lang == 'ko' %}긍정%{% else %}pos %{% endif %}</th>
-              <th class="px-3 py-2 text-right">n</th>
-              <th class="px-3 py-2 text-right">{% if lang == 'ko' %}Wilson{% else %}wilson{% endif %}</th>
-              <th class="px-3 py-2 text-left">{% if lang == 'ko' %}세부 요인 (인과){% else %}detail reasons{% endif %}</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-100">
-            {% for r in result.result_rows %}
-              <tr class="hover:bg-blue-50/30">
-                <td class="px-3 py-2 tabular-nums">
-                  <span class="inline-flex items-center gap-1">
-                    <span class="font-bold text-blue-700">{{ (r.relevance * 100)|round(0, 'common')|int }}%</span>
-                  </span>
-                </td>
-                <td class="px-3 py-2 font-medium text-gray-900 truncate max-w-[12rem]"
-                    title="{{ r.vendor }}">{{ r.vendor }}</td>
-                <td class="px-3 py-2 text-gray-800"
-                    title="{{ r.description or '' }}">
-                  💪 {{ r.category }}
-                  {% if r.small_sample %}
-                    <span class="ml-1 text-[9px] px-1 py-0 rounded-full bg-amber-100 text-amber-800 align-middle">
-                      {% if lang == 'ko' %}표본 적음{% else %}small n{% endif %}
-                    </span>
-                  {% endif %}
-                </td>
-                <td class="px-3 py-2 text-right tabular-nums {% if r.pct < 30 %}text-gray-400{% else %}text-green-700 font-semibold{% endif %}">
-                  {{ '%.1f'|format(r.pct) }}%
-                </td>
-                <td class="px-3 py-2 text-right tabular-nums text-gray-600">{{ '{:,}'.format(r.count) }}</td>
-                <td class="px-3 py-2 text-right tabular-nums text-gray-600">{{ '%.2f'|format(r.wilson_score) }}</td>
-                <td class="px-3 py-2 text-[11px] text-gray-700 max-w-md break-words">
-                  {% if r.reasons %}
-                    {{ r.reasons }}
-                  {% else %}
-                    <span class="text-gray-400 italic">
-                      {% if lang == 'ko' %}— (CSV 내보낼 때 "저장된 원인 분석 포함" 체크해야 채워짐){% else %}— (export with "include reasons" to populate){% endif %}
-                    </span>
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+    {# ========== PER-FACTOR GROUPS ========== #}
+    {% set groups = result.get('groups') or [] %}
+    {% if groups and result.total_matched_rows > 0 %}
+      {% for g in groups %}
+        <section class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+          <header class="px-3 py-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
+            <span class="text-base">🎯</span>
+            <span class="font-semibold text-sm text-blue-900">{{ g.factor }}</span>
+            <span class="ml-auto text-[11px] text-blue-700/80 tabular-nums">
+              {% if lang == 'ko' %}매칭{% else %}matched{% endif %}
+              <b>{{ g.matched_count }}</b>
+            </span>
+          </header>
+          {% if g.result_rows %}
+            <table class="w-full text-xs">
+              <thead class="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-600">
+                <tr>
+                  <th class="px-3 py-2 text-left">{% if lang == 'ko' %}매칭{% else %}match{% endif %}</th>
+                  <th class="px-3 py-2 text-left">{% if lang == 'ko' %}업체{% else %}vendor{% endif %}</th>
+                  <th class="px-3 py-2 text-left">{% if lang == 'ko' %}강점 요소{% else %}strength category{% endif %}</th>
+                  <th class="px-3 py-2 text-right">{% if lang == 'ko' %}긍정%{% else %}pos %{% endif %}</th>
+                  <th class="px-3 py-2 text-right">n</th>
+                  <th class="px-3 py-2 text-right">{% if lang == 'ko' %}Wilson{% else %}wilson{% endif %}</th>
+                  <th class="px-3 py-2 text-left">{% if lang == 'ko' %}세부 요인 (인과){% else %}detail reasons{% endif %}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                {% for r in g.result_rows %}
+                  <tr class="hover:bg-blue-50/30">
+                    <td class="px-3 py-2 tabular-nums">
+                      <span class="font-bold text-blue-700">{{ (r.relevance * 100)|round(0, 'common')|int }}%</span>
+                    </td>
+                    <td class="px-3 py-2 font-medium text-gray-900 truncate max-w-[12rem]"
+                        title="{{ r.vendor }}">{{ r.vendor }}</td>
+                    <td class="px-3 py-2 text-gray-800"
+                        title="{{ r.description or '' }}">
+                      💪 {{ r.category }}
+                      {% if r.small_sample %}
+                        <span class="ml-1 text-[9px] px-1 py-0 rounded-full bg-amber-100 text-amber-800 align-middle">
+                          {% if lang == 'ko' %}표본 적음{% else %}small n{% endif %}
+                        </span>
+                      {% endif %}
+                    </td>
+                    <td class="px-3 py-2 text-right tabular-nums {% if r.pct < 30 %}text-gray-500{% else %}text-green-700 font-semibold{% endif %}">
+                      {{ '%.1f'|format(r.pct) }}%
+                    </td>
+                    <td class="px-3 py-2 text-right tabular-nums text-gray-600">{{ '{:,}'.format(r.count) }}</td>
+                    <td class="px-3 py-2 text-right tabular-nums text-gray-600">{{ '%.2f'|format(r.wilson_score) }}</td>
+                    <td class="px-3 py-2 text-[11px] text-gray-700 max-w-md break-words">
+                      {% if r.reasons %}
+                        {{ r.reasons }}
+                      {% else %}
+                        <span class="text-gray-400 italic">
+                          {% if lang == 'ko' %}—{% else %}—{% endif %}
+                        </span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <div class="p-4 text-xs text-gray-500 italic">
+              {% if lang == 'ko' %}
+                이 요소에 임계값 {{ '%.2f'|format(result.threshold) }} 이상으로 매칭되는 강점이 없습니다.
+              {% else %}
+                No strengths matched at threshold {{ '%.2f'|format(result.threshold) }}.
+              {% endif %}
+            </div>
+          {% endif %}
+        </section>
+      {% endfor %}
     {% else %}
       <div class="border border-gray-200 bg-gray-50 rounded-md p-6 text-center text-sm text-gray-600">
         {% if lang == 'ko' %}
-          이 경쟁력 요소에 임계값({{ '%.2f'|format(result.threshold) }}) 이상으로 매칭되는 강점 row가 없습니다.<br>
+          입력하신 요소들에 임계값 {{ '%.2f'|format(result.threshold) }} 이상으로 매칭되는 강점이 없습니다.<br>
           <span class="text-xs text-gray-500">더 일반적인 표현으로 다시 시도하거나, 임계값을 낮춰서 다시 분석해보세요.</span>
         {% else %}
-          No strength rows matched this factor at threshold {{ '%.2f'|format(result.threshold) }}.<br>
-          <span class="text-xs text-gray-500">Try a broader factor or lower the threshold.</span>
+          No strengths matched any factor at threshold {{ '%.2f'|format(result.threshold) }}.<br>
+          <span class="text-xs text-gray-500">Try broader factors or lower the threshold.</span>
         {% endif %}
       </div>
     {% endif %}

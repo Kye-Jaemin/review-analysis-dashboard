@@ -79,22 +79,34 @@
                  class="hidden" onchange="onCsvSelected(this)" required>
         </div>
 
-        {# Factor + threshold #}
+        {# Factor chips + threshold #}
         <div>
-          <label for="factor-input" class="block text-sm font-semibold text-gray-800 mb-2">
-            2. {% if lang == 'ko' %}경쟁력 요소{% else %}Competitive factor{% endif %}
+          <label for="factor-typeahead" class="block text-sm font-semibold text-gray-800 mb-2">
+            2. {% if lang == 'ko' %}경쟁력 요소 (여러 개 입력 가능, 최대 10개){% else %}Competitive factors (multiple, up to 10){% endif %}
           </label>
-          <div class="flex flex-col sm:flex-row gap-2">
-            <input id="factor-input"
-                   name="factor"
+          <div id="factor-chips-zone"
+               class="border border-gray-300 rounded-md px-2 py-1.5 flex flex-wrap items-center gap-1.5 min-h-[42px] focus-within:ring-2 focus-within:ring-blue-400 cursor-text"
+               onclick="document.getElementById('factor-typeahead').focus()">
+            {# Existing chips inserted by JS into this same flex row #}
+            <input id="factor-typeahead"
                    type="text"
-                   required
-                   minlength="1"
                    maxlength="200"
                    autocomplete="off"
-                   placeholder="{% if lang == 'ko' %}예) 음식 Vision AI 정확도{% else %}e.g. Food Vision AI accuracy{% endif %}"
-                   class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-            <label class="flex items-center gap-1.5 text-xs text-gray-600">
+                   placeholder="{% if lang == 'ko' %}요소 입력 후 Enter (예: 음식 Vision AI 정확도){% else %}Type a factor, press Enter{% endif %}"
+                   class="flex-1 min-w-[180px] border-0 outline-none text-sm py-1" />
+          </div>
+          {# Hidden form field — JSON-encoded array of factors, written by JS on every chip change. #}
+          <input type="hidden" name="factors" id="factors-hidden" value="[]" />
+
+          <div class="flex items-center justify-between gap-2 mt-2">
+            <div class="text-[11px] text-gray-500">
+              {% if lang == 'ko' %}
+                Enter 또는 쉼표(,)로 칩 추가 · ×로 제거 · 같은 요소 중복 제거됨
+              {% else %}
+                Enter or comma adds a chip · click × to remove · duplicates ignored
+              {% endif %}
+            </div>
+            <label class="flex items-center gap-1.5 text-xs text-gray-600 shrink-0">
               {% if lang == 'ko' %}임계값{% else %}threshold{% endif %}
               <input id="threshold-input" name="threshold" type="number"
                      min="0.3" max="0.9" step="0.05" value="{{ default_threshold }}"
@@ -104,15 +116,6 @@
                     class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium whitespace-nowrap">
               {% if lang == 'ko' %}분석{% else %}Analyze{% endif %}
             </button>
-          </div>
-          <div class="text-[11px] text-gray-500 mt-1.5">
-            {% if lang == 'ko' %}
-              매칭도가 임계값 미만인 row는 결과에서 제외됩니다. 기본 0.5.
-              검색어를 정확/편의/가격 등의 차원으로 구체화하면 매칭이 명확해집니다.
-            {% else %}
-              Rows whose relevance is below the threshold are excluded. Default 0.5.
-              Sharper factor wording (accuracy / convenience / price etc.) gives cleaner matches.
-            {% endif %}
           </div>
         </div>
       </form>
@@ -181,6 +184,84 @@ function clearCsvFile() {
       const inp = document.getElementById('csv-file-input');
       inp.files = files;
       onCsvSelected(inp);
+    }
+  });
+})();
+
+// ============================================================
+// Factor chips
+// ============================================================
+const MAX_FACTORS = 10;
+let _factors = [];
+
+function _serializeFactors() {
+  document.getElementById('factors-hidden').value = JSON.stringify(_factors);
+}
+function _renderChips() {
+  const zone = document.getElementById('factor-chips-zone');
+  // Remove all existing chip nodes; the input is kept (it's the
+  // last child, identified by id).
+  zone.querySelectorAll('.factor-chip').forEach(n => n.remove());
+  const input = document.getElementById('factor-typeahead');
+  _factors.forEach((f, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'factor-chip inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-medium border border-blue-200';
+    chip.innerHTML = '🎯 <span></span><button type="button" class="hover:text-red-600 ml-0.5 text-sm" aria-label="remove">×</button>';
+    chip.querySelector('span').textContent = f;
+    chip.querySelector('button').onclick = (ev) => {
+      ev.stopPropagation();
+      removeFactor(i);
+    };
+    zone.insertBefore(chip, input);
+  });
+  _serializeFactors();
+}
+function addFactor(text) {
+  const v = (text || '').trim();
+  if (!v) return;
+  if (_factors.length >= MAX_FACTORS) {
+    alert('{% if lang == "ko" %}최대 ' + MAX_FACTORS + '개까지 입력 가능합니다.{% else %}Up to ' + MAX_FACTORS + ' factors.{% endif %}');
+    return;
+  }
+  const lower = v.toLowerCase();
+  if (_factors.some(f => f.toLowerCase() === lower)) return;  // dedupe
+  _factors.push(v.slice(0, 200));
+  _renderChips();
+}
+function removeFactor(idx) {
+  _factors.splice(idx, 1);
+  _renderChips();
+}
+
+(function() {
+  const inp = document.getElementById('factor-typeahead');
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addFactor(inp.value);
+      inp.value = '';
+    } else if (e.key === 'Backspace' && !inp.value && _factors.length) {
+      removeFactor(_factors.length - 1);
+    }
+  });
+  inp.addEventListener('blur', () => {
+    // Convert leftover typed text into a chip on focus loss so the
+    // user can't accidentally submit a partial entry as nothing.
+    if (inp.value.trim()) {
+      addFactor(inp.value);
+      inp.value = '';
+    }
+  });
+  // Guard form submit — also flush any pending typed text + require
+  // at least one chip.
+  document.getElementById('competitive-form').addEventListener('submit', (e) => {
+    if (inp.value.trim()) {
+      addFactor(inp.value);
+      inp.value = '';
+    }
+    if (_factors.length === 0) {
+      e.preventDefault();
+      alert('{% if lang == "ko" %}최소 1개 경쟁력 요소를 입력해주세요.{% else %}Enter at least one factor.{% endif %}');
     }
   });
 })();

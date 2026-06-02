@@ -43,12 +43,12 @@ router = APIRouter()
 
 
 class SaveCardBody(BaseModel):
-    factor: str = Field(..., min_length=1, max_length=200)
+    factors: list[str] = Field(..., min_length=1, max_length=10)
     label: Optional[str] = Field(None, max_length=200)
     threshold: float = Field(DEFAULT_THRESHOLD, ge=0.0, le=1.0)
     model_used: Optional[str] = Field(None, max_length=100)
     input_csv: list[dict]
-    result_rows: list[dict]
+    result_payload: dict
 
 
 class PatchCardBody(BaseModel):
@@ -84,24 +84,52 @@ def _parse_uploaded_csv(content: bytes) -> list[dict]:
     return rows
 
 
+def _parse_factors_form(raw: str | list[str]) -> list[str]:
+    """Accept either a JSON-encoded array, a newline-/comma-separated
+    string, or already-parsed list. The page POSTs JSON; smoke tests
+    sometimes POST plain strings. Either way → list of trimmed factors."""
+    if isinstance(raw, list):
+        items = [str(x) for x in raw]
+    elif isinstance(raw, str):
+        raw = raw.strip()
+        if not raw:
+            items = []
+        elif raw.startswith("["):
+            import json as _json
+            try:
+                parsed = _json.loads(raw)
+                items = [str(x) for x in (parsed if isinstance(parsed, list) else [])]
+            except Exception:
+                items = [raw]
+        else:
+            # Split on newlines, then commas. Whitespace stripped per item.
+            chunks: list[str] = []
+            for line in raw.splitlines():
+                chunks.extend(p for p in line.split(",") if p.strip())
+            items = chunks or [raw]
+    else:
+        items = []
+    return [s.strip() for s in items if s and s.strip()]
+
+
 @router.post("/competitive/analyze-csv")
 async def competitive_analyze_csv(
     request: Request,
     file: UploadFile = File(...),
-    factor: str = Form(...),
+    factors: str = Form(...),
     threshold: float = Form(DEFAULT_THRESHOLD),
     model: Optional[str] = Form(None),
     session: AsyncSession = Depends(get_session),
 ):
-    """Multipart endpoint: takes the CSV file + factor + threshold, runs
-    one Claude call to score strength categories, returns the HTML
-    partial with the result table."""
-    factor = (factor or "").strip()
-    if not factor:
+    """Multipart endpoint: takes the CSV file + factors (JSON array or
+    newline/comma-separated) + threshold, runs N parallel Claude calls
+    to score strength categories per factor, returns the HTML partial."""
+    factor_list = _parse_factors_form(factors)
+    if not factor_list:
         return render(
             request,
             "_competitive_results.html",
-            error="경쟁력 요소를 입력해주세요.",
+            error="최소 1개 경쟁력 요소를 입력해주세요.",
             result=None,
             saved_card=None,
             csv_name=None,
@@ -123,7 +151,7 @@ async def competitive_analyze_csv(
 
     try:
         result = await analyze_csv(
-            factor=factor,
+            factors=factor_list,
             rows=rows,
             threshold=threshold,
             model=model,
@@ -147,16 +175,9 @@ async def competitive_analyze_csv(
             csv_name=file.filename or "",
         )
 
-    # Attach the CSV name so the partial can show "vendor_analysis.csv (50행)"
-    # AND embed the parsed input rows in a hidden script tag so the save
-    # button can POST them back without re-uploading.
     result["_csv_name"] = file.filename or "vendor_analysis.csv"
-    # Stash the cleaned rows the LLM actually saw (post-normalization)
-    # so saving from the page records exactly what was analyzed.
     cleaned_rows: list[dict] = []
     for r in rows or []:
-        # Replicate service-layer normalization shape (we just stash
-        # what we got — service will re-normalize on reanalyze).
         if isinstance(r, dict):
             cleaned_rows.append({k: v for k, v in r.items()})
     return render(
@@ -199,10 +220,10 @@ async def competitive_card_save(
     try:
         await save_card(
             session,
-            factor=body.factor,
+            factors=body.factors,
             label=body.label,
             input_csv=body.input_csv,
-            result_rows=body.result_rows,
+            result_payload=body.result_payload,
             threshold=body.threshold,
             model_used=body.model_used,
         )
@@ -215,6 +236,46 @@ async def competitive_card_save(
         cards=cards,
         include_hidden=False,
     )
+
+
+def _build_load_result(card) -> dict:
+    """Reconstitute the analyze_csv()-shaped dict from a saved card."""
+    # card.result_rows in the new schema is the full analyze_csv() dict.
+    # If it's a legacy bare list, wrap into a single group.
+    from app.services.competitive import _card_factors as _cf
+    factors_list = _cf(card)
+    payload = card.result_rows
+    if isinstance(payload, dict) and "groups" in payload:
+        groups = payload.get("groups") or []
+        total = int(payload.get("total_matched_rows") or sum(
+            len(g.get("result_rows") or []) for g in groups
+        ))
+    elif isinstance(payload, list):
+        groups = [{
+            "factor": factors_list[0] if factors_list else card.factor,
+            "result_rows": payload,
+            "matched_count": len(payload),
+        }]
+        total = len(payload)
+    else:
+        groups = [
+            {"factor": f, "result_rows": [], "matched_count": 0}
+            for f in factors_list
+        ]
+        total = 0
+    return {
+        "factors": factors_list,
+        "threshold": card.threshold,
+        "input_row_count": len(card.input_csv or []),
+        "strength_input_count": sum(
+            1 for r in (card.input_csv or [])
+            if (r.get("type") or "").strip().lower() == "strength"
+        ),
+        "groups": groups,
+        "total_matched_rows": total,
+        "model": card.model_used,
+        "_csv_name": "(저장된 CSV)",
+    }
 
 
 @router.get("/competitive/cards/{card_id}/load")
@@ -233,27 +294,17 @@ async def competitive_card_load(
             saved_card=None,
             csv_name=None,
         )
-    result = {
-        "factor": card.factor,
-        "threshold": card.threshold,
-        "input_row_count": len(card.input_csv or []),
-        "strength_input_count": sum(
-            1 for r in (card.input_csv or [])
-            if (r.get("type") or "").strip().lower() == "strength"
-        ),
-        "result_rows": card.result_rows or [],
-        "model": card.model_used,
-        "_csv_name": "(저장된 CSV)",
-    }
+    from app.services.competitive import _card_factors as _cf
     return render(
         request,
         "_competitive_results.html",
-        result=result,
+        result=_build_load_result(card),
         input_csv=card.input_csv or [],
         saved_card={
             "id": card.id,
             "label": card.label,
             "factor": card.factor,
+            "factors": _cf(card),
             "threshold": card.threshold,
             "model_used": card.model_used,
             "created_at": card.created_at.isoformat() if card.created_at else None,
@@ -291,27 +342,17 @@ async def competitive_card_reanalyze(
             saved_card=None,
             csv_name=None,
         )
-    result = {
-        "factor": card.factor,
-        "threshold": card.threshold,
-        "input_row_count": len(card.input_csv or []),
-        "strength_input_count": sum(
-            1 for r in (card.input_csv or [])
-            if (r.get("type") or "").strip().lower() == "strength"
-        ),
-        "result_rows": card.result_rows or [],
-        "model": card.model_used,
-        "_csv_name": "(저장된 CSV)",
-    }
+    from app.services.competitive import _card_factors as _cf
     return render(
         request,
         "_competitive_results.html",
-        result=result,
+        result=_build_load_result(card),
         input_csv=card.input_csv or [],
         saved_card={
             "id": card.id,
             "label": card.label,
             "factor": card.factor,
+            "factors": _cf(card),
             "threshold": card.threshold,
             "model_used": card.model_used,
             "created_at": card.created_at.isoformat() if card.created_at else None,

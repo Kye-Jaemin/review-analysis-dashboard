@@ -532,10 +532,26 @@ async def list_saved_cards(
     out: list[dict] = []
     for c in rows:
         input_csv = c.input_csv or []
-        result_rows = c.result_rows or []
+        result_payload = c.result_rows or {}
+        # Total matched = sum of per-group counts. Tolerate both old
+        # shape (bare list) and new (dict with groups).
+        if isinstance(result_payload, dict):
+            total_matched = int(result_payload.get("total_matched_rows") or 0)
+            if not total_matched and "groups" in result_payload:
+                total_matched = sum(
+                    len(g.get("result_rows") or [])
+                    for g in (result_payload.get("groups") or [])
+                )
+        elif isinstance(result_payload, list):
+            total_matched = len(result_payload)
+        else:
+            total_matched = 0
+        factors_list = _card_factors(c)
         out.append({
             "id": c.id,
             "factor": c.factor,
+            "factors": factors_list,
+            "factor_count": len(factors_list),
             "label": c.label,
             "threshold": c.threshold,
             "model_used": c.model_used,
@@ -543,10 +559,8 @@ async def list_saved_cards(
             "display_order": c.display_order,
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-            # Pre-computed counts so the sidebar can render "N행 → M매칭"
-            # pills without parsing the full payloads in the template.
             "input_row_count": len(input_csv),
-            "result_row_count": len(result_rows),
+            "result_row_count": total_matched,
         })
     return out
 
@@ -560,24 +574,37 @@ async def get_saved_card(
 async def save_card(
     session: AsyncSession,
     *,
-    factor: str,
+    factors: list[str],
     label: Optional[str],
     input_csv: list[dict],
-    result_rows: list[dict],
+    result_payload: dict,
     threshold: float,
     model_used: Optional[str],
 ) -> CompetitiveFactorCard:
-    """Persist a fresh CSV-driven analysis as a new card.
+    """Persist a multi-factor CSV-driven analysis as a new card.
 
-    Stores the raw CSV row set (`input_csv`) AND the relevance-filtered
-    rows (`result_rows`) so loading the card never needs the LLM and
-    re-analyzing re-uses the exact same input set.
+    `factors` is the full list; `result_payload` is the analyze_csv()
+    dict (with `groups` etc.) — saved as-is in result_rows so loads
+    can render without recomputing anything.
     """
-    factor = (factor or "").strip()
-    if not factor:
-        raise ValueError("factor is required")
-    if not isinstance(input_csv, list) or not isinstance(result_rows, list):
-        raise ValueError("input_csv and result_rows must be lists")
+    if not isinstance(factors, list) or not factors:
+        raise ValueError("at least one factor is required")
+    if not isinstance(input_csv, list) or not isinstance(result_payload, dict):
+        raise ValueError("input_csv must be a list and result_payload a dict")
+    # Drop empties + dedupe, mirror analyze_csv normalization.
+    cleaned_factors: list[str] = []
+    seen: set[str] = set()
+    for f in factors:
+        s = (str(f) if f is not None else "").strip()
+        if not s:
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned_factors.append(s[:200])
+    if not cleaned_factors:
+        raise ValueError("at least one non-empty factor is required")
 
     max_order = (
         await session.execute(
@@ -587,16 +614,17 @@ async def save_card(
         )
     ).scalar_one_or_none() or 0
 
+    primary_factor = cleaned_factors[0]
     card = CompetitiveFactorCard(
-        factor=factor[:200],
-        label=(label or factor)[:200],
+        factor=primary_factor[:200],
+        factors=cleaned_factors,
+        label=(label or primary_factor)[:200],
         threshold=float(threshold),
         model_used=(model_used or "")[:100] or None,
         input_csv=input_csv,
-        result_rows=result_rows,
-        # Legacy columns intentionally written with dummy values — kept
-        # in the schema (nullable) so the table didn't need to be
-        # rebuilt for the migration.
+        # result_payload contains `groups`, `total_matched_rows`, etc.
+        # Stored verbatim under result_rows so the load path is a no-op.
+        result_rows=result_payload,
         universe_size=0,
         result={},
         hidden=False,
@@ -606,6 +634,16 @@ async def save_card(
     await session.commit()
     await session.refresh(card)
     return card
+
+
+def _card_factors(card: CompetitiveFactorCard) -> list[str]:
+    """Read a card's factor list, tolerating the legacy single-factor
+    shape (no `factors` column populated)."""
+    if card.factors:
+        return [str(f) for f in card.factors if str(f).strip()]
+    if card.factor:
+        return [card.factor]
+    return []
 
 
 async def update_card_label(
@@ -650,22 +688,22 @@ async def reanalyze_card(
     *,
     model: Optional[str] = None,
 ) -> Optional[CompetitiveFactorCard]:
-    """Re-run analyze_csv() using the card's saved input_csv + factor +
+    """Re-run analyze_csv() using the card's saved input_csv + factors +
     threshold; overwrite result_rows + bump updated_at."""
     card = await session.get(CompetitiveFactorCard, card_id)
     if not card:
         return None
     input_csv = card.input_csv or []
     if not input_csv:
-        # Legacy card without a saved CSV — nothing to re-analyze.
         return card
     new = await analyze_csv(
-        factor=card.factor,
+        factors=_card_factors(card),
         rows=input_csv,
         threshold=card.threshold,
         model=model,
     )
-    card.result_rows = new.get("result_rows") or []
+    card.result_rows = new
+    card.factors = new.get("factors")
     if model:
         card.model_used = model[:100]
     card.updated_at = datetime.utcnow()
@@ -775,71 +813,119 @@ def _normalize_csv_row(raw: dict) -> Optional[dict]:
     }
 
 
+# Hard cap on the number of factors a single analysis can score
+# against. Each factor is a separate Claude call (batched) so 10 is
+# already 10× the cost of a single-factor analysis. Beyond that the
+# UI also becomes hard to scan.
+MAX_FACTORS = 10
+
+
+async def _score_factors_parallel(
+    factors: list[str],
+    items: list[dict],
+    model: str,
+) -> dict[str, dict[str, float]]:
+    """Score each factor against the same category universe in parallel.
+
+    Returns {factor: {category_name_lower: relevance}}. Each factor
+    becomes one (or more, when len(items) > LLM_BATCH_SIZE) Claude
+    completion; asyncio.gather runs them concurrently so total wall-
+    clock ≈ slowest single factor instead of sum.
+    """
+    import asyncio
+
+    async def _one(factor: str) -> dict[str, float]:
+        scores: dict[str, float] = {}
+        for i in range(0, len(items), LLM_BATCH_SIZE):
+            batch = items[i : i + LLM_BATCH_SIZE]
+            partial = await _score_categories(factor, batch, model)
+            scores.update(partial)
+        return scores
+
+    results = await asyncio.gather(*(_one(f) for f in factors))
+    return dict(zip(factors, results))
+
+
 async def analyze_csv(
     *,
-    factor: str,
+    factors: list[str],
     rows: list[dict],
     threshold: float = DEFAULT_THRESHOLD,
     model: Optional[str] = None,
 ) -> dict:
-    """Score a user-uploaded CSV (/vendors export shape) against a
-    competitive factor.
+    """Score a CSV against MULTIPLE competitive factors and group the
+    matched rows under each factor.
 
     Pipeline:
-      1. Coerce/validate every row. Drop the obvious junk.
-      2. Filter to type='strength' — weakness rows are intentionally
-         out of scope for this analysis (user-level decision).
-      3. Build a distinct (category, description) universe so each
-         unique category is scored only once even when several
-         vendors share it.
-      4. ONE LLM call (re-uses _score_categories) returns
-         {name.lower(): relevance ∈ [0,1]} for every category.
-      5. Attach the relevance back onto each strength row, compute
-         match_score = relevance × wilson_score, keep rows whose
-         relevance ≥ threshold, sort relevance ↓ then pct ↓.
+      1. Normalize / dedup input factors (strip, max MAX_FACTORS).
+      2. Coerce CSV rows + filter to type='strength'.
+      3. Build the distinct category universe.
+      4. Parallel LLM calls (one per factor, batched within).
+      5. Per factor, filter rows ≥ threshold and sort relevance ↓
+         then pct ↓. A row that matches N factors appears N times
+         (once per group) — that's the user's intent: "classify into
+         each competitive factor".
 
     Returns:
       {
-        "factor": str,
+        "factors": [str, ...],
         "threshold": float,
         "input_row_count": int,
         "strength_input_count": int,
-        "result_rows": [...],
+        "groups": [
+          {"factor": str, "result_rows": [...], "matched_count": int}, ...
+        ],
+        "total_matched_rows": int,         # sum across groups (can double-count)
         "universe_size": int,
         "model": str,
       }
     """
-    factor = (factor or "").strip()
-    if not factor:
-        raise ValueError("factor is required")
+    # 1. Normalize factors
+    if not isinstance(factors, list):
+        raise ValueError("factors must be a list")
+    cleaned_factors: list[str] = []
+    seen: set[str] = set()
+    for f in factors:
+        s = (str(f) if f is not None else "").strip()
+        if not s:
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned_factors.append(s[:200])
+        if len(cleaned_factors) >= MAX_FACTORS:
+            break
+    if not cleaned_factors:
+        raise ValueError("at least one factor is required")
     threshold = max(0.0, min(1.0, float(threshold)))
 
-    # 1. Normalize input
+    # 2. CSV row normalize + strength filter
     cleaned: list[dict] = []
     for r in rows or []:
         norm = _normalize_csv_row(r)
         if norm:
             cleaned.append(norm)
     input_row_count = len(cleaned)
-
-    # 2. Strength-only filter
     strengths = [r for r in cleaned if r["type"] == "strength"]
 
     if not strengths:
         return {
-            "factor": factor,
+            "factors": cleaned_factors,
             "threshold": threshold,
             "input_row_count": input_row_count,
             "strength_input_count": 0,
-            "result_rows": [],
+            "groups": [
+                {"factor": f, "result_rows": [], "matched_count": 0}
+                for f in cleaned_factors
+            ],
+            "total_matched_rows": 0,
             "universe_size": 0,
             "model": (model or settings.ANTHROPIC_MODEL),
             "message": "no_strength_rows_in_csv",
         }
 
-    # 3. Distinct universe (preserve description if the same category
-    #    name has different descriptions across vendors; we just keep
-    #    the first one we see — close enough for LLM matching).
+    # 3. Distinct universe
     universe: dict[str, dict] = {}
     for r in strengths:
         key = r["category"].strip().lower()
@@ -851,37 +937,42 @@ async def analyze_csv(
         }
     items = list(universe.values())
 
-    # 4. LLM scoring (batched, temperature=0)
+    # 4. Parallel LLM scoring per factor
     chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
-    scores: dict[str, float] = {}
-    for i in range(0, len(items), LLM_BATCH_SIZE):
-        batch = items[i : i + LLM_BATCH_SIZE]
-        partial = await _score_categories(factor, batch, chosen_model)
-        scores.update(partial)
-
-    # 5. Attach + filter + sort
-    result_rows: list[dict] = []
-    for r in strengths:
-        cat_key = r["category"].strip().lower()
-        relevance = float(scores.get(cat_key, 0.0))
-        if relevance < threshold:
-            continue
-        match_score = relevance * r["wilson_score"]
-        out = dict(r)
-        out["relevance"] = round(relevance, 3)
-        out["match_score"] = round(match_score, 4)
-        result_rows.append(out)
-    result_rows.sort(
-        key=lambda x: (x["relevance"], x["pct"]),
-        reverse=True,
+    per_factor_scores = await _score_factors_parallel(
+        cleaned_factors, items, chosen_model
     )
 
+    # 5. Build per-factor groups
+    groups: list[dict] = []
+    total_matched = 0
+    for f in cleaned_factors:
+        scores = per_factor_scores.get(f, {})
+        matched: list[dict] = []
+        for r in strengths:
+            cat_key = r["category"].strip().lower()
+            relevance = float(scores.get(cat_key, 0.0))
+            if relevance < threshold:
+                continue
+            out = dict(r)
+            out["relevance"] = round(relevance, 3)
+            out["match_score"] = round(relevance * r["wilson_score"], 4)
+            matched.append(out)
+        matched.sort(key=lambda x: (x["relevance"], x["pct"]), reverse=True)
+        groups.append({
+            "factor": f,
+            "result_rows": matched,
+            "matched_count": len(matched),
+        })
+        total_matched += len(matched)
+
     return {
-        "factor": factor,
+        "factors": cleaned_factors,
         "threshold": threshold,
         "input_row_count": input_row_count,
         "strength_input_count": len(strengths),
-        "result_rows": result_rows,
+        "groups": groups,
+        "total_matched_rows": total_matched,
         "universe_size": len(universe),
         "model": chosen_model,
     }

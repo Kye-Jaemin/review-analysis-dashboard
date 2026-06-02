@@ -31,9 +31,18 @@ class CompetitiveFactorCard(Base):
     __tablename__ = "competitive_factor_cards"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # Original user input. Always kept as the source-of-truth string we'd
-    # send back to the LLM on re-analyze.
+    # Legacy single-factor input. Stays as the sidebar's display label
+    # and the source-of-truth for older single-factor cards; multi-
+    # factor cards (migration 0018+) use the `factors` JSON column
+    # instead but mirror the first entry here so old code paths still
+    # render something reasonable.
     factor: Mapped[str] = mapped_column(String(200), nullable=False)
+    # The full list of competitive factors the user submitted in one
+    # analysis (migration 0018). Nullable for backward compat — older
+    # cards have NULL here and `factor` is the only thing to read.
+    factors: Mapped[Optional[list[str]]] = mapped_column(
+        JSON, nullable=True
+    )
     # Display name shown in the sidebar. Defaults to `factor` at save
     # time; user can rename via PATCH for clarity ("AI 코칭 v2", "경쟁사
     # 비교용", etc.) without losing the original LLM input.
