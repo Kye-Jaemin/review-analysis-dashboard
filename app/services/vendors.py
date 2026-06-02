@@ -230,14 +230,32 @@ async def list_vendors(session: AsyncSession) -> list[dict]:
             avg_sent_score = weighted / analyzed_total
 
         # ---- Strengths / weaknesses from auto categories ----
-        # Find every investigation card that targets any of this vendor's
-        # sources; their auto categories form the candidate pool.
+        # Find every investigation card that targets THIS vendor specifically.
+        # Two filters guard against attributing other vendors' themes:
+        #
+        #  1. Skip hidden cards — the user has explicitly removed them from
+        #     the analysis surface and they shouldn't leak back in here.
+        #  2. Skip multi-vendor cards (e.g. a card combining 8 fitness apps)
+        #     because their auto-categories like "운동·심박존 커스터마이징
+        #     부재" are extracted from the COMBINED corpus and reflect
+        #     themes across multiple brands. Attributing those categories
+        #     wholesale to each overlapping vendor causes cross-brand
+        #     leakage. Only include cards whose source_ids are entirely
+        #     contained in this vendor's source pool (a "pure" vendor card).
+        #
         # source_ids is a JSON column so we filter in Python.
         all_invs = (await session.execute(select(Investigation))).scalars().all()
+        vendor_src_set = set(src_ids)
         relevant_inv_ids: set[int] = set()
         for inv in all_invs:
+            if getattr(inv, "hidden", False):
+                continue
             inv_srcs = set(inv.source_ids or [])
-            if inv_srcs & set(src_ids):
+            if not inv_srcs:
+                continue
+            # Strict containment: every source in the card belongs to this
+            # vendor. Eliminates multi-vendor cards.
+            if inv_srcs <= vendor_src_set:
                 relevant_inv_ids.add(inv.id)
         cats: list[AutoCategory] = []
         if relevant_inv_ids:
