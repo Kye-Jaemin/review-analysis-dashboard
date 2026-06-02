@@ -111,6 +111,19 @@ _VENDOR_ALIASES: dict[str, str] = {
     "oura ring": "oura",
 }
 
+# Optional per-canonical display override. Use ONLY when the auto-pick
+# (longest candidate wins) doesn't produce the brand the user expects.
+# Example: Oura's source pool has "Oura" (4 chars) and "ouraring" (8
+# chars). Longest-wins would pick "ouraring"; we want "Oura". Adding
+# "oura": "Oura" here forces that display regardless of length.
+# Entries here are applied verbatim — they don't have to appear as any
+# source's display_name. Leave a canonical key OUT of this map to keep
+# the default longest-candidate behaviour (preserves descriptive labels
+# like "Google Health (Fitbit)" and "Weight Watchers Program").
+_VENDOR_DISPLAY_OVERRIDE: dict[str, str] = {
+    "oura": "Oura",
+}
+
 # Auto-category names that aren't real "strengths" or "weaknesses" but
 # are the bulk sentiment buckets the analyzer always inserts (Top 10 + 2
 # fixed simple buckets). Excluded from the strength/weakness ranking so
@@ -187,18 +200,18 @@ async def list_vendors(session: AsyncSession) -> list[dict]:
         candidate = (s.display_name or s.label or "").strip()
         if candidate.lower().startswith("r/"):
             candidate = candidate[2:]
-        # Display name pick: prefer the candidate whose lowercased form is
-        # the canonical alias key (the "official" brand name), falling
-        # back to the longest candidate otherwise. Without this, an
-        # alias-merged group like Oura {"Oura", "ouraring"} would expose
-        # "ouraring" (longer) instead of the proper brand "Oura".
-        current = g["display"]
-        cand_is_canonical = candidate.lower() == key
-        curr_is_canonical = current.lower() == key if current else False
-        if cand_is_canonical and not curr_is_canonical:
+        # Default: longest non-empty original wins as the friendlier title.
+        # Per-group display overrides are applied AFTER this loop so they
+        # take precedence regardless of which candidates came in.
+        if len(candidate) > len(g["display"]):
             g["display"] = candidate
-        elif cand_is_canonical == curr_is_canonical and len(candidate) > len(current):
-            g["display"] = candidate
+
+    # Apply explicit display overrides (see _VENDOR_DISPLAY_OVERRIDE
+    # docstring above). Only keys actually present in the map are
+    # touched — every other group keeps the longest-candidate pick.
+    for key, override in _VENDOR_DISPLAY_OVERRIDE.items():
+        if key in vendor_groups:
+            vendor_groups[key]["display"] = override
 
     vendors: list[dict] = []
     for key, g in vendor_groups.items():
