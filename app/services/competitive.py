@@ -127,30 +127,33 @@ async def _score_categories(
         "  0.4  tangentially related — shares some surface words but\n"
         "       different concept or dimension\n"
         "  0.0  unrelated\n\n"
-        "CRITICAL — DIMENSION RULE:\n"
-        "  A category and a factor can share the same TOPIC but evaluate\n"
-        "  different DIMENSIONS of it (convenience / accuracy / speed /\n"
-        "  price / availability / aesthetics). When the dimensions\n"
-        "  differ, score LOW (≤ 0.45) even if the topic words overlap.\n"
-        "  Only categories that match BOTH the topic AND the dimension\n"
-        "  earn ≥ 0.7.\n\n"
-        "Examples (study the dimension column):\n"
-        '  factor "AI 코칭",                 category "AI 코치 기능"           → 0.95   (same topic+dim)\n'
-        '  factor "AI 코칭",                 category "운동 추천"              → 0.50   (related topic)\n'
-        '  factor "AI 코칭",                 category "구독 결제"              → 0.00   (unrelated)\n'
-        '  factor "배터리 수명",              category "Oura 링 배터리 수명"    → 0.95   (same)\n'
-        '  factor "음식 기록 편의성"   [편의], category "사진 촬영 식사 기록"   → 0.85   (convenience ↔ convenience)\n'
-        '  factor "음식 기록 편의성"   [편의], category "AI 칼로리 측정 정확도" → 0.30   (different DIM: 정확도)\n'
-        '  factor "Vision AI 인식 정확도" [정확], category "AI 인식 정확도"     → 0.95   (accuracy ↔ accuracy)\n'
-        '  factor "Vision AI 인식 정확도" [정확], category "사진 촬영 칼로리 인식" → 0.40   (different DIM: 편의)\n'
-        '  factor "Vision AI 인식 정확도" [정확], category "UI/UX 디자인"       → 0.05   (unrelated)\n'
-        '  factor "구독료 가격",       [가격], category "구독·결제"             → 0.85\n'
-        '  factor "구독료 가격",       [가격], category "구독 취소 후 접근"     → 0.30   (different DIM)\n\n'
-        "Match on SEMANTIC meaning, not literal substring overlap. Languages\n"
-        "may differ between factor and category — treat them as equivalent\n"
-        "(e.g. Korean factor vs English category, or vice versa). UI/UX,\n"
-        "design, navigation are unrelated to AI accuracy / coaching /\n"
-        "tracking unless the factor explicitly mentions interface.\n\n"
+        "Worked examples:\n"
+        '  factor "AI 코칭",                 category "AI 코치 기능"             → 0.95\n'
+        '  factor "AI 코칭",                 category "운동 추천"                → 0.50\n'
+        '  factor "AI 코칭",                 category "구독 결제"                → 0.00\n'
+        '  factor "배터리 수명",              category "Oura 링 배터리 수명"      → 0.95\n'
+        '  factor "음식 기록 편의성",         category "사진 촬영 식사 기록"      → 0.85\n'
+        '  factor "음식 기록 편의성",         category "AI 칼로리 측정 정확도"    → 0.35\n'
+        '  factor "AI 인식 정확도",           category "AI 인식 정확도"           → 1.00\n'
+        '  factor "AI 인식 정확도",           category "AI 칼로리 측정 정확도"    → 0.90\n'
+        '  factor "Vision AI 인식 정확도",   category "AI 인식 정확도"           → 0.95\n'
+        '  factor "Vision AI 인식 정확도",   category "사진 촬영 칼로리 인식"    → 0.50\n'
+        '  factor "Vision AI 인식 정확도",   category "UI/UX 디자인 및 내비게이션" → 0.05\n'
+        '  factor "구독료 가격",              category "구독·결제"                → 0.85\n'
+        '  factor "구독료 가격",              category "구독 취소 후 접근"        → 0.35\n\n'
+        "Guidance:\n"
+        "  - Match on SEMANTIC meaning, not literal substring overlap.\n"
+        "  - Languages may differ between factor and category — treat them\n"
+        "    as equivalent (e.g. Korean factor vs English category).\n"
+        "  - When the factor highlights a specific DIMENSION (accuracy,\n"
+        "    convenience, price, speed, design), a category that covers\n"
+        "    the same topic but a DIFFERENT dimension should score LOWER\n"
+        "    (around 0.3–0.5), not the same as a dimension-match.\n"
+        "  - UI/UX/design/navigation categories are UNRELATED to AI\n"
+        "    accuracy / coaching / tracking unless the factor explicitly\n"
+        "    mentions the interface.\n"
+        "  - If the factor uses the SAME wording as a category, that\n"
+        "    category must score 0.95+ — never penalize an exact match.\n\n"
         "Output JSON only:\n"
         '  {"scores": [{"name": "<exact input name>", "relevance": <0..1>}, ...]}\n'
         "Include EVERY input category exactly once. No prose, no markdown."
