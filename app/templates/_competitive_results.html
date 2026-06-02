@@ -106,8 +106,26 @@
     {% else %}
       {# Fresh analysis — offer to save. Save button POSTs the full
          result JSON; on success the sidebar refreshes and the button
-         flips to "✓ 저장됨". #}
-      <div class="border border-emerald-200 bg-emerald-50/40 rounded-md p-3 flex items-center gap-3" x-data="{ saved: false, saving: false }">
+         flips to "✓ 저장됨".
+
+         Quote-escaping: we can't drop {{ result|tojson }} straight into
+         an @click="..." handler — tojson emits literal `"` which would
+         close the surrounding HTML attribute and break the JS. Instead
+         we embed the payload in a hidden <script type="application/json">
+         tag (which has no quote-escaping concerns since browsers parse
+         it as opaque text), read it once at click time via
+         document.getElementById(...).textContent, and JSON.parse it. #}
+      <div class="border border-emerald-200 bg-emerald-50/40 rounded-md p-3 flex items-center gap-3"
+           x-data="{ saved: false, saving: false }">
+        <script id="competitive-save-payload" type="application/json">
+          {{ {
+            "factor": result.factor,
+            "label": result.factor,
+            "threshold": result.threshold,
+            "model_used": none,
+            "result": result,
+          } | tojson }}
+        </script>
         <span class="text-base">💾</span>
         <div class="flex-1 text-xs text-gray-700">
           <b>이 분석을 카드로 저장</b>하면 다음에 LLM 호출 없이 같은 결과를 볼 수 있습니다.
@@ -120,24 +138,19 @@
                   fetch('/competitive/cards', {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({
-                      factor: {{ result.factor|tojson }},
-                      label: {{ result.factor|tojson }},
-                      threshold: {{ result.threshold }},
-                      model_used: null,
-                      result: {{ result|tojson }}
-                    })
+                    body: document.getElementById('competitive-save-payload').textContent.trim()
                   })
-                  .then(r => {
+                  .then(async r => {
                     saving = false;
                     if (r.ok) {
                       saved = true;
                       htmx.ajax('GET', '/competitive/cards', '#competitive-cards');
                     } else {
-                      alert('카드 저장 실패');
+                      const t = await r.text().catch(() => '');
+                      alert('카드 저장 실패 (HTTP ' + r.status + ')' + (t ? '\n' + t.slice(0, 300) : ''));
                     }
                   })
-                  .catch(() => { saving = false; alert('카드 저장 실패'); });
+                  .catch(err => { saving = false; alert('카드 저장 실패: ' + err); });
                 "
                 class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded font-medium whitespace-nowrap">
           <span x-show="!saving">💾 카드로 저장</span>
