@@ -181,7 +181,7 @@
                 {% set rank_icon = ['🥇','🥈','🥉','4.','5.'][loop.index0] %}
                 {% set saved_card_id = saved_lookup.get((v.key, (c.name or '').strip().lower(), 'positive')) %}
                 <li class="rounded-md p-2.5 border hover:shadow-sm transition-all cursor-pointer
-                           {% if saved_card_id %}bg-emerald-50/80 border-emerald-300 border-l-4 border-l-emerald-500 hover:border-emerald-400{% elif dim %}bg-gray-50 border-gray-200 hover:border-gray-300{% else %}bg-white/70 border-green-100 hover:border-green-300{% endif %}"
+                           {% if saved_card_id %}bg-emerald-50/80 border-emerald-300 border-l-4 border-l-emerald-500 hover:border-emerald-400{% elif dim %}bg-gray-200 border-gray-400 hover:border-gray-500{% else %}bg-white/70 border-green-100 hover:border-green-300{% endif %}"
                     data-reasons-trigger
                     data-vendor-key="{{ v.key }}"
                     data-vendor-display="{{ v.display }}"
@@ -190,9 +190,9 @@
                     data-saved-id="{{ saved_card_id or '' }}"
                     title="{% if saved_card_id %}{% if lang == 'ko' %}저장된 원인 분석 보기 (LLM 호출 없음){% else %}View saved reasons (no LLM call){% endif %}{% else %}{% if lang == 'ko' %}클릭하면 이 강점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this strength{% endif %}{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
-                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% if dim %} opacity-50{% endif %}{% else %}text-gray-500 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
+                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% if dim %} opacity-60{% endif %}{% else %}text-gray-600 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
                     {# Category name (truncate-safe — the 📌 indicator lives in its own pill outside this span) #}
-                    <span class="flex-1 min-w-0 font-semibold text-sm {% if dim %}text-gray-500{% else %}text-gray-900{% endif %} truncate" title="{{ c.name }}">{{ c.name }}</span>
+                    <span class="flex-1 min-w-0 font-semibold text-sm {% if dim %}text-gray-700{% else %}text-gray-900{% endif %} truncate" title="{{ c.name }}">{{ c.name }}</span>
                     {# Saved-card chip: outside the truncate so it always shows. Click target is the same li. #}
                     {% if saved_card_id %}
                       <span class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
@@ -200,13 +200,13 @@
                       </span>
                     {% endif %}
                     <span class="shrink-0 text-right" title="{% if dim %}{% if lang == 'ko' %}긍정 비율 30% 미만 — 약한 신호. {% else %}Positive ratio under 30 % — weak signal. {% endif %}{% endif %}{% if lang == 'ko' %}Wilson 신뢰 점수: {{ score }}%{% else %}Wilson confidence score: {{ score }}%{% endif %}">
-                      <span class="text-base font-bold {% if dim %}text-gray-500{% else %}text-green-700{% endif %} tabular-nums">{{ pct }}%</span>
-                      <span class="text-[10px] text-gray-500 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
+                      <span class="text-base font-bold {% if dim %}text-gray-700{% else %}text-green-700{% endif %} tabular-nums">{{ pct }}%</span>
+                      <span class="text-[10px] text-gray-600 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
                     </span>
                   </div>
                   <!-- Positive ratio bar -->
-                  <div class="h-1.5 {% if dim %}bg-gray-100{% else %}bg-green-100{% endif %} rounded-full overflow-hidden">
-                    <div class="h-full bg-gradient-to-r {% if dim %}from-gray-300 to-gray-400{% else %}from-green-400 to-emerald-500{% endif %} rounded-full transition-all"
+                  <div class="h-1.5 {% if dim %}bg-gray-300{% else %}bg-green-100{% endif %} rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r {% if dim %}from-gray-500 to-gray-600{% else %}from-green-400 to-emerald-500{% endif %} rounded-full transition-all"
                          style="width: {{ pct }}%"></div>
                   </div>
                   <div class="flex items-center justify-between gap-2 mt-1.5">
@@ -254,7 +254,7 @@
                 {% set rank_icon = ['🚨','⚠','⚠','4.','5.'][loop.index0] %}
                 {% set saved_card_id = saved_lookup.get((v.key, (c.name or '').strip().lower(), 'negative')) %}
                 <li class="rounded-md p-2.5 border hover:shadow-sm transition-all cursor-pointer
-                           {% if saved_card_id %}bg-emerald-50/80 border-emerald-300 border-l-4 border-l-emerald-500 hover:border-emerald-400{% elif dim %}bg-gray-50 border-gray-200 hover:border-gray-300{% else %}bg-white/70 border-red-100 hover:border-red-300{% endif %}"
+                           {% if saved_card_id %}bg-emerald-50/80 border-emerald-300 border-l-4 border-l-emerald-500 hover:border-emerald-400{% elif dim %}bg-gray-200 border-gray-400 hover:border-gray-500{% else %}bg-white/70 border-red-100 hover:border-red-300{% endif %}"
                     data-reasons-trigger
                     data-vendor-key="{{ v.key }}"
                     data-vendor-display="{{ v.display }}"
@@ -263,21 +263,21 @@
                     data-saved-id="{{ saved_card_id or '' }}"
                     title="{% if saved_card_id %}{% if lang == 'ko' %}저장된 원인 분석 보기 (LLM 호출 없음){% else %}View saved reasons (no LLM call){% endif %}{% else %}{% if lang == 'ko' %}클릭하면 이 약점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this weakness{% endif %}{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
-                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% if dim %} opacity-50{% endif %}{% else %}text-gray-500 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
-                    <span class="flex-1 min-w-0 font-semibold text-sm {% if dim %}text-gray-500{% else %}text-gray-900{% endif %} truncate" title="{{ c.name }}">{{ c.name }}</span>
+                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% if dim %} opacity-60{% endif %}{% else %}text-gray-600 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
+                    <span class="flex-1 min-w-0 font-semibold text-sm {% if dim %}text-gray-700{% else %}text-gray-900{% endif %} truncate" title="{{ c.name }}">{{ c.name }}</span>
                     {% if saved_card_id %}
                       <span class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
                         📌 {% if lang == 'ko' %}저장됨{% else %}saved{% endif %}
                       </span>
                     {% endif %}
                     <span class="shrink-0 text-right" title="{% if dim %}{% if lang == 'ko' %}부정 비율 30% 미만 — 약한 신호. {% else %}Negative ratio under 30 % — weak signal. {% endif %}{% endif %}{% if lang == 'ko' %}Wilson 신뢰 점수: {{ score }}%{% else %}Wilson confidence score: {{ score }}%{% endif %}">
-                      <span class="text-base font-bold {% if dim %}text-gray-500{% else %}text-red-700{% endif %} tabular-nums">{{ pct }}%</span>
-                      <span class="text-[10px] text-gray-500 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
+                      <span class="text-base font-bold {% if dim %}text-gray-700{% else %}text-red-700{% endif %} tabular-nums">{{ pct }}%</span>
+                      <span class="text-[10px] text-gray-600 ml-1 tabular-nums">({{ '{:,}'.format(c.total) }})</span>
                     </span>
                   </div>
                   <!-- Negative ratio bar -->
-                  <div class="h-1.5 {% if dim %}bg-gray-100{% else %}bg-red-100{% endif %} rounded-full overflow-hidden">
-                    <div class="h-full bg-gradient-to-r {% if dim %}from-gray-300 to-gray-400{% else %}from-red-400 to-rose-500{% endif %} rounded-full transition-all"
+                  <div class="h-1.5 {% if dim %}bg-gray-300{% else %}bg-red-100{% endif %} rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r {% if dim %}from-gray-500 to-gray-600{% else %}from-red-400 to-rose-500{% endif %} rounded-full transition-all"
                          style="width: {{ pct }}%"></div>
                   </div>
                   <div class="flex items-center justify-between gap-2 mt-1.5">
