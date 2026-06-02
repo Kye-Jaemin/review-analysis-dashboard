@@ -550,6 +550,12 @@ function _renderResult(data, saved) {
   if (saved && data.savedAt) parts.push(`<span class="text-blue-700">📅 ${data.savedAt.slice(0,16).replace('T',' ')}</span>`);
   metaEl.innerHTML = parts.join(' · ');
 
+  // Polarity is needed for both the chart and the reason-list colors
+  // below, so declare it OUTSIDE the chart's "do we have causal reasons?"
+  // gate. Otherwise the list rendering crashes with `isPositive is not
+  // defined` whenever the chart branch is skipped.
+  const isPositive = data.band === 'positive';
+
   // Chart — horizontal bars. Hidden when there are no causal reasons
   // (i.e. every review was outcome-only), since a chart of nothing is
   // worse than no chart.
@@ -559,7 +565,6 @@ function _renderResult(data, saved) {
   if (reasons.length > 0) {
     chartWrap.classList.remove('hidden');
     const ctx = canvas.getContext('2d');
-    const isPositive = data.band === 'positive';
     const baseColor = isPositive ? 'rgba(22,163,74,0.85)' : 'rgba(220,38,38,0.85)';
     const borderColor = isPositive ? 'rgb(22,163,74)' : 'rgb(220,38,38)';
     _reasonsState.chart = new Chart(ctx, {
