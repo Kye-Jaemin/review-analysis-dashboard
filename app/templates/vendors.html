@@ -262,11 +262,23 @@
   {% endfor %}
 </div>
 
-{# ========== Reasons modal (single instance, populated on click) ========== #}
+{# ========== Reasons modal (single instance, populated on click) ==========
+
+   Positioning model: the overlay covers the full viewport for the click-
+   to-dismiss backdrop and z-stacking, but the inner content is absolute-
+   positioned within it and openReasonsModalFor() sets `top` near the
+   clicked item's vertical position (clamped to viewport). So clicking a
+   strength near the bottom of a tall vendor row opens the modal near
+   that click — not at viewport center, which used to feel disconnected.
+
+   Horizontal: stays centered via `left: 50%; transform: translateX(-50%)`.
+#}
 <div id="reasons-modal"
-     class="fixed inset-0 z-50 hidden bg-black/50 flex items-center justify-center p-4"
+     class="fixed inset-0 z-50 hidden bg-black/50"
      onclick="if (event.target === this) closeReasonsModal()">
-  <div class="bg-white rounded-lg shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+  <div id="reasons-modal-content"
+       class="absolute bg-white rounded-lg shadow-2xl w-[calc(100%-2rem)] max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+       style="left: 50%; top: 4rem; transform: translateX(-50%);">
     <!-- Header -->
     <div class="px-5 py-3 border-b flex items-center gap-2 shrink-0" id="reasons-modal-header">
       <span id="reasons-modal-icon" class="text-xl">💡</span>
@@ -388,14 +400,41 @@ function openReasonsModalFor(el) {
   document.getElementById('reasons-modal-icon').textContent =
     band === 'positive' ? '💡' : '⚠️';
 
-  // Show modal
-  document.getElementById('reasons-modal').classList.remove('hidden');
+  // Show modal + position content near the clicked item.
+  const overlay = document.getElementById('reasons-modal');
+  overlay.classList.remove('hidden');
+  _positionModalNear(el);
 
   if (_reasonsState.savedCardId) {
     loadSavedReasons(_reasonsState.savedCardId);
   } else {
     fetchFreshReasons(false);
   }
+}
+
+// Position the modal content near `el` (the clicked <li>) so the user's
+// eye doesn't have to travel to viewport center. The modal stays within
+// the viewport (16px padding from edges) and re-clamps on window resize.
+function _positionModalNear(el) {
+  const content = document.getElementById('reasons-modal-content');
+  if (!content || !el) return;
+  // Reset any inline top so getBoundingClientRect measures the natural
+  // size after CSS lays it out.
+  content.style.top = '0px';
+  // Wait one frame so the content has reflowed with its current body.
+  requestAnimationFrame(() => {
+    const rect = el.getBoundingClientRect();
+    const vpH = window.innerHeight;
+    const cH = content.offsetHeight || 480;
+    const margin = 16;
+    // Anchor: slightly above the clicked item's top edge so the click
+    // target stays visible at the modal's top edge.
+    let top = rect.top - 24;
+    // Clamp so the whole modal stays in the viewport.
+    if (top + cH > vpH - margin) top = vpH - cH - margin;
+    if (top < margin) top = margin;
+    content.style.top = top + 'px';
+  });
 }
 
 function closeReasonsModal() {
@@ -542,6 +581,10 @@ function _renderResult(data, saved) {
 
   _showOnly('reasons-result');
   _updateFooter(saved, true);
+  // After the chart + reason list render the modal grows from the
+  // loading-spinner height to its real height. Re-clamp position so it
+  // doesn't grow OUT of the viewport on big result sets.
+  if (_reasonsState.trigger) _positionModalNear(_reasonsState.trigger);
 }
 
 async function reasonsSave() {

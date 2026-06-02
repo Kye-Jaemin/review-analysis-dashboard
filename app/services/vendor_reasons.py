@@ -43,18 +43,34 @@ from app.services.vendors import (
 )
 
 
-# Up to this many unique reviews are sampled per (vendor, cat, band)
-# for the LLM call. Matches the themes mindmap sample size — anything
-# larger blows the Haiku context budget for borderline-large categories.
-SAMPLE_LIMIT = 100
+# Effectively the FULL set of reviews for this (vendor, cat, band)
+# triple. Positive-only or negative-only slices for a single category
+# rarely exceed a few hundred; 2000 is a hard cap that protects against
+# pathological cases without truncating real workloads. Combined with
+# SNIPPET_CHARS below the worst case is ~2000 × 250 chars ≈ 500K chars,
+# well under Haiku 4.5's 200K-token context window.
+#
+# (Previous value was 100, which was a "themes mindmap" carryover — the
+# user explicitly asked for full coverage since positive-only categories
+# are usually small enough that capping made every chart look identical
+# regardless of the underlying corpus size.)
+SAMPLE_LIMIT = 2000
+
+# Per-review character cap for the snippet sent to the LLM. Shorter than
+# the themes-mindmap 400-char cap because we're now sending many more
+# reviews per call.
+SNIPPET_CHARS = 250
 
 # Per-reason example cap. Three short quotes are enough to ground the
 # reason in real review text without making the modal scroll forever.
 EXAMPLES_PER_REASON = 3
 
-# Default Claude budget for the reasons call. The output is small
-# (4–6 reasons × short fields) so 2048 is plenty with margin.
-LLM_MAX_TOKENS = 2048
+# Default Claude budget for the reasons call. Bumped from 2048 to 4096
+# so the LLM has headroom for the longer example quotes that surface
+# when more reviews are available (we now pass effectively all reviews,
+# not a 100-row sample). Output is still small (4–6 reasons × short
+# fields) so this is purely defensive.
+LLM_MAX_TOKENS = 4096
 
 # In-memory cache: same (vendor, category, band, lang) → result.
 # 30-min TTL so re-clicks within a session don't burn LLM, but Render
@@ -184,7 +200,7 @@ async def _fetch_review_sample(
         snippet = (summary if summary else (text or "")).strip().replace("\n", " ")
         out.append({
             "id": int(rid),
-            "snippet": snippet[:400],
+            "snippet": snippet[:SNIPPET_CHARS],
             "rating": int(rating) if rating is not None else None,
             "sentiment": sent.value if hasattr(sent, "value") else str(sent),
         })
