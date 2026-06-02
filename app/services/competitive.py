@@ -952,37 +952,46 @@ async def analyze_csv(
     # Per-ROW matching candidates. Classifier scores each strength row
     # against each factor using the SAVED REASONS as the primary signal
     # (the causal mechanisms uncovered by the /vendors per-strength
-    # analysis) with the (vendor, category) header as the row identity.
+    # analysis).
     #
-    # CRITICAL: `name` must be the actual matching SUBJECT — the system
-    # prompt scores against the `name` field per its examples
-    # ("factor 'AI 코칭' vs category 'AI 코치 기능' → 0.95"). Using a
-    # placeholder like `row_<i>` made the LLM score everything ~0
-    # because the names looked meaningless to the rubric. The fix:
-    # name carries "{vendor} > {category}" (unique per row in the
-    # /vendors CSV; defensively disambiguated with a #N suffix if
-    # duplicates slip in). Reasons go in `description` as supporting
-    # context that the LLM weighs alongside the name.
+    # CRITICAL: `name` is what the system-prompt rubric scores against
+    # ("factor 'AI 코칭' vs category 'AI 코치 기능' → 0.95"). Examples
+    # there are short, single-concept category names. An earlier
+    # attempt at "{vendor} > {category}" (so each row would be unique
+    # without a #N suffix) made the LLM score every WW row to ~0 —
+    # the vendor prefix dragged the matching focus off the topic.
+    #
+    # Final shape:
+    #   name        = category only (clean, matches rubric style)
+    #   description = "Vendor: …. Reasons: ……" — vendor + reasons live
+    #                 here as supporting context; reasons in particular
+    #                 are what the user wants the LLM to weigh per the
+    #                 "분류는 세부 요인 기준으로" request.
+    # Cross-vendor category collisions (e.g. "AI 인식" appearing for
+    # both Cal AI and BitePal) get a "(2)", "(3)", … parenthetical
+    # disambiguator so the score dict can still address each row.
     candidates: list[dict] = []
     key_to_row_idx: dict[str, int] = {}
     rows_with_reasons_count = 0
     for i, r in enumerate(strengths):
         reasons = (r.get("reasons") or "").strip()
-        base_name = f"{r['vendor']} > {r['category']}"
+        base_name = r["category"]
         name = base_name
         suffix = 1
-        # Disambiguate by appending #N if the same (vendor, category)
-        # appears more than once in the CSV. _score_categories dedups
-        # on lowercased name; collisions would silently drop rows.
         while name.lower() in key_to_row_idx:
             suffix += 1
-            name = f"{base_name} #{suffix}"
+            name = f"{base_name} ({suffix})"
         key_to_row_idx[name.lower()] = i
+        # Description carries vendor + reasons. When reasons are
+        # missing we still pass the vendor so the LLM has SOME
+        # discriminating context across same-category collisions.
+        desc_bits: list[str] = []
+        if r.get("vendor"):
+            desc_bits.append(f"Vendor: {r['vendor']}")
         if reasons:
             rows_with_reasons_count += 1
-            description = reasons[:500]
-        else:
-            description = None
+            desc_bits.append(f"Reasons: {reasons[:400]}")
+        description = " | ".join(desc_bits) if desc_bits else None
         candidates.append({"name": name, "description": description})
 
     chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
