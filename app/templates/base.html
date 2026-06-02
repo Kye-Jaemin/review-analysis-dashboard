@@ -698,13 +698,18 @@
     // ============================================================
     // Temporary upgrade gate
     // ============================================================
-    // Source collection (POST /sources/{id}/collect) and analysis
-    // execution (POST /analyze) are paywalled behind a 4-digit access
-    // code while the workspace is in upgrade mode. Once entered
-    // correctly the session remembers it (sessionStorage) so the user
-    // isn't reprompted on every action within the same tab. Remove
-    // this block once the upgrade is over and the buttons should be
-    // freely usable again.
+    // Every endpoint that burns a Claude (or external scrape) API
+    // call is paywalled behind a 4-digit access code while the
+    // workspace is in upgrade mode. Three interceptors cover the
+    // three transport layers the UI uses:
+    //
+    //   - form submits (the collect / analyze buttons)
+    //   - HTMX requests (competitive results, vendor card reanalyze)
+    //   - raw fetch() (vendor reasons modal, card save flows)
+    //
+    // Once the user enters the code correctly, sessionStorage
+    // remembers it for the tab so they aren't reprompted on every
+    // click. Remove this block when upgrade mode ends.
     (function () {
       const GATE_CODE = '3537';
       const GATE_MESSAGE = (
@@ -728,8 +733,8 @@
       // Sync prompt-based gate. Returns true if the user is (or just
       // became) authorized, false otherwise. We use the built-in
       // prompt() rather than a custom modal because it's synchronous —
-      // a form's submit / htmx:beforeRequest handler needs to decide
-      // pass/fail without awaiting async UI.
+      // a form's submit / htmx:beforeRequest / fetch override needs
+      // to decide pass/fail without awaiting async UI.
       function checkGate() {
         if (isAuthorized()) return true;
         const entered = prompt(GATE_MESSAGE);
@@ -748,44 +753,89 @@
       // if they need to (e.g. a deep link that isn't a normal form).
       window._requireAccessCode = checkGate;
 
-      function needsGate(form) {
-        const action = (form && form.getAttribute && form.getAttribute('action')) || '';
-        if (!action) return false;
-        // POST /sources/{id}/collect — source collection trigger
-        if (/^\/sources\/\d+\/collect\/?$/.test(action)) return true;
-        // POST /analyze — analysis execution
-        if (action === '/analyze' || action === '/analyze/') return true;
+      // Centralised path matcher: every LLM-burning (or scrape-burning)
+      // endpoint the UI reaches. Update this one function to add or
+      // remove gated endpoints; the three interceptors below all read
+      // from it.
+      function pathNeedsGate(method, path) {
+        if (!path) return false;
+        method = (method || 'GET').toUpperCase();
+        // Strip query string + hash so the matcher operates on the
+        // pure URL path even when called with a fully qualified URL.
+        try {
+          const u = new URL(path, window.location.origin);
+          path = u.pathname;
+        } catch (_) {
+          path = String(path).split('?')[0].split('#')[0];
+        }
+        // Source collection (external scrape API).
+        if (method === 'POST' && /^\/sources\/\d+\/collect\/?$/.test(path)) return true;
+        // Classification + sentiment analysis run (Claude).
+        if (method === 'POST' && (path === '/analyze' || path === '/analyze/')) return true;
+        // Sentiment-causes mindmap (Claude).
+        if (method === 'POST' && path === '/api/themes') return true;
+        // Single-review translation (Claude).
+        if (method === 'POST' && path === '/api/translate-review') return true;
+        // One-shot category-name neutralize (Claude).
+        if (method === 'POST' && path === '/api/auto-categories/neutralize-names') return true;
+        // Competitive-factor LLM scoring (page partial + raw JSON).
+        if (method === 'GET' && path === '/competitive/results') return true;
+        if (method === 'GET' && path === '/api/competitive-rank') return true;
+        // Competitive card re-analyze (Claude).
+        if (method === 'POST' && /^\/competitive\/cards\/\d+\/reanalyze\/?$/.test(path)) return true;
+        // Vendor "why?" extraction (Claude). The card load / save
+        // routes are NOT gated — they're pure DB reads.
+        if (method === 'GET' && path === '/api/vendor-reasons') return true;
+        // Vendor reason card re-analyze (Claude).
+        if (method === 'POST' && /^\/api\/vendor-reason-cards\/\d+\/reanalyze\/?$/.test(path)) return true;
         return false;
       }
+      window._pathNeedsGate = pathNeedsGate;
 
-      // Capture-phase listener so we run BEFORE HTMX's own submit
-      // handler. If we preventDefault here, HTMX's request is
-      // suppressed too — verified against htmx 1.x source.
+      // Capture-phase form submit listener — runs BEFORE HTMX's own
+      // submit handler. preventDefault here suppresses HTMX too.
       document.addEventListener('submit', function (evt) {
         const form = evt.target;
         if (!form || form.tagName !== 'FORM') return;
-        if (!needsGate(form)) return;
+        const action = form.getAttribute('action') || '';
+        const method = (form.getAttribute('method') || 'GET').toUpperCase();
+        if (!pathNeedsGate(method, action)) return;
         if (!checkGate()) {
           evt.preventDefault();
           evt.stopPropagation();
         }
       }, true);
 
-      // HTMX-only safety net for triggers that aren't a <form> submit
-      // (e.g. an `hx-post` on a button without a wrapping form).
+      // HTMX-driven requests (hx-get / hx-post / hx-patch / hx-delete).
       document.addEventListener('htmx:beforeRequest', function (evt) {
         const cfg = (evt.detail && evt.detail.requestConfig) || {};
         const path = cfg.path || '';
-        const method = (cfg.verb || cfg.method || '').toLowerCase();
-        if (method !== 'post') return;
-        const matches = (
-          /^\/sources\/\d+\/collect\/?$/.test(path) ||
-          path === '/analyze' || path === '/analyze/'
-        );
-        if (matches && !checkGate()) {
+        const method = cfg.verb || cfg.method || 'GET';
+        if (pathNeedsGate(method, path) && !checkGate()) {
           evt.preventDefault();
         }
       });
+
+      // Raw fetch() — used by the vendor-reasons modal, the save-card
+      // POSTs, the rename PATCHes, etc. Monkey-patch window.fetch so
+      // the gate fires before the request leaves the browser. The
+      // override is transparent for non-gated URLs.
+      const _origFetch = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        let url = '';
+        let method = 'GET';
+        if (typeof input === 'string') {
+          url = input;
+          method = (init && init.method) || 'GET';
+        } else if (input && typeof input === 'object') {
+          url = input.url || '';
+          method = (init && init.method) || input.method || 'GET';
+        }
+        if (pathNeedsGate(method, url) && !checkGate()) {
+          return Promise.reject(new Error('access code required'));
+        }
+        return _origFetch(input, init);
+      };
     })();
   </script>
   {% block scripts %}{% endblock %}

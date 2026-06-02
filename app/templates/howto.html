@@ -42,15 +42,15 @@
   <ol class="ml-5 mt-1">
     <li><a href="#overview">이 앱이 하는 일</a></li>
     <li><a href="#quickstart">빠른 시작 (5단계)</a></li>
-    <li><a href="#sources">소스 추가 — 4가지 채널</a></li>
+    <li><a href="#sources">리뷰 수집 — 4가지 채널 (구 "소스")</a></li>
     <li><a href="#categories">카테고리 트리 만들기 (수동)</a></li>
-    <li><a href="#analyze">분석 실행 — 자동 vs 수동</a></li>
+    <li><a href="#analyze">리뷰 분류 및 긍부정 평가 — 자동 vs 수동 (구 "분석")</a></li>
     <li><a href="#cards">조사 카드 관리 (정렬·숨김·그룹·내보내기)</a></li>
     <li><a href="#dashboard">대시보드 패널</a></li>
-    <li><a href="#vendors">업체 분석 페이지 (강점/약점)</a></li>
-    <li><a href="#competitive">경쟁력 분석 페이지 (요소 → 업체 매칭)</a></li>
+    <li><a href="#vendors">업체 강/약점 분석 페이지 (구 "업체 분석")</a></li>
+    <li><a href="#competitive">경쟁력 분류 페이지 (베타, 구 "경쟁력 분석")</a></li>
     <li><a href="#mindmap">감성 원인 마인드맵</a></li>
-    <li><a href="#reviews">리뷰 탐색 + 내보내기 + 번역</a></li>
+    <li><a href="#reviews">전체 리뷰 보기 + 내보내기 + 번역 (구 "리뷰")</a></li>
     <li><a href="#workspace">워크스페이스 저장·불러오기</a></li>
     <li><a href="#troubleshoot">문제 해결</a></li>
   </ol>
@@ -62,7 +62,7 @@
    <strong>수동 카테고리 트리</strong>로 분류하고
    <strong>5단계 감성</strong>(매우 부정 ~ 매우 긍정)을 평가합니다. 결과는
    <strong>조사 카드</strong>를 클릭해서 대시보드·리뷰·마인드맵에서 비교·필터링·내보내기 가능,
-   그리고 <strong>업체 분석</strong> 페이지에서 강점/약점도 한눈에.</p>
+   그리고 <strong>업체 강/약점 분석</strong> 페이지에서 강점/약점도 한눈에.</p>
 
 <div class="callout new">
   <strong>조사 카드(Investigation card)란?</strong><br>
@@ -73,14 +73,14 @@
 
 <h2 id="quickstart">2. 빠른 시작 (5단계)</h2>
 <ol>
-  <li><strong>소스 추가</strong> — <a href="/sources" class="text-blue-600 hover:underline">소스</a>에서 분석할 앱·서브레딧·URL 등록</li>
+  <li><strong>소스 추가</strong> — <a href="/sources" class="text-blue-600 hover:underline">리뷰 수집</a>에서 분석할 앱·서브레딧·URL 등록</li>
   <li><strong>수집 실행</strong> — 소스 페이지에서 각 소스의 <em>수집 시작</em> 클릭 <span class="text-amber-700">(액세스 코드 필요)</span></li>
   <li><strong>(선택) 수동 카테고리 정의</strong> — 자동 분류로 시작해도 무방. 직접 정의한 분류 체계가 필요하면 <a href="/categories" class="text-blue-600 hover:underline">수동 카테고리</a>에서 트리 생성</li>
-  <li><strong>분석 실행</strong> — <a href="/analyze" class="text-blue-600 hover:underline">분석</a>에서 소스 선택, 분류 모드 (자동 / 수동) 선택, 이름 입력 후 실행 <span class="text-amber-700">(액세스 코드 필요)</span></li>
-  <li><strong>결과 확인</strong> — <a href="/" class="text-blue-600 hover:underline">대시보드</a> 진입 후 카드 클릭으로 즉시 그 카드 범위 보기. <a href="/vendors" class="text-blue-600 hover:underline">업체 분석</a> 페이지에서 업체별 강점/약점도 자동 집계</li>
+  <li><strong>분류 + 긍부정 평가 실행</strong> — <a href="/analyze" class="text-blue-600 hover:underline">리뷰 분류 및 긍부정 평가</a>에서 소스 선택, 분류 모드 (자동 / 수동) 선택, 이름 입력 후 실행 <span class="text-amber-700">(액세스 코드 필요)</span></li>
+  <li><strong>결과 확인</strong> — <a href="/" class="text-blue-600 hover:underline">대시보드</a> 진입 후 카드 클릭으로 즉시 그 카드 범위 보기. <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a> 페이지에서 업체별 강점/약점도 자동 집계</li>
 </ol>
 
-<h2 id="sources">3. 소스 추가 — 4가지 채널</h2>
+<h2 id="sources">3. 리뷰 수집 — 4가지 채널 <span class="text-sm text-gray-500">(사이드바: <b>리뷰 수집</b>, 구 "소스")</span></h2>
 
 <h3>3.1 Google Play</h3>
 <ol>
@@ -139,7 +139,7 @@
   LLM 분류 정확도가 크게 올라갑니다. 빈 설명은 분류 품질 저하의 가장 큰 원인.
 </div>
 
-<h2 id="analyze">5. 분석 실행 — 자동 vs 수동</h2>
+<h2 id="analyze">5. 리뷰 분류 및 긍부정 평가 — 자동 vs 수동 <span class="text-sm text-gray-500">(사이드바: <b>리뷰 분류 및 긍부정 평가</b>, 구 "분석")</span></h2>
 <p>분석 페이지의 가장 큰 선택지는 <strong>분류 방식</strong>입니다:</p>
 
 <h3>5.1 자동 모드 (기본 추천)</h3>
@@ -258,8 +258,8 @@
   <li><strong>마인드맵 ⟳ 새로고침 버튼</strong> → 활성 카드 기준 다시 로드 (LLM 비용 없음, 캐시 우선)</li>
 </ul>
 
-<h2 id="vendors">8. 업체 분석 페이지 (NEW)</h2>
-<p><a href="/vendors" class="text-blue-600 hover:underline">업체 분석</a> 메뉴 — 모든 소스를 <strong>업체 stem</strong> (display_name 의 첫 단어) 기준으로 묶어 강점/약점을 집계합니다.</p>
+<h2 id="vendors">8. 업체 강/약점 분석 페이지 <span class="text-sm text-gray-500">(사이드바: <b>업체 강/약점 분석</b>, 구 "업체 분석")</span></h2>
+<p><a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a> 메뉴 — 모든 소스를 <strong>업체 stem</strong> (display_name 의 첫 단어) 기준으로 묶어 강점/약점을 집계합니다.</p>
 
 <ul>
   <li><strong>신규 LLM 호출 0건</strong> — 기존 분석 결과 가공만</li>
@@ -301,8 +301,8 @@
   <strong>예시 시나리오:</strong> Weight Watchers Program의 <em>체중 감량 성과 공유</em>(강점) 클릭 → 모달 열림 → "지속적 식단·습관 형성 (24)", "커뮤니티 응원 (18)", "포인트 시스템 (17)" 같은 원인이 차트로 표시 → 각 원인 펼치면 실제 리뷰 인용 → 💾 저장.
 </div>
 
-<h2 id="competitive">9. 경쟁력 분석 페이지 (NEW)</h2>
-<p><a href="/competitive" class="text-blue-600 hover:underline">경쟁력 분석</a> 메뉴 — 사용자가 입력한 <strong>경쟁력 요소</strong>(예: "헬스 데이터 기반 AI 코칭")에 의미상 부합하는 강점을 보유한 업체를 자동 랭킹.</p>
+<h2 id="competitive">9. 경쟁력 분류 페이지 <span class="text-sm text-gray-500">(사이드바: <b>경쟁력 분류(베타)</b>, 구 "경쟁력 분석")</span></h2>
+<p><a href="/competitive" class="text-blue-600 hover:underline">경쟁력 분류(베타)</a> 메뉴 — 사용자가 입력한 <strong>경쟁력 요소</strong>(예: "헬스 데이터 기반 AI 코칭")에 의미상 부합하는 강점을 보유한 업체를 자동 랭킹.</p>
 
 <ul>
   <li>입력란에 요소 텍스트 입력 후 <strong>[분석]</strong> 클릭 (Enter 도 가능)</li>
@@ -366,7 +366,7 @@
   <li>per-card export 와 워크스페이스 export 모두에 포함됨</li>
 </ul>
 
-<h2 id="reviews">11. 리뷰 탐색 + 내보내기 + 번역</h2>
+<h2 id="reviews">11. 전체 리뷰 보기 + 내보내기 + 번역 <span class="text-sm text-gray-500">(사이드바: <b>전체 리뷰 보기</b>, 구 "리뷰")</span></h2>
 <ul>
   <li>리뷰 페이지 상단에도 <strong>조사 카드 그리드</strong>가 표시됨 — 클릭하면 그 카드 범위의 리뷰만 표시</li>
   <li>좌측 사이드바 필터(감성/기간/키워드)로 카드 범위 안에서 추가 필터링 가능</li>
