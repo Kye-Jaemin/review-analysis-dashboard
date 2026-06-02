@@ -287,6 +287,10 @@ async def _call_claude(
         f"           contribute to simple_responses INSTEAD.\n"
         f"  - examples: 2–3 SHORT (<60 chars) representative quotes,\n"
         f"              preserve the original review language.\n"
+        f"  - review_ids: ARRAY of the [N] integer IDs (the brackets in\n"
+        f"                the input) for the N reviews whose PRIMARY\n"
+        f"                reason is this. The length MUST equal `count`.\n"
+        f"                Every ID must come from the input — never invent.\n"
         f"  Order reasons by count DESC. Skip vague catch-all reasons\n"
         f"  (\"users liked it\", \"it works\") — reasons must be SUBSTANTIVE\n"
         f"  and DISTINCT.\n\n"
@@ -294,15 +298,19 @@ async def _call_claude(
         f"  - count: how many reviews in the input only stated the outcome\n"
         f"           or gave generic {sub_polarity} feedback without\n"
         f"           explaining why\n"
-        f"  - examples: 3–5 SHORT (<60 chars) representative quotes\n\n"
+        f"  - examples: 3–5 SHORT (<60 chars) representative quotes\n"
+        f"  - review_ids: same idea — IDs of every outcome-only review.\n\n"
         f"Sum of (reasons[*].count + simple_responses.count) MUST be ≤\n"
-        f"total reviews in input. Every review is counted AT MOST ONCE.\n\n"
+        f"total reviews in input. Every review is counted AT MOST ONCE\n"
+        f"across reasons AND simple_responses — never duplicate an ID.\n\n"
         f"Output JSON only, no prose, no markdown fences:\n"
         f"{{\n"
         f'  "reasons": [\n'
-        f'    {{"reason": "...", "count": N, "examples": ["...", "..."]}}\n'
+        f'    {{"reason": "...", "count": N, "examples": ["..."],\n'
+        f'      "review_ids": [<int>, <int>, ...]}}\n'
         f"  ],\n"
-        f'  "simple_responses": {{"count": N, "examples": ["...", "..."]}}\n'
+        f'  "simple_responses": {{"count": N, "examples": ["..."],\n'
+        f'                        "review_ids": [<int>, ...]}}\n'
         f"}}"
     )
     user_msg = "Reviews:\n" + "\n".join(
@@ -345,11 +353,17 @@ async def _call_claude(
                     ex = str(e).strip()
                     if ex:
                         examples.append(ex[:120])
-            reasons_out.append({"reason": reason[:120], "count": max(0, count), "examples": examples})
+            review_ids = _parse_review_ids(item.get("review_ids"))
+            reasons_out.append({
+                "reason": reason[:120],
+                "count": max(0, count),
+                "examples": examples,
+                "review_ids": review_ids,
+            })
 
     # Simple responses bucket
     sr_raw = parsed.get("simple_responses") or {}
-    simple_out = {"count": 0, "examples": []}
+    simple_out = {"count": 0, "examples": [], "review_ids": []}
     if isinstance(sr_raw, dict):
         try:
             simple_out["count"] = max(0, int(sr_raw.get("count") or 0))
@@ -363,8 +377,49 @@ async def _call_claude(
                 ex = str(e).strip()
                 if ex:
                     simple_out["examples"].append(ex[:120])
+        simple_out["review_ids"] = _parse_review_ids(sr_raw.get("review_ids"))
 
     return {"reasons": reasons_out, "simple_responses": simple_out}
+
+
+def _parse_review_ids(raw) -> list[int]:
+    """Best-effort int conversion of an LLM-supplied review_ids list."""
+    if not isinstance(raw, list):
+        return []
+    out: list[int] = []
+    for x in raw:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _sanitize_review_ids(
+    reasons: list[dict], simple: dict, sample_ids: set[int]
+) -> tuple[list[dict], dict]:
+    """Server-side defense against LLM hallucination on review_ids.
+
+      - Drop IDs that weren't in the original sample (the LLM might invent).
+      - Dedup across reasons AND simple — every review can belong to one
+        bucket at most (matches the prompt rule).
+      - First-occurrence wins (preserves the ordering the model produced).
+    """
+    seen: set[int] = set()
+    for r in reasons:
+        deduped: list[int] = []
+        for rid in r.get("review_ids", []):
+            if rid in sample_ids and rid not in seen:
+                seen.add(rid)
+                deduped.append(rid)
+        r["review_ids"] = deduped
+    simple_deduped: list[int] = []
+    for rid in simple.get("review_ids", []):
+        if rid in sample_ids and rid not in seen:
+            seen.add(rid)
+            simple_deduped.append(rid)
+    simple["review_ids"] = simple_deduped
+    return reasons, simple
 
 
 def _cap_counts(reasons: list[dict], simple: dict, sample_size: int) -> tuple[list[dict], dict]:
@@ -489,9 +544,26 @@ async def extract_reasons(
         summary_lang=summary_lang,
         model=chosen_model,
     )
-    # Cap counts against actual sample size (truth override).
+    # Drop hallucinated review_ids + dedup across buckets BEFORE cap so
+    # the counts we trust match the IDs we'll later expand against.
+    sample_ids = {r["id"] for r in sample}
+    san_reasons, san_simple = _sanitize_review_ids(
+        llm_out["reasons"], llm_out["simple_responses"], sample_ids
+    )
+    # Truth override: snap each bucket's `count` to its actual id-list
+    # length when the LLM over-reported (count > len(review_ids)). This
+    # keeps the chart, the simple-box badge, and the expand-button count
+    # in lockstep no matter what the LLM declared.
+    for r in san_reasons:
+        ids_n = len(r.get("review_ids", []))
+        if ids_n and ids_n < r.get("count", 0):
+            r["count"] = ids_n
+    if len(san_simple.get("review_ids", [])) and len(san_simple["review_ids"]) < san_simple.get("count", 0):
+        san_simple["count"] = len(san_simple["review_ids"])
+    # Final cap against sample_size — defense against pathological LLMs
+    # that still over-report after sanitize.
     capped_reasons, capped_simple = _cap_counts(
-        llm_out["reasons"], llm_out["simple_responses"], len(sample)
+        san_reasons, san_simple, len(sample)
     )
 
     result = {

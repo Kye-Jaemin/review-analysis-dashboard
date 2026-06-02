@@ -611,13 +611,29 @@ function _renderResult(data, saved) {
     simpleBox.classList.add('hidden');
   }
 
-  // Reason list (with expandable examples)
+  // Reason list (with expandable examples + on-demand "show all reviews")
   const listEl = document.getElementById('reasons-list');
   listEl.innerHTML = reasons.map((r, i) => {
     const exs = (r.examples || []).map(e =>
       `<li class="text-[12px] text-gray-700 pl-2 border-l-2 ${isPositive ? 'border-green-200' : 'border-red-200'}">${escapeHtml(e)}</li>`
     ).join('');
     const bg = isPositive ? 'bg-green-50/40 border-green-100' : 'bg-rose-50/40 border-rose-100';
+    const ids = (r.review_ids || []).filter(Number.isFinite);
+    // "전체 리뷰 보기" button only when the reason has review_ids and the
+    // count is greater than what we've already shown as examples.
+    // Older saved cards (pre-review_ids schema) have an empty list here
+    // and don't get the button.
+    const showAllBtn = ids.length > 0 ? `
+      <button type="button"
+              data-reason-idx="${i}"
+              data-reason-ids="${ids.join(',')}"
+              data-reason-label="${escapeHtml(r.reason)}"
+              data-reason-band="${isPositive ? 'positive' : 'negative'}"
+              class="reason-expand-btn mt-2 ml-8 text-[11px] font-medium ${isPositive ? 'text-green-700 hover:text-green-900' : 'text-red-700 hover:text-red-900'} underline">
+        📋 {% if lang == 'ko' %}전체 리뷰 보기{% else %}Show all reviews{% endif %} (${ids.length})
+      </button>
+      <div class="reason-expand-target mt-2 ml-8 hidden"></div>
+    ` : '';
     return `
       <li class="${bg} border rounded p-2.5">
         <details ${i < 2 ? 'open' : ''}>
@@ -627,9 +643,42 @@ function _renderResult(data, saved) {
             <span class="tabular-nums text-xs ${isPositive ? 'text-green-700' : 'text-red-700'} font-semibold">${r.count || 0}</span>
           </summary>
           ${exs ? `<ul class="mt-2 ml-8 space-y-1">${exs}</ul>` : ''}
+          ${showAllBtn}
         </details>
       </li>`;
   }).join('');
+
+  // Wire up expand buttons (delegated would also work; explicit keeps
+  // state per click predictable).
+  listEl.querySelectorAll('.reason-expand-btn').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      _expandReasonReviews(btn);
+    });
+  });
+
+  // Also offer expand on the simple-responses bucket if it has IDs.
+  const simpleIds = (simple.review_ids || []).filter(Number.isFinite);
+  const simpleEx = document.getElementById('reasons-simple-examples');
+  if (simpleIds.length > 0 && simpleEx) {
+    // Append a single expand button below the example bullets.
+    const wrap = document.createElement('div');
+    wrap.className = 'mt-2';
+    wrap.innerHTML = `
+      <button type="button"
+              data-reason-idx="simple"
+              data-reason-ids="${simpleIds.join(',')}"
+              data-reason-label="${'{% if lang == "ko" %}단순 결과 진술{% else %}Outcome-only{% endif %}'}"
+              class="reason-expand-btn text-[11px] font-medium text-gray-700 hover:text-gray-900 underline">
+        📋 {% if lang == 'ko' %}전체 리뷰 보기{% else %}Show all reviews{% endif %} (${simpleIds.length})
+      </button>
+      <div class="reason-expand-target mt-2 hidden"></div>`;
+    simpleEx.parentElement.appendChild(wrap);
+    wrap.querySelector('.reason-expand-btn').addEventListener('click', (ev) => {
+      ev.preventDefault();
+      _expandReasonReviews(wrap.querySelector('.reason-expand-btn'));
+    });
+  }
 
   _showOnly('reasons-result');
   _updateFooter(saved, true);
@@ -775,6 +824,71 @@ function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// On-demand fetch + render of the FULL review list for a single reason.
+// Triggered by clicking "📋 전체 리뷰 보기 (N)" next to a reason. The IDs
+// were captured server-side during the initial LLM extract, so this is a
+// pure DB hydration — no extra Claude call.
+async function _expandReasonReviews(btn) {
+  const target = btn.parentElement.querySelector('.reason-expand-target')
+              || btn.nextElementSibling;
+  if (!target) return;
+  // Toggle off if already expanded.
+  if (!target.classList.contains('hidden') && target.dataset.loaded === '1') {
+    target.classList.add('hidden');
+    btn.textContent = btn.textContent.replace('▲', '📋').replace(
+      /({% if lang == "ko" %}닫기{% else %}Hide{% endif %})/, '{% if lang == "ko" %}전체 리뷰 보기{% else %}Show all reviews{% endif %}');
+    return;
+  }
+  const ids = (btn.dataset.reasonIds || '').split(',').filter(Boolean);
+  if (!ids.length) return;
+  target.classList.remove('hidden');
+  target.innerHTML = `<div class="text-[11px] text-gray-500 italic py-2">{% if lang == 'ko' %}리뷰 불러오는 중…{% else %}Loading reviews…{% endif %}</div>`;
+
+  try {
+    const params = new URLSearchParams();
+    params.append('ids', ids.join(','));
+    const res = await fetch('/api/vendor-reasons/reviews-by-ids?' + params.toString());
+    if (!res.ok) {
+      target.innerHTML = `<div class="text-[11px] text-rose-700">{% if lang == 'ko' %}리뷰 로드 실패{% else %}Failed to load{% endif %} (HTTP ${res.status})</div>`;
+      return;
+    }
+    const data = await res.json();
+    const reviews = data.reviews || [];
+    if (!reviews.length) {
+      target.innerHTML = `<div class="text-[11px] text-gray-500">{% if lang == 'ko' %}리뷰 없음{% else %}No reviews{% endif %}</div>`;
+      return;
+    }
+    const band = btn.dataset.reasonBand || 'positive';
+    const accent = band === 'positive' ? 'border-green-200' : 'border-red-200';
+    target.innerHTML = `
+      <div class="text-[11px] text-gray-600 mb-2 font-medium">
+        ${reviews.length}{% if lang == "ko" %}건 표시 ({% else %} reviews ({% endif %}${data.requested}{% if lang == "ko" %}건 중){% else %} requested){% endif %}
+      </div>
+      <ul class="space-y-1.5 max-h-[280px] overflow-y-auto border border-gray-200 rounded p-2 bg-white">
+        ${reviews.map(r => {
+          const stars = r.rating ? '★'.repeat(Math.max(0, Math.min(5, r.rating))) : '';
+          const sentChip = r.sentiment ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">${escapeHtml(r.sentiment)}</span>` : '';
+          const dateStr = r.posted_at ? r.posted_at.slice(0, 10) : (r.collected_at ? r.collected_at.slice(0, 10) : '');
+          return `
+            <li class="border-l-2 ${accent} pl-2 py-1">
+              <div class="flex items-center gap-2 text-[10px] text-gray-500 mb-0.5">
+                ${stars ? `<span class="text-amber-500">${stars}</span>` : ''}
+                ${sentChip}
+                ${dateStr ? `<span class="ml-auto">${dateStr}</span>` : ''}
+              </div>
+              <div class="text-[12px] text-gray-800 whitespace-pre-line break-words">${escapeHtml(r.text)}</div>
+            </li>`;
+        }).join('')}
+      </ul>`;
+    target.dataset.loaded = '1';
+    btn.textContent = '▲ {% if lang == "ko" %}닫기{% else %}Hide{% endif %} (' + reviews.length + ')';
+    // The modal grew taller — reposition so it doesn't run off screen.
+    if (_reasonsState.trigger) _positionModalNear(_reasonsState.trigger);
+  } catch (e) {
+    target.innerHTML = `<div class="text-[11px] text-rose-700">${escapeHtml(String(e))}</div>`;
+  }
 }
 
 // Wire up clicks. Delegated to body for resilience across HTMX swaps.

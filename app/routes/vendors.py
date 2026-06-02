@@ -228,3 +228,74 @@ async def delete_reason_card(
     if not ok:
         raise HTTPException(404, "card not found")
     return {"deleted": card_id}
+
+
+# ----------------------------------------------------------------------------
+# Per-reason "show all reviews" expansion
+# ----------------------------------------------------------------------------
+#
+# When the user clicks a reason row in the modal, the frontend POSTs the
+# list of review_ids the LLM assigned to that reason and gets back the
+# full review texts. No additional LLM call — the IDs were already
+# captured at extract time.
+
+from sqlalchemy import select  # noqa: E402 — local import keeps the
+# top-of-file imports clean while this section is self-contained.
+from app.models import Analysis, Review  # noqa: E402
+
+
+@router.get("/api/vendor-reasons/reviews-by-ids")
+async def reviews_by_ids(
+    ids: str = Query(..., description="comma-separated review ids"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Hydrate a list of review_ids into their full text + metadata.
+    Pure DB read, no LLM call. Used by the reason-row click expand
+    so the user can see the entire population of reviews that fed
+    a single reason.
+    """
+    try:
+        id_list = [int(x) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, "invalid ids — must be comma-separated integers")
+    if not id_list:
+        return {"reviews": []}
+    # Safety cap. Even very loose categories rarely tag 500+ reviews to
+    # a single causal reason; anything bigger is almost certainly a bug.
+    if len(id_list) > 500:
+        id_list = id_list[:500]
+
+    rows = (
+        await session.execute(
+            select(
+                Review.id,
+                Review.text,
+                Review.rating,
+                Review.author,
+                Review.posted_at,
+                Review.collected_at,
+                Analysis.sentiment,
+                Analysis.sentiment_score,
+            )
+            .join(Analysis, Analysis.review_id == Review.id, isouter=True)
+            .where(Review.id.in_(id_list))
+        )
+    ).all()
+
+    by_id: dict[int, dict] = {}
+    for rid, text, rating, author, posted, collected, sent, sscore in rows:
+        s_key = sent.value if hasattr(sent, "value") else (str(sent) if sent else None)
+        by_id[int(rid)] = {
+            "id": int(rid),
+            "text": text or "",
+            "rating": int(rating) if rating is not None else None,
+            "author": author or "",
+            "posted_at": posted.isoformat() if posted else None,
+            "collected_at": collected.isoformat() if collected else None,
+            "sentiment": s_key,
+            "sentiment_score": int(sscore) if sscore is not None else None,
+        }
+    # Preserve the request order so the user sees the same sequence the
+    # LLM produced (typically rough strength-of-signal order).
+    ordered = [by_id[i] for i in id_list if i in by_id]
+    return {"reviews": ordered, "found": len(ordered), "requested": len(id_list)}
