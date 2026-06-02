@@ -74,10 +74,16 @@ SAMPLE_LIMIT = 3
 MAX_MATCHES_PER_VENDOR = 5
 
 # How many categories we send to Claude in a single completion. ~110
-# distinct names exist in the current dataset (well within one call) but
-# we batch defensively so a future workspace with hundreds of cards
-# doesn't bust the context window. Each batch is a separate LLM call.
-LLM_BATCH_SIZE = 60
+# distinct names exist in the current dataset. Each scored entry is a
+# ~50-token JSON object ({"name": "<korean topic>", "relevance": 0.42}),
+# so 30 items fit comfortably in a 4096-token output budget with margin
+# for the JSON skeleton. Each batch is a separate LLM call.
+LLM_BATCH_SIZE = 30
+
+# Output budget per LLM call. Empirically 30 items × ~50 tokens = 1500,
+# plus skeleton overhead. 4096 leaves plenty of headroom even if a future
+# prompt makes the per-entry output a bit chattier.
+LLM_MAX_TOKENS = 4096
 
 
 def _strip_fences(s: str) -> str:
@@ -139,14 +145,22 @@ async def _score_categories(
     client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     resp = await client.messages.create(
         model=model,
-        max_tokens=2048,
+        max_tokens=LLM_MAX_TOKENS,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
     text = _strip_fences(
         "".join(getattr(b, "text", "") for b in resp.content)
     )
-    parsed = json.loads(text)
+    # Defensive parse: if Claude truncates output (very unlikely now that
+    # we batch 30 items into a 4096-token budget, but the failure mode is
+    # ugly enough — the whole request returned 400 — that we'd rather
+    # degrade gracefully). On parse failure, return an empty score map
+    # for this batch; downstream code treats unknown names as relevance=0.
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
     out: dict[str, float] = {}
     for s in parsed.get("scores", []) or []:
         if not isinstance(s, dict):
