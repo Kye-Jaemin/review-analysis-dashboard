@@ -422,10 +422,96 @@
       </div>
     </div>
 
+    {# ========== PARTIAL MATCHES (collapsed by default) ==========
+       Vendors whose best category fell in [0.3, threshold). Lets the
+       user audit "why was vendor X not in the main ranking?" —
+       directly shows the LLM-assigned relevance so the dimension
+       mismatch (편의 vs 정확도 등) is visible. #}
+    {% set ps = result.get('partial_strength_matches', []) %}
+    {% set pw = result.get('partial_weakness_matches', []) %}
+    {% if ps or pw %}
+      <div class="border border-gray-200 rounded-lg bg-gray-50/40" x-data="{ show: false }">
+        <button type="button" @click="show = !show"
+                class="w-full px-4 py-3 flex items-center gap-2 text-left hover:bg-gray-100/60 transition-colors">
+          <span class="text-base">🔍</span>
+          <span class="font-semibold text-gray-800 text-sm">
+            부분 매칭 후보 (임계값 {{ '%.2f'|format(result.threshold) }} 미만, ≥ 0.30)
+          </span>
+          <span class="text-[11px] text-gray-500 ml-auto">
+            강점 {{ ps|length }} · 약점 {{ pw|length }}
+            <span x-text="show ? '▲' : '▼'" class="ml-1"></span>
+          </span>
+        </button>
+        <div x-show="show" x-collapse class="border-t border-gray-200 divide-y divide-gray-200">
+          {% if ps %}
+            <div class="px-4 py-3">
+              <div class="text-[11px] font-semibold text-green-800 mb-2">💪 강점 측 부분 매칭</div>
+              <ul class="space-y-1.5">
+                {% for row in ps %}
+                  <li class="flex items-center gap-2 text-xs">
+                    {% if row.vendor.icon_url %}
+                      <img src="{{ row.vendor.icon_url }}" alt=""
+                           class="w-5 h-5 rounded shrink-0 object-cover"
+                           onerror="this.style.display='none'" />
+                    {% endif %}
+                    <span class="font-medium text-gray-900 truncate" style="max-width:12rem"
+                          title="{{ row.vendor.display }}">{{ row.vendor.display }}</span>
+                    <span class="text-gray-400">·</span>
+                    <span class="text-gray-700 truncate flex-1 min-w-0"
+                          title="{{ row.top_partial.name }}">{{ row.top_partial.name }}</span>
+                    <span class="text-right shrink-0 tabular-nums">
+                      <span class="text-blue-700 font-semibold">매칭 {{ (row.top_partial.relevance * 100)|round(0, 'common')|int }}%</span>
+                      <span class="text-gray-500">·</span>
+                      <span class="text-green-700">긍정 {{ (row.top_partial.pos_pct * 100)|round(0, 'common')|int }}%</span>
+                      <span class="text-gray-500">({{ row.top_partial.total }})</span>
+                    </span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+          {% if pw %}
+            <div class="px-4 py-3">
+              <div class="text-[11px] font-semibold text-rose-800 mb-2">🚩 약점 측 부분 매칭</div>
+              <ul class="space-y-1.5">
+                {% for row in pw %}
+                  <li class="flex items-center gap-2 text-xs">
+                    {% if row.vendor.icon_url %}
+                      <img src="{{ row.vendor.icon_url }}" alt=""
+                           class="w-5 h-5 rounded shrink-0 object-cover"
+                           onerror="this.style.display='none'" />
+                    {% endif %}
+                    <span class="font-medium text-gray-900 truncate" style="max-width:12rem"
+                          title="{{ row.vendor.display }}">{{ row.vendor.display }}</span>
+                    <span class="text-gray-400">·</span>
+                    <span class="text-gray-700 truncate flex-1 min-w-0"
+                          title="{{ row.top_partial.name }}">{{ row.top_partial.name }}</span>
+                    <span class="text-right shrink-0 tabular-nums">
+                      <span class="text-blue-700 font-semibold">매칭 {{ (row.top_partial.relevance * 100)|round(0, 'common')|int }}%</span>
+                      <span class="text-gray-500">·</span>
+                      <span class="text-rose-700">부정 {{ (row.top_partial.neg_pct * 100)|round(0, 'common')|int }}%</span>
+                      <span class="text-gray-500">({{ row.top_partial.total }})</span>
+                    </span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+          <div class="px-4 py-2 text-[10px] text-gray-500 italic">
+            여기 표시된 항목은 LLM이 메인 랭킹 임계값(0.5) 아래로 점수화한 카테고리입니다.
+            대개 같은 토픽이라도 <b>차원이 다를 때</b>(편의↔정확도, 가격↔접근성 등)
+            점수가 낮아집니다. 검색어를 정확/편의/가격 등의 차원으로 더 구체화하면
+            매칭이 명확해집니다.
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
     {# Bottom footnote #}
     <div class="text-[11px] text-gray-500 italic">
       매칭도는 LLM이 카테고리 이름과 설명을 의미 기반으로 평가한 0–1 점수입니다.
       Wilson 점수는 표본수를 반영한 긍정/부정 비율의 95% 신뢰구간 하한입니다.
+      LLM은 <code class="font-mono bg-gray-100 px-1 rounded">temperature=0</code>으로 호출되어 같은 입력은 같은 점수를 반환합니다.
     </div>
   </div>
 {% endif %}

@@ -68,6 +68,11 @@ from app.services.vendors import (
 # show the threshold explanation alongside results.
 DEFAULT_THRESHOLD = 0.5
 
+# Floor below which a category is too unrelated to be worth surfacing
+# even as a "partial match" debug hint. Anything below this is treated
+# as "the LLM is sure this doesn't apply" and dropped silently.
+PARTIAL_FLOOR = 0.3
+
 # Hard cap on sample reviews returned per matching category. Three is
 # enough to ground the rating in real text without bloating the response.
 SAMPLE_LIMIT = 3
@@ -120,17 +125,32 @@ async def _score_categories(
         "  1.0  the category IS this factor (essentially the same concept)\n"
         "  0.7  strongly related — a clear sub-aspect or near-synonym\n"
         "  0.4  tangentially related — shares some surface words but\n"
-        "       different concept\n"
+        "       different concept or dimension\n"
         "  0.0  unrelated\n\n"
-        "Examples:\n"
-        '  factor "AI 코칭", category "AI 코치 기능"  → 0.95\n'
-        '  factor "AI 코칭", category "운동 추천"      → 0.50\n'
-        '  factor "AI 코칭", category "구독 결제"      → 0.00\n'
-        '  factor "배터리 수명", category "Oura 링 배터리 수명" → 0.95\n'
-        '  factor "음식 기록 편의성", category "사진 촬영 식사 기록" → 0.80\n\n'
+        "CRITICAL — DIMENSION RULE:\n"
+        "  A category and a factor can share the same TOPIC but evaluate\n"
+        "  different DIMENSIONS of it (convenience / accuracy / speed /\n"
+        "  price / availability / aesthetics). When the dimensions\n"
+        "  differ, score LOW (≤ 0.45) even if the topic words overlap.\n"
+        "  Only categories that match BOTH the topic AND the dimension\n"
+        "  earn ≥ 0.7.\n\n"
+        "Examples (study the dimension column):\n"
+        '  factor "AI 코칭",                 category "AI 코치 기능"           → 0.95   (same topic+dim)\n'
+        '  factor "AI 코칭",                 category "운동 추천"              → 0.50   (related topic)\n'
+        '  factor "AI 코칭",                 category "구독 결제"              → 0.00   (unrelated)\n'
+        '  factor "배터리 수명",              category "Oura 링 배터리 수명"    → 0.95   (same)\n'
+        '  factor "음식 기록 편의성"   [편의], category "사진 촬영 식사 기록"   → 0.85   (convenience ↔ convenience)\n'
+        '  factor "음식 기록 편의성"   [편의], category "AI 칼로리 측정 정확도" → 0.30   (different DIM: 정확도)\n'
+        '  factor "Vision AI 인식 정확도" [정확], category "AI 인식 정확도"     → 0.95   (accuracy ↔ accuracy)\n'
+        '  factor "Vision AI 인식 정확도" [정확], category "사진 촬영 칼로리 인식" → 0.40   (different DIM: 편의)\n'
+        '  factor "Vision AI 인식 정확도" [정확], category "UI/UX 디자인"       → 0.05   (unrelated)\n'
+        '  factor "구독료 가격",       [가격], category "구독·결제"             → 0.85\n'
+        '  factor "구독료 가격",       [가격], category "구독 취소 후 접근"     → 0.30   (different DIM)\n\n'
         "Match on SEMANTIC meaning, not literal substring overlap. Languages\n"
         "may differ between factor and category — treat them as equivalent\n"
-        "(e.g. Korean factor vs English category, or vice versa).\n\n"
+        "(e.g. Korean factor vs English category, or vice versa). UI/UX,\n"
+        "design, navigation are unrelated to AI accuracy / coaching /\n"
+        "tracking unless the factor explicitly mentions interface.\n\n"
         "Output JSON only:\n"
         '  {"scores": [{"name": "<exact input name>", "relevance": <0..1>}, ...]}\n'
         "Include EVERY input category exactly once. No prose, no markdown."
@@ -149,6 +169,13 @@ async def _score_categories(
     resp = await client.messages.create(
         model=model,
         max_tokens=LLM_MAX_TOKENS,
+        # temperature=0 pins the LLM to its most-likely scoring path so
+        # the same (factor, universe) pair returns the same scores across
+        # calls. Without it Haiku samples at ~0.7 and borderline matches
+        # (around the 0.5 threshold) flip in/out of the ranking between
+        # consecutive submits, which surfaces as "why was SnapCalorie
+        # included last time but missing now?" confusion.
+        temperature=0.0,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
@@ -286,6 +313,8 @@ async def rank_vendors_by_factor(
             "score_formula": "max(relevance × Wilson_pos_score)",
             "strength_ranking": [],
             "weakness_ranking": [],
+            "partial_strength_matches": [],
+            "partial_weakness_matches": [],
             "universe_size": 0,
             "message": (
                 "분석된 자동 카테고리가 없습니다. 먼저 대시보드에서 카드를 "
@@ -304,6 +333,11 @@ async def rank_vendors_by_factor(
     # ---- 4. Per-vendor matching + sample fetch ----
     strength_rows: list[dict] = []
     weakness_rows: list[dict] = []
+    # Vendors whose best strength/weakness fell in [PARTIAL_FLOOR, threshold).
+    # Surfaced in a collapsed "🔍 부분 매칭" panel so the user can see WHY
+    # a vendor they expected (e.g. SnapCalorie) didn't reach the cutoff.
+    partial_strength_rows: list[dict] = []
+    partial_weakness_rows: list[dict] = []
 
     for v in vendors:
         src_ids = v.get("source_ids") or []
@@ -312,9 +346,22 @@ async def rank_vendors_by_factor(
 
         # ---- Strengths side ----
         s_matches: list[dict] = []
+        s_partial_best: Optional[dict] = None  # best below-threshold candidate
         for s in v.get("strengths", []):
             r = scores.get((s.get("name") or "").strip().lower(), 0.0)
             if r < threshold:
+                # Track for the partial-matches panel without fetching
+                # samples (cheap; samples only for the main ranking).
+                if r >= PARTIAL_FLOOR:
+                    candidate = {
+                        "name": s["name"],
+                        "relevance": round(r, 3),
+                        "pos_pct": round(float(s.get("pos_pct") or 0.0), 4),
+                        "pos_score": round(float(s.get("pos_score") or 0.0), 4),
+                        "total": int(s.get("total") or 0),
+                    }
+                    if not s_partial_best or candidate["relevance"] > s_partial_best["relevance"]:
+                        s_partial_best = candidate
                 continue
             pos_score = float(s.get("pos_score") or 0.0)
             match_score = r * pos_score
@@ -339,19 +386,20 @@ async def rank_vendors_by_factor(
             })
         s_matches.sort(key=lambda m: m["match_score"], reverse=True)
         s_matches = s_matches[:MAX_MATCHES_PER_VENDOR]
+        vendor_dict = {
+            "key": v["key"],
+            "display": v["display"],
+            "icon_url": v.get("icon_url"),
+            "source_ids": src_ids,
+            "review_count": v.get("review_count"),
+            "analyzed_count": v.get("analyzed_count"),
+            "avg_rating": v.get("avg_rating"),
+            "platforms": v.get("platforms", []),
+        }
         if s_matches:
             top = s_matches[0]
             strength_rows.append({
-                "vendor": {
-                    "key": v["key"],
-                    "display": v["display"],
-                    "icon_url": v.get("icon_url"),
-                    "source_ids": src_ids,
-                    "review_count": v.get("review_count"),
-                    "analyzed_count": v.get("analyzed_count"),
-                    "avg_rating": v.get("avg_rating"),
-                    "platforms": v.get("platforms", []),
-                },
+                "vendor": vendor_dict,
                 "score": top["match_score"],
                 "score_breakdown": {
                     "relevance": top["relevance"],
@@ -360,12 +408,30 @@ async def rank_vendors_by_factor(
                 },
                 "matches": s_matches,
             })
+        elif s_partial_best:
+            # Vendor didn't qualify for the main ranking but has a
+            # near-miss. Surface so the user can audit.
+            partial_strength_rows.append({
+                "vendor": vendor_dict,
+                "top_partial": s_partial_best,
+            })
 
         # ---- Weaknesses side ----
         w_matches: list[dict] = []
+        w_partial_best: Optional[dict] = None
         for w in v.get("weaknesses", []):
             r = scores.get((w.get("name") or "").strip().lower(), 0.0)
             if r < threshold:
+                if r >= PARTIAL_FLOOR:
+                    candidate = {
+                        "name": w["name"],
+                        "relevance": round(r, 3),
+                        "neg_pct": round(float(w.get("neg_pct") or 0.0), 4),
+                        "neg_score": round(float(w.get("neg_score") or 0.0), 4),
+                        "total": int(w.get("total") or 0),
+                    }
+                    if not w_partial_best or candidate["relevance"] > w_partial_best["relevance"]:
+                        w_partial_best = candidate
                 continue
             neg_score = float(w.get("neg_score") or 0.0)
             match_score = r * neg_score
@@ -393,16 +459,7 @@ async def rank_vendors_by_factor(
         if w_matches:
             top = w_matches[0]
             weakness_rows.append({
-                "vendor": {
-                    "key": v["key"],
-                    "display": v["display"],
-                    "icon_url": v.get("icon_url"),
-                    "source_ids": src_ids,
-                    "review_count": v.get("review_count"),
-                    "analyzed_count": v.get("analyzed_count"),
-                    "avg_rating": v.get("avg_rating"),
-                    "platforms": v.get("platforms", []),
-                },
+                "vendor": vendor_dict,
                 "score": top["match_score"],
                 "score_breakdown": {
                     "relevance": top["relevance"],
@@ -410,6 +467,11 @@ async def rank_vendors_by_factor(
                     "category": top["name"],
                 },
                 "matches": w_matches,
+            })
+        elif w_partial_best:
+            partial_weakness_rows.append({
+                "vendor": vendor_dict,
+                "top_partial": w_partial_best,
             })
 
     # ---- 5. Sort ----
@@ -422,12 +484,23 @@ async def rank_vendors_by_factor(
         reverse=True,
     )
 
+    # Sort partial-match lists by relevance desc so the closest near-misses
+    # surface first in the collapsed debug panel.
+    partial_strength_rows.sort(
+        key=lambda r: r["top_partial"]["relevance"], reverse=True
+    )
+    partial_weakness_rows.sort(
+        key=lambda r: r["top_partial"]["relevance"], reverse=True
+    )
+
     return {
         "factor": factor,
         "threshold": threshold,
         "score_formula": "max(relevance × Wilson_pos_score)",
         "strength_ranking": strength_rows,
         "weakness_ranking": weakness_rows,
+        "partial_strength_matches": partial_strength_rows,
+        "partial_weakness_matches": partial_weakness_rows,
         "universe_size": len(universe),
     }
 
