@@ -550,15 +550,20 @@ async def extract_reasons(
     san_reasons, san_simple = _sanitize_review_ids(
         llm_out["reasons"], llm_out["simple_responses"], sample_ids
     )
-    # Truth override: snap each bucket's `count` to its actual id-list
-    # length when the LLM over-reported (count > len(review_ids)). This
-    # keeps the chart, the simple-box badge, and the expand-button count
-    # in lockstep no matter what the LLM declared.
+    # Truth override (bidirectional): the chart bar, the simple-box
+    # badge, and the "전체 리뷰 보기 (N)" button MUST agree on the same
+    # N. Sanitize already dropped duplicates and hallucinated IDs, so
+    # the surviving review_ids list IS the truth. Snap count to its
+    # length whenever the LLM declared anything different.
+    #
+    # Edge case: when sanitize returned 0 valid IDs (older runs / model
+    # didn't include any), we leave count alone — falling back to the
+    # LLM's self-reported count is better than rewriting it to 0.
     for r in san_reasons:
         ids_n = len(r.get("review_ids", []))
-        if ids_n and ids_n < r.get("count", 0):
+        if ids_n:
             r["count"] = ids_n
-    if len(san_simple.get("review_ids", [])) and len(san_simple["review_ids"]) < san_simple.get("count", 0):
+    if san_simple.get("review_ids"):
         san_simple["count"] = len(san_simple["review_ids"])
     # Final cap against sample_size — defense against pathological LLMs
     # that still over-report after sanitize.
