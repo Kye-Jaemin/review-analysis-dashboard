@@ -322,6 +322,21 @@
 
         <!-- Reason list with examples -->
         <ol id="reasons-list" class="space-y-2"></ol>
+
+        <!-- Simple-response bucket: outcome-only / generic reviews that
+             don't explain the mechanism. Shown as a small annotated box
+             so the user can tell at a glance how much of the sample
+             was substantive vs how much was just "I lost weight!" -->
+        <div id="reasons-simple" class="hidden border border-gray-200 bg-gray-50 rounded p-3 text-sm">
+          <details>
+            <summary class="cursor-pointer flex items-center gap-2 font-medium text-gray-700">
+              <span class="text-base">💬</span>
+              <span class="flex-1">{% if lang == 'ko' %}단순 결과 진술 (원인 설명 없음){% else %}Outcome-only reviews (no causal explanation){% endif %}</span>
+              <span id="reasons-simple-count" class="tabular-nums text-gray-500 font-semibold"></span>
+            </summary>
+            <ul id="reasons-simple-examples" class="mt-2 ml-6 space-y-1 list-disc text-xs text-gray-600"></ul>
+          </details>
+        </div>
       </div>
     </div>
 
@@ -512,52 +527,84 @@ async function loadSavedReasons(cardId) {
 
 function _renderResult(data, saved) {
   const reasons = data.reasons || [];
-  if (!reasons.length) {
+  const simple = data.simple_responses || {count: 0, examples: []};
+  if (!reasons.length && !simple.count) {
     _showOnly('reasons-empty');
     _updateFooter(saved, false);
     return;
   }
-  // Meta line
+  // Meta line: total sample + causal count + simple count (with ratio)
   const metaEl = document.getElementById('reasons-meta');
   const parts = [];
-  parts.push(`{% if lang == 'ko' %}표본 <b>${data.sample_size || 0}</b>개 리뷰{% else %}sample of <b>${data.sample_size || 0}</b> reviews{% endif %}`);
+  const sampleN = data.sample_size || 0;
+  const causalN = reasons.reduce((s, r) => s + (r.count || 0), 0);
+  const simpleN = simple.count || 0;
+  parts.push(`{% if lang == 'ko' %}표본 <b>${sampleN}</b>개{% else %}sample <b>${sampleN}</b>{% endif %}`);
+  parts.push(`{% if lang == 'ko' %}인과 원인 <b class="text-blue-700">${causalN}</b>건{% else %}causal <b class="text-blue-700">${causalN}</b>{% endif %}`);
+  if (simpleN > 0) {
+    const simplePct = sampleN > 0 ? Math.round(simpleN * 100 / sampleN) : 0;
+    parts.push(`{% if lang == 'ko' %}단순 결과 <b class="text-gray-600">${simpleN}</b>건 (${simplePct}%){% else %}outcome-only <b class="text-gray-600">${simpleN}</b> (${simplePct}%){% endif %}`);
+  }
   if (data.model) parts.push(`<span class="text-gray-400">${data.model}</span>`);
   if (data.cached) parts.push(`<span class="text-emerald-700">⚡ {% if lang == 'ko' %}캐시됨{% else %}cached{% endif %}</span>`);
   if (saved && data.savedAt) parts.push(`<span class="text-blue-700">📅 ${data.savedAt.slice(0,16).replace('T',' ')}</span>`);
   metaEl.innerHTML = parts.join(' · ');
 
-  // Chart — horizontal bars
+  // Chart — horizontal bars. Hidden when there are no causal reasons
+  // (i.e. every review was outcome-only), since a chart of nothing is
+  // worse than no chart.
   if (_reasonsState.chart) { try { _reasonsState.chart.destroy(); } catch {} }
-  const ctx = document.getElementById('reasons-chart').getContext('2d');
-  const isPositive = data.band === 'positive';
-  const baseColor = isPositive ? 'rgba(22,163,74,0.85)' : 'rgba(220,38,38,0.85)';
-  const borderColor = isPositive ? 'rgb(22,163,74)' : 'rgb(220,38,38)';
-  _reasonsState.chart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: reasons.map(r => r.reason),
-      datasets: [{
-        label: '{% if lang == 'ko' %}리뷰 수{% else %}reviews{% endif %}',
-        data: reasons.map(r => r.count || 0),
-        backgroundColor: baseColor,
-        borderColor: borderColor,
-        borderWidth: 1,
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ctx.parsed.x + ' {% if lang == 'ko' %}건{% else %}reviews{% endif %}' } }
+  const canvas = document.getElementById('reasons-chart');
+  const chartWrap = canvas.parentElement;
+  if (reasons.length > 0) {
+    chartWrap.classList.remove('hidden');
+    const ctx = canvas.getContext('2d');
+    const isPositive = data.band === 'positive';
+    const baseColor = isPositive ? 'rgba(22,163,74,0.85)' : 'rgba(220,38,38,0.85)';
+    const borderColor = isPositive ? 'rgb(22,163,74)' : 'rgb(220,38,38)';
+    _reasonsState.chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: reasons.map(r => r.reason),
+        datasets: [{
+          label: '{% if lang == 'ko' %}리뷰 수{% else %}reviews{% endif %}',
+          data: reasons.map(r => r.count || 0),
+          backgroundColor: baseColor,
+          borderColor: borderColor,
+          borderWidth: 1,
+        }]
       },
-      scales: {
-        x: { beginAtZero: true, ticks: { precision: 0 } },
-        y: { ticks: { autoSkip: false, font: { size: 11 } } }
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ctx.parsed.x + ' {% if lang == 'ko' %}건{% else %}reviews{% endif %}' } }
+        },
+        scales: {
+          x: { beginAtZero: true, ticks: { precision: 0 } },
+          y: { ticks: { autoSkip: false, font: { size: 11 } } }
+        }
       }
-    }
-  });
+    });
+  } else {
+    chartWrap.classList.add('hidden');
+  }
+
+  // Simple-response box: hidden when there are no outcome-only reviews.
+  const simpleBox = document.getElementById('reasons-simple');
+  if (simpleN > 0) {
+    document.getElementById('reasons-simple-count').textContent =
+      simpleN + (sampleN > 0 ? ' / ' + sampleN : '');
+    const exEl = document.getElementById('reasons-simple-examples');
+    exEl.innerHTML = (simple.examples || []).map(e =>
+      `<li>${escapeHtml(e)}</li>`
+    ).join('') || `<li class="italic text-gray-400">{% if lang == 'ko' %}예시 없음{% else %}no examples{% endif %}</li>`;
+    simpleBox.classList.remove('hidden');
+  } else {
+    simpleBox.classList.add('hidden');
+  }
 
   // Reason list (with expandable examples)
   const listEl = document.getElementById('reasons-list');

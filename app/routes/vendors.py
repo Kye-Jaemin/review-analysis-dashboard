@@ -107,6 +107,20 @@ async def list_reason_cards(
     }
 
 
+def _unwrap_reasons(stored):
+    """Tolerate both shapes: old cards have `reasons` = bare list, new
+    cards have `reasons` = {reasons: [...], simple_responses: {...}}.
+    Returns (reasons_list, simple_responses_dict)."""
+    if isinstance(stored, list):
+        return stored, {"count": 0, "examples": []}
+    if isinstance(stored, dict):
+        return (
+            stored.get("reasons") or [],
+            stored.get("simple_responses") or {"count": 0, "examples": []},
+        )
+    return [], {"count": 0, "examples": []}
+
+
 @router.get("/api/vendor-reason-cards/{card_id}")
 async def get_reason_card(
     card_id: int, session: AsyncSession = Depends(get_session)
@@ -114,6 +128,7 @@ async def get_reason_card(
     card = await get_card(session, card_id)
     if not card:
         raise HTTPException(404, "card not found")
+    reasons, simple = _unwrap_reasons(card.reasons)
     return {
         "id": card.id,
         "vendor_key": card.vendor_key,
@@ -124,7 +139,8 @@ async def get_reason_card(
         "model_used": card.model_used,
         "sample_size": card.sample_size,
         "source_ids_snapshot": card.source_ids_snapshot,
-        "reasons": card.reasons,
+        "reasons": reasons,
+        "simple_responses": simple,
         "hidden": card.hidden,
         "created_at": card.created_at.isoformat() if card.created_at else None,
         "updated_at": card.updated_at.isoformat() if card.updated_at else None,
@@ -164,6 +180,7 @@ async def reanalyze_reason_card(
         raise HTTPException(503, str(e))
     if not card:
         raise HTTPException(404, "card not found")
+    reasons, simple = _unwrap_reasons(card.reasons)
     return {
         "id": card.id,
         "vendor_key": card.vendor_key,
@@ -174,7 +191,8 @@ async def reanalyze_reason_card(
         "model_used": card.model_used,
         "sample_size": card.sample_size,
         "source_ids_snapshot": card.source_ids_snapshot,
-        "reasons": card.reasons,
+        "reasons": reasons,
+        "simple_responses": simple,
         "updated_at": card.updated_at.isoformat() if card.updated_at else None,
     }
 

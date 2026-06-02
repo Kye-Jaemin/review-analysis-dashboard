@@ -223,9 +223,12 @@ async def _call_claude(
     band: str,
     summary_lang: str,
     model: str,
-) -> list[dict]:
-    """Ask Claude for 4–6 reasons. Returns raw reason list (no count
-    override yet — caller handles that)."""
+) -> dict:
+    """Ask Claude for 4–6 causal reasons + a separate simple-response
+    bucket. Returns
+      {"reasons": [{reason, count, examples}, ...],
+       "simple_responses": {count: int, examples: [str, ...]}}
+    (no count override yet — caller handles that)."""
     if not settings.ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
     from anthropic import AsyncAnthropic
@@ -236,6 +239,24 @@ async def _call_claude(
     description_line = (
         f"Category description: {category_description}\n" if category_description else ""
     )
+    # Polarity-aware examples for the "outcome vs cause" rule. For positive
+    # reviews simple = "X 했어요" / "lost N pounds"; for negative simple =
+    # "별로예요" / "doesn't work". The LLM gets concrete pattern matches
+    # for both languages so it doesn't have to guess.
+    if band == "positive":
+        outcome_examples = (
+            '       BAD  (outcome statement):  "100파운드 감량 성공", '
+            '"lost 20kg in a year", "체중이 빠졌어요", "great results"\n'
+            '       GOOD (causal mechanism):  "포인트 시스템이 칼로리를 의식하게 만들어줌", '
+            '"AI coach kept me accountable", "커뮤니티 응원이 동기 부여"'
+        )
+    else:
+        outcome_examples = (
+            '       BAD  (outcome statement):  "별로예요", "doesn\'t work for me", '
+            '"실망", "useless"\n'
+            '       GOOD (causal mechanism):  "동기화 오류로 데이터 손실", '
+            '"광고가 너무 잦아 사용 흐름 끊김", "AI 인식이 부정확해 매번 수정 필요"'
+        )
 
     system = (
         f"You analyze user reviews to surface the REASONS behind a specific "
@@ -244,24 +265,44 @@ async def _call_claude(
         f"Category: {category_name}\n"
         f"{description_line}"
         f"All reviews below share {polarity} sentiment about this category.\n\n"
-        f"Identify 4–6 distinct REASONS the users gave for their {sub_polarity} "
-        f"feedback. For each reason:\n"
+        f"CRITICAL — CAUSE vs OUTCOME:\n"
+        f"  A review that only STATES the outcome (\"I lost weight!\", "
+        f"\"앱이 별로\") is NOT a reason. A causal reason explains the\n"
+        f"  MECHANISM — what specifically about the product produced that\n"
+        f"  outcome, or what specifically went wrong.\n"
+        f"  Examples (study both lines):\n"
+        f"{outcome_examples}\n\n"
+        f"  Outcome-only reviews go into the SEPARATE `simple_responses`\n"
+        f"  bucket, NOT into the main reasons list. The user explicitly\n"
+        f"  wants to see causal mechanisms, with outcome-only counts\n"
+        f"  surfaced separately as a meta signal.\n\n"
+        f"For the main reasons:\n"
+        f"  Identify 4–6 distinct CAUSAL REASONS the users gave for their\n"
+        f"  {sub_polarity} feedback. For each reason:\n"
         f"  - reason: short label in {lang_label} (3–8 words, NOUN PHRASE,\n"
-        f"            describe WHY users felt this way, not just what feature\n"
-        f"            they mentioned)\n"
+        f"            describe the CAUSAL MECHANISM, not the outcome)\n"
         f"  - count: number of reviews whose PRIMARY reason is this.\n"
-        f"           IMPORTANT: each review contributes to AT MOST ONE reason\n"
-        f"           (its strongest); sum of counts MUST be ≤ total reviews.\n"
+        f"           IMPORTANT: each review contributes to AT MOST ONE\n"
+        f"           reason (its strongest), and outcome-only reviews\n"
+        f"           contribute to simple_responses INSTEAD.\n"
         f"  - examples: 2–3 SHORT (<60 chars) representative quotes,\n"
-        f"              preserve the original review language.\n\n"
-        f"Skip vague catch-all reasons (\"users liked it\", \"it works\") —\n"
-        f"the reasons must be SUBSTANTIVE and DISTINCT from each other.\n"
-        f"Order reasons by count DESC.\n\n"
+        f"              preserve the original review language.\n"
+        f"  Order reasons by count DESC. Skip vague catch-all reasons\n"
+        f"  (\"users liked it\", \"it works\") — reasons must be SUBSTANTIVE\n"
+        f"  and DISTINCT.\n\n"
+        f"For simple_responses:\n"
+        f"  - count: how many reviews in the input only stated the outcome\n"
+        f"           or gave generic {sub_polarity} feedback without\n"
+        f"           explaining why\n"
+        f"  - examples: 3–5 SHORT (<60 chars) representative quotes\n\n"
+        f"Sum of (reasons[*].count + simple_responses.count) MUST be ≤\n"
+        f"total reviews in input. Every review is counted AT MOST ONCE.\n\n"
         f"Output JSON only, no prose, no markdown fences:\n"
         f"{{\n"
         f'  "reasons": [\n'
         f'    {{"reason": "...", "count": N, "examples": ["...", "..."]}}\n'
-        f"  ]\n"
+        f"  ],\n"
+        f'  "simple_responses": {{"count": N, "examples": ["...", "..."]}}\n'
         f"}}"
     )
     user_msg = "Reviews:\n" + "\n".join(
@@ -281,37 +322,58 @@ async def _call_claude(
         parsed = json.loads(text)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"failed to parse LLM JSON: {e}; raw={text[:200]!r}")
+    # Reasons
     raw = parsed.get("reasons") or []
-    if not isinstance(raw, list):
-        return []
-    out: list[dict] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        reason = str(item.get("reason") or "").strip()
-        if not reason:
-            continue
+    reasons_out: list[dict] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            reason = str(item.get("reason") or "").strip()
+            if not reason:
+                continue
+            try:
+                count = int(item.get("count")) if item.get("count") is not None else 0
+            except (TypeError, ValueError):
+                count = 0
+            examples_raw = item.get("examples") or []
+            examples: list[str] = []
+            if isinstance(examples_raw, list):
+                for e in examples_raw[:EXAMPLES_PER_REASON]:
+                    if e is None:
+                        continue
+                    ex = str(e).strip()
+                    if ex:
+                        examples.append(ex[:120])
+            reasons_out.append({"reason": reason[:120], "count": max(0, count), "examples": examples})
+
+    # Simple responses bucket
+    sr_raw = parsed.get("simple_responses") or {}
+    simple_out = {"count": 0, "examples": []}
+    if isinstance(sr_raw, dict):
         try:
-            count = int(item.get("count")) if item.get("count") is not None else 0
+            simple_out["count"] = max(0, int(sr_raw.get("count") or 0))
         except (TypeError, ValueError):
-            count = 0
-        examples_raw = item.get("examples") or []
-        examples: list[str] = []
-        if isinstance(examples_raw, list):
-            for e in examples_raw[:EXAMPLES_PER_REASON]:
+            simple_out["count"] = 0
+        ex_raw = sr_raw.get("examples") or []
+        if isinstance(ex_raw, list):
+            for e in ex_raw[:5]:
                 if e is None:
                     continue
                 ex = str(e).strip()
                 if ex:
-                    examples.append(ex[:120])
-        out.append({"reason": reason[:120], "count": max(0, count), "examples": examples})
-    return out
+                    simple_out["examples"].append(ex[:120])
+
+    return {"reasons": reasons_out, "simple_responses": simple_out}
 
 
-def _cap_reason_counts(reasons: list[dict], sample_size: int) -> list[dict]:
-    """Re-cap reason counts so their running sum stays ≤ sample_size,
-    mirroring the themes.py truth-override step. LLM occasionally
-    over-reports; this keeps the chart consistent with the sample.
+def _cap_counts(reasons: list[dict], simple: dict, sample_size: int) -> tuple[list[dict], dict]:
+    """Re-cap reason counts + simple_responses count so the running sum
+    stays ≤ sample_size. Reasons are reduced first (in display order);
+    if there's still budget left, simple_responses keeps its count.
+
+    Same defensive pattern as the themes.py / competitive.py truth
+    override — LLM occasionally over-reports counts in either bucket.
     """
     running = 0
     for r in reasons:
@@ -319,7 +381,11 @@ def _cap_reason_counts(reasons: list[dict], sample_size: int) -> list[dict]:
         if running + c > sample_size:
             r["count"] = max(0, sample_size - running)
         running += r.get("count", 0)
-    return reasons
+    # Simple bucket eats whatever budget is left.
+    simple_count = simple.get("count", 0)
+    if running + simple_count > sample_size:
+        simple["count"] = max(0, sample_size - running)
+    return reasons, simple
 
 
 # ============================================================================
@@ -401,6 +467,7 @@ async def extract_reasons(
             "source_ids": source_ids,
             "sample_size": 0,
             "reasons": [],
+            "simple_responses": {"count": 0, "examples": []},
             "model": None,
             "cached": False,
             "generated_at": None,
@@ -413,7 +480,7 @@ async def extract_reasons(
     if chosen_model not in settings.allowed_models:
         chosen_model = settings.ANTHROPIC_MODEL
 
-    raw_reasons = await _call_claude(
+    llm_out = await _call_claude(
         sample,
         vendor_display=vendor.get("display") or vendor_key,
         category_name=resolved["category_name"],
@@ -423,7 +490,9 @@ async def extract_reasons(
         model=chosen_model,
     )
     # Cap counts against actual sample size (truth override).
-    capped = _cap_reason_counts(raw_reasons, len(sample))
+    capped_reasons, capped_simple = _cap_counts(
+        llm_out["reasons"], llm_out["simple_responses"], len(sample)
+    )
 
     result = {
         "vendor_key": vendor_key,
@@ -433,7 +502,8 @@ async def extract_reasons(
         "band": band,
         "source_ids": source_ids,
         "sample_size": len(sample),
-        "reasons": capped,
+        "reasons": capped_reasons,
+        "simple_responses": capped_simple,
         "model": chosen_model,
         "cached": False,
         "generated_at": time.time(),
@@ -455,6 +525,13 @@ async def list_saved_cards(
         stmt = stmt.where(VendorReasonCard.hidden.is_(False))
     stmt = stmt.order_by(VendorReasonCard.updated_at.desc())
     rows = (await session.execute(stmt)).scalars().all()
+    def _reason_count(stored) -> int:
+        # Old shape: list, new shape: {reasons: [...], simple_responses: {...}}
+        if isinstance(stored, list):
+            return len(stored)
+        if isinstance(stored, dict):
+            return len(stored.get("reasons") or [])
+        return 0
     return [
         {
             "id": c.id,
@@ -464,7 +541,7 @@ async def list_saved_cards(
             "band": c.band,
             "label": c.label,
             "sample_size": c.sample_size,
-            "reasons_count": len(c.reasons or []),
+            "reasons_count": _reason_count(c.reasons),
             "hidden": c.hidden,
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
@@ -505,12 +582,23 @@ async def save_card(
     result: dict,
     label: Optional[str] = None,
 ) -> VendorReasonCard:
-    """Persist a fresh extract_reasons() output as a new card row."""
+    """Persist a fresh extract_reasons() output as a new card row.
+
+    `simple_responses` is stored alongside the `reasons` list inside the
+    same JSON column (we wrap into {"reasons": [...], "simple_responses":
+    {...}} on save). Older cards saved before this change have a bare
+    list as their reasons column; the load path tolerates both shapes.
+    """
     vendor_key = (result.get("vendor_key") or "").strip()
     category_name = (result.get("category_name") or "").strip()
     band = (result.get("band") or "").strip()
     if not vendor_key or not category_name or band not in ("positive", "negative"):
         raise ValueError("result is missing vendor_key / category_name / band")
+    # Wrap to preserve simple_responses without a schema migration.
+    reasons_payload = {
+        "reasons": result.get("reasons") or [],
+        "simple_responses": result.get("simple_responses") or {"count": 0, "examples": []},
+    }
     card = VendorReasonCard(
         vendor_key=vendor_key[:100],
         vendor_display=(result.get("vendor_display") or vendor_key)[:200],
@@ -520,7 +608,7 @@ async def save_card(
         model_used=(result.get("model") or "")[:100] or None,
         sample_size=int(result.get("sample_size") or 0),
         source_ids_snapshot=list(result.get("source_ids") or []),
-        reasons=result.get("reasons") or [],
+        reasons=reasons_payload,
         hidden=False,
     )
     session.add(card)
@@ -587,7 +675,10 @@ async def reanalyze_card(
         model=model,
         force=True,
     )
-    card.reasons = fresh.get("reasons") or []
+    card.reasons = {
+        "reasons": fresh.get("reasons") or [],
+        "simple_responses": fresh.get("simple_responses") or {"count": 0, "examples": []},
+    }
     card.sample_size = int(fresh.get("sample_size") or 0)
     card.source_ids_snapshot = list(fresh.get("source_ids") or [])
     if fresh.get("model"):
