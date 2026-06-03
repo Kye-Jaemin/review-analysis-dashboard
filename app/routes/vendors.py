@@ -310,40 +310,38 @@ async def reviews_by_ids(
 # ----------------------------------------------------------------------------
 
 
-@router.get("/vendors/export.csv")
-async def vendors_export_csv(
-    vendor_keys: str = Query(
-        "", description="comma-separated vendor keys; empty means all visible vendors"
-    ),
-    include: str = Query("both", pattern="^(strengths|weaknesses|both)$"),
-    include_reasons: int = Query(
-        0, description="1 = append saved reason analyses as a 'reasons' column"
-    ),
-    exclude_weak: int = Query(
-        1,
-        description=(
-            "1 = drop rows whose polarity ratio is under 30 % (the same "
-            "threshold the /vendors page grays out as a weak signal); 0 "
-            "= keep every Top-5 entry. Default 1."
-        ),
-    ),
-    session: AsyncSession = Depends(get_session),
-):
-    """Download the strength/weakness Top 5 table for the selected vendors
-    as a CSV. The reasons column (optional) joins each row with the
-    causal reasons from the matching VendorReasonCard, when one exists.
+_EXPORT_HEADER = [
+    "vendor",
+    "type",
+    "category",
+    "pct",
+    "count",
+    "wilson_score",
+    "description",
+    "small_sample",
+    "reasons",
+]
 
-    Excel-friendly: UTF-8 with BOM so Korean characters render correctly
-    when the file is opened in Excel on Windows. Filename is ASCII to
-    avoid the latin-1 Content-Disposition pitfall."""
+
+async def _build_export_rows(
+    session: AsyncSession,
+    *,
+    vendor_keys: str,
+    include: str,
+    include_reasons: int,
+    exclude_weak: int,
+) -> list[list]:
+    """Common row-builder shared by the CSV + XLSX endpoints.
+
+    Returns the body rows (header is added by the caller per format).
+    Filters / lookups stay in one place so the two formats can never
+    drift out of sync.
+    """
     vendors = await list_vendors(session)
     selected = {k.strip() for k in vendor_keys.split(",") if k.strip()}
     if selected:
         vendors = [v for v in vendors if v.get("key") in selected]
 
-    # Optional: load saved reason cards so we can splice their causal
-    # mechanisms into the export. Keyed by (vendor_key, lowercased
-    # category_name, band) to match the same triple the page uses.
     reason_map: dict[tuple[str, str, str], list[tuple[str, int]]] = {}
     if include_reasons:
         cards = (
@@ -370,27 +368,12 @@ async def vendors_export_csv(
     def _join_reasons(entries: list[tuple[str, int]]) -> str:
         return "; ".join(f"{name}({n})" for name, n in entries)
 
-    # Stream rows into an in-memory buffer; CSV files for ~14 vendors ×
-    # 10 rows are tiny so this is fine without chunking.
-    buf = io.StringIO()
-    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
-    writer.writerow([
-        "vendor",
-        "type",
-        "category",
-        "pct",
-        "count",
-        "wilson_score",
-        "description",
-        "small_sample",
-        "reasons",
-    ])
-
     # 30 % threshold matches the gray-out logic in vendors.html, so the
-    # exported CSV and the on-screen "strong" rows are the same set when
-    # the user keeps the default exclude_weak=1.
+    # export and the on-screen "strong" rows are the same set when the
+    # user keeps the default exclude_weak=1.
     WEAK_THRESHOLD = 0.30
 
+    rows: list[list] = []
     for v in vendors:
         if include in ("strengths", "both"):
             for s in v.get("strengths") or []:
@@ -399,7 +382,7 @@ async def vendors_export_csv(
                     continue
                 name = (s.get("name") or "").strip()
                 key = (v.get("key"), name.lower(), "positive")
-                writer.writerow([
+                rows.append([
                     v.get("display") or v.get("key"),
                     "strength",
                     name,
@@ -417,7 +400,7 @@ async def vendors_export_csv(
                     continue
                 name = (w.get("name") or "").strip()
                 key = (v.get("key"), name.lower(), "negative")
-                writer.writerow([
+                rows.append([
                     v.get("display") or v.get("key"),
                     "weakness",
                     name,
@@ -428,7 +411,43 @@ async def vendors_export_csv(
                     "Y" if w.get("small_sample") else "",
                     _join_reasons(reason_map.get(key, [])) if include_reasons else "",
                 ])
+    return rows
 
+
+@router.get("/vendors/export.csv")
+async def vendors_export_csv(
+    vendor_keys: str = Query(
+        "", description="comma-separated vendor keys; empty means all visible vendors"
+    ),
+    include: str = Query("both", pattern="^(strengths|weaknesses|both)$"),
+    include_reasons: int = Query(
+        0, description="1 = append saved reason analyses as a 'reasons' column"
+    ),
+    exclude_weak: int = Query(
+        1,
+        description=(
+            "1 = drop rows whose polarity ratio is under 30 % (the same "
+            "threshold the /vendors page grays out as a weak signal); 0 "
+            "= keep every Top-5 entry. Default 1."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Download as UTF-8 CSV (with BOM so Excel-on-Windows reads it
+    cleanly). Filename is ASCII to dodge the latin-1 Content-Disposition
+    pitfall."""
+    body_rows = await _build_export_rows(
+        session,
+        vendor_keys=vendor_keys,
+        include=include,
+        include_reasons=include_reasons,
+        exclude_weak=exclude_weak,
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(_EXPORT_HEADER)
+    for r in body_rows:
+        writer.writerow(r)
     # BOM lets Excel-on-Windows auto-detect UTF-8 for the Korean cells.
     body = ("﻿" + buf.getvalue()).encode("utf-8")
     return Response(
@@ -436,5 +455,80 @@ async def vendors_export_csv(
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": 'attachment; filename="vendor_analysis.csv"'
+        },
+    )
+
+
+@router.get("/vendors/export.xlsx")
+async def vendors_export_xlsx(
+    vendor_keys: str = Query(""),
+    include: str = Query("both", pattern="^(strengths|weaknesses|both)$"),
+    include_reasons: int = Query(0),
+    exclude_weak: int = Query(1),
+    session: AsyncSession = Depends(get_session),
+):
+    """Same data as the CSV endpoint, but emitted as a real .xlsx file
+    via openpyxl. Excel users get formatted columns, autofilter, frozen
+    header, and proper number/text typing instead of "everything is
+    text and the leading-zero categories look broken." """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    body_rows = await _build_export_rows(
+        session,
+        vendor_keys=vendor_keys,
+        include=include,
+        include_reasons=include_reasons,
+        exclude_weak=exclude_weak,
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "vendor_analysis"
+
+    # Header row — bold + light gray fill so the autofilter dropdown
+    # arrows show up against a backdrop.
+    header_font = Font(bold=True)
+    header_fill = PatternFill("solid", fgColor="E5E7EB")
+    for col_idx, label in enumerate(_EXPORT_HEADER, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    # Body rows — numbers stay numeric so Excel can sort/aggregate.
+    for r_idx, row in enumerate(body_rows, start=2):
+        for c_idx, value in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=value)
+
+    # Column widths tuned for typical Korean content. Reasons can be
+    # long so wider; pct/count/wilson stay tight.
+    widths = {
+        "vendor": 28, "type": 10, "category": 32,
+        "pct": 8, "count": 8, "wilson_score": 12,
+        "description": 40, "small_sample": 12, "reasons": 60,
+    }
+    for col_idx, label in enumerate(_EXPORT_HEADER, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(label, 16)
+
+    # Quality-of-life: freeze the header row, enable autofilter on the
+    # whole table, left-align everything for Korean readability.
+    ws.freeze_panes = "A2"
+    last_col_letter = get_column_letter(len(_EXPORT_HEADER))
+    last_row = max(1, len(body_rows) + 1)
+    ws.auto_filter.ref = f"A1:{last_col_letter}{last_row}"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    body = buf.getvalue()
+    return Response(
+        content=body,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": 'attachment; filename="vendor_analysis.xlsx"'
         },
     )

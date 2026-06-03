@@ -379,6 +379,30 @@
         </div>
       </section>
 
+      {# Format picker #}
+      <section>
+        <h3 class="text-sm font-semibold text-gray-800 mb-2">
+          {% if lang == 'ko' %}파일 형식{% else %}Format{% endif %}
+        </h3>
+        <div class="flex flex-wrap gap-3 text-sm">
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="export-format" value="csv" checked>
+            <span>📄 CSV <span class="text-[10px] text-gray-500">(.csv)</span></span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="export-format" value="xlsx">
+            <span>📊 Excel <span class="text-[10px] text-gray-500">(.xlsx)</span></span>
+          </label>
+        </div>
+        <div class="text-[11px] text-gray-500 mt-1">
+          {% if lang == 'ko' %}
+            Excel은 헤더 고정 + 자동 필터 + 컬럼 폭 자동 조정. CSV는 다른 도구 import에 적합.
+          {% else %}
+            Excel: frozen header + autofilter + tuned column widths. CSV: best for piping into other tools.
+          {% endif %}
+        </div>
+      </section>
+
       {# Weak-signal exclusion (default ON, mirrors /vendors gray-out) #}
       <section>
         <label class="flex items-start gap-2 cursor-pointer">
@@ -470,14 +494,16 @@ function exportRunCsv() {
   const include = document.querySelector('input[name=export-include]:checked').value;
   const includeReasons = document.getElementById('export-include-reasons').checked ? 1 : 0;
   const excludeWeak = document.getElementById('export-exclude-weak').checked ? 1 : 0;
+  const format = (document.querySelector('input[name=export-format]:checked') || {}).value || 'csv';
   const params = new URLSearchParams({
     vendor_keys: keys.join(','),
     include: include,
     include_reasons: String(includeReasons),
     exclude_weak: String(excludeWeak),
   });
+  const endpoint = format === 'xlsx' ? '/vendors/export.xlsx' : '/vendors/export.csv';
   // Trigger download via direct nav. The route sets Content-Disposition.
-  window.location.href = '/vendors/export.csv?' + params.toString();
+  window.location.href = endpoint + '?' + params.toString();
   closeExportModal();
 }
 // Escape closes
