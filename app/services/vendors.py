@@ -109,6 +109,12 @@ _VENDOR_ALIASES: dict[str, str] = {
     # Play Store "Oura" listings refer to the same product.
     "ouraring": "oura",
     "oura ring": "oura",
+    # Noom's two store listings:
+    #   "Noom: Weight Loss & GLP-1 Care"  → stem "noom" (after ':' split)
+    #   "Noom Weight Loss, Food Tracker"  → stem "noom weight loss, food tracker"
+    #                                       (no ':'/'-' separator to split on)
+    # Same company, two product blurbs.
+    "noom weight loss, food tracker": "noom",
 }
 
 # Optional per-canonical display override. Use ONLY when the auto-pick
