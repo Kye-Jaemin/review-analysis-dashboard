@@ -550,6 +550,21 @@ async def extract_reasons(
     san_reasons, san_simple = _sanitize_review_ids(
         llm_out["reasons"], llm_out["simple_responses"], sample_ids
     )
+    # Sweep up the LEFTOVER: reviews the LLM didn't slot into any causal
+    # reason OR the simple bucket. The prompt asks for "every review at
+    # most once" (≤ sample_size) — in practice the model leaves a small
+    # remainder behind, which made the on-screen totals not add up
+    # (표본 74 = 인과 44 + 단순 26 + 잉여 4). By definition these are
+    # outcome-only reviews — the LLM saw them but couldn't extract a
+    # causal mechanism — so they belong in simple_responses. Iterate
+    # the original sample (not the set) to preserve display order.
+    assigned_ids: set[int] = set()
+    for r in san_reasons:
+        assigned_ids.update(r.get("review_ids", []))
+    assigned_ids.update(san_simple.get("review_ids", []))
+    leftover = [r["id"] for r in sample if r["id"] not in assigned_ids]
+    if leftover:
+        san_simple["review_ids"] = list(san_simple.get("review_ids", [])) + leftover
     # Truth override (bidirectional): the chart bar, the simple-box
     # badge, and the "전체 리뷰 보기 (N)" button MUST agree on the same
     # N. Sanitize already dropped duplicates and hallucinated IDs, so
