@@ -1,0 +1,124 @@
+{# Result partial for /competitive-v3.
+
+   Inputs:
+     result        build_view() output, or None on error.
+       Shape:
+         {input_row_count, rows_with_reasons, vendors_with_reasons,
+          skipped_no_reasons, vendors: [
+            {key, display, icon_url, categories: [
+              {category, band, pct, count, reasons: [{text, count}]}
+            ]}
+          ], _file_name}
+     csv_name      uploaded filename
+     error         optional error string #}
+
+{% if error %}
+  <div class="border border-rose-200 bg-rose-50 rounded-md p-4 text-sm text-rose-800">
+    <div class="font-semibold mb-1">{% if lang == 'ko' %}파일을 처리하지 못했습니다.{% else %}Failed to process.{% endif %}</div>
+    <div>{{ error }}</div>
+  </div>
+{% elif result %}
+  <div class="space-y-4">
+
+    {# SUMMARY CHIPS #}
+    <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
+      {% if result._file_name %}<span>📎 {{ result._file_name }}</span>{% endif %}
+      <span>{% if lang == 'ko' %}전체 행{% else %}rows{% endif %} {{ result.input_row_count }}</span>
+      <span>{% if lang == 'ko' %}세부 요인 있는 행{% else %}w/ reasons{% endif %} <b class="text-blue-700">{{ result.rows_with_reasons }}</b></span>
+      {% if result.skipped_no_reasons %}
+        <span class="text-amber-700">⚠ {% if lang == 'ko' %}reasons 없어 스킵{% else %}skipped (no reasons){% endif %} {{ result.skipped_no_reasons }}</span>
+      {% endif %}
+      <span>{% if lang == 'ko' %}업체{% else %}vendors{% endif %} <b class="text-blue-700">{{ result.vendors_with_reasons }}</b></span>
+    </div>
+
+    {% if not result.vendors %}
+      <div class="border border-gray-200 bg-gray-50 rounded-md p-6 text-center text-sm text-gray-600">
+        {% if lang == 'ko' %}
+          표시할 데이터가 없습니다.<br>
+          <span class="text-xs text-gray-500">/vendors에서 CSV/Excel을 내보낼 때 "📌 저장된 원인 분석 포함" 옵션이 켜져 있어야 reasons 열이 채워집니다.</span>
+        {% else %}
+          No data to display.<br>
+          <span class="text-xs text-gray-500">Re-export with "include reasons" on.</span>
+        {% endif %}
+      </div>
+    {% else %}
+
+      {# VENDOR CARDS #}
+      <div class="space-y-3">
+        {% for v in result.vendors %}
+          <div class="border border-gray-200 rounded-lg bg-white shadow-sm">
+            {# Vendor header #}
+            <div class="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+              {% if v.icon_url %}
+                <img src="{{ v.icon_url }}" class="w-10 h-10 rounded shrink-0 object-cover border border-gray-200"
+                     alt="" onerror="this.style.display='none'">
+              {% else %}
+                <div class="w-10 h-10 rounded bg-gray-200 flex items-center justify-center text-xs text-gray-500 shrink-0">
+                  {{ (v.display or v.key)[:2].upper() }}
+                </div>
+              {% endif %}
+              <div class="flex-1 min-w-0">
+                <div class="text-base font-semibold text-gray-900 truncate" title="{{ v.display }}">{{ v.display }}</div>
+                <div class="text-[10px] text-gray-500">
+                  {{ v.categories|length }}{% if lang == 'ko' %}개 항목{% else %} entries{% endif %}
+                  · {{ v.categories|sum(attribute='reasons')|length if false else (v.categories|map(attribute='reasons')|map('length')|sum) }} {% if lang == 'ko' %}reason{% else %}reasons{% endif %}
+                </div>
+              </div>
+            </div>
+
+            {# Categories with their reasons #}
+            <div class="divide-y divide-gray-100">
+              {% for c in v.categories %}
+                <div class="px-4 py-3">
+                  <div class="flex items-center gap-2 mb-2">
+                    {% if c.band == 'positive' %}
+                      <span class="text-base">💪</span>
+                      <span class="font-medium text-sm text-gray-900">{{ c.category }}</span>
+                      <span class="text-[11px] text-green-700 tabular-nums">{{ '%.1f'|format(c.pct) }}%</span>
+                    {% else %}
+                      <span class="text-base">⚠️</span>
+                      <span class="font-medium text-sm text-gray-900">{{ c.category }}</span>
+                      <span class="text-[11px] text-red-700 tabular-nums">{{ '%.1f'|format(c.pct) }}%</span>
+                    {% endif %}
+                    <span class="text-[10px] text-gray-500 ml-auto">{{ '{:,}'.format(c.count) }} {% if lang == 'ko' %}건{% else %}reviews{% endif %}</span>
+                  </div>
+                  {% if c.reasons %}
+                    <ul class="ml-7 space-y-1">
+                      {% for r in c.reasons %}
+                        <li>
+                          <button type="button"
+                                  data-v3-reason
+                                  data-vendor-key="{{ v.key }}"
+                                  data-vendor-display="{{ v.display }}"
+                                  data-category="{{ c.category }}"
+                                  data-band="{{ c.band }}"
+                                  data-reason-text="{{ r.text }}"
+                                  class="text-left text-[13px] text-gray-800 hover:text-blue-700 hover:underline cursor-pointer">
+                            • {{ r.text }}
+                            <span class="text-[10px] text-gray-500 tabular-nums">({{ r.count }})</span>
+                          </button>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    <div class="ml-7 text-[11px] text-gray-400 italic">— {% if lang == 'ko' %}세부 요인 없음{% else %}no reasons{% endif %}</div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="text-[11px] text-gray-500 italic">
+      {% if lang == 'ko' %}
+        각 reason 클릭 시 저장된 원인 분석 카드를 조회해 실제 리뷰 본문을 팝업으로 표시합니다.
+        카드가 없거나 reason이 매칭되지 않으면 안내 메시지가 뜹니다 — /vendors에서 해당 강점을 다시 분석·저장하면 됩니다.
+      {% else %}
+        Clicking a reason pulls the actual review text from the matching saved reason card.
+        If the card is missing or the text doesn't match, a hint appears — re-analyze the strength on /vendors.
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

@@ -13,6 +13,7 @@ from app.routes import (
     categories,
     competitive,
     competitive_v2,
+    competitive_v3,
     export,
     investigations,
     pages,
@@ -79,3 +80,4 @@ app.include_router(workspace.router)
 app.include_router(vendors.router)
 app.include_router(competitive.router)
 app.include_router(competitive_v2.router)
+app.include_router(competitive_v3.router)

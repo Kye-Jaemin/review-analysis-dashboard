@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('nav.competitive_v3') }} — {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <div>
+    <h1 class="text-2xl font-semibold flex items-center gap-2">
+      <span>🗂️</span>
+      <span>{% if lang == 'ko' %}경쟁력 분류 v3 (베타){% else %}Competitive factor v3 (beta){% endif %}</span>
+    </h1>
+    <p class="text-sm text-gray-600 mt-1 max-w-3xl">
+      {% if lang == 'ko' %}
+        <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 내보낸 CSV 또는 Excel을 업로드하면,
+        업체별로 강점 카테고리와 그 안의 <b>세부 요인(reasons)</b>이 그대로 나열됩니다.
+        각 reason을 클릭하면 실제 리뷰 본문이 팝업으로 표시됩니다 (저장된 원인 분석 카드 필요).
+        LLM 호출 없음 — 순수 뷰어입니다.
+      {% else %}
+        Upload a CSV or Excel exported from
+        <a href="/vendors" class="text-blue-600 hover:underline">vendor strengths/weaknesses</a>;
+        each vendor's strengths + their detail reasons are listed verbatim. Click any reason to
+        open the actual reviews in a popup (requires a saved reason card). No LLM call —
+        pure viewer.
+      {% endif %}
+    </p>
+  </div>
+
+  {# Upload form #}
+  <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+    <form id="competitive-v3-form"
+          hx-post="/competitive-v3/parse"
+          hx-encoding="multipart/form-data"
+          hx-target="#competitive-v3-results"
+          hx-swap="innerHTML"
+          hx-indicator="#competitive-v3-loading">
+
+      <label class="block text-sm font-semibold text-gray-800 mb-2">
+        {% if lang == 'ko' %}CSV 또는 Excel 업로드{% else %}Upload CSV or Excel{% endif %}
+      </label>
+      <div id="v3-drop-zone"
+           class="border-2 border-dashed border-gray-300 rounded-md p-4 text-center hover:border-blue-400 transition-colors cursor-pointer"
+           onclick="document.getElementById('v3-file-input').click()">
+        <div id="v3-empty-state" class="text-xs text-gray-500">
+          <div class="text-2xl mb-1">📄</div>
+          {% if lang == 'ko' %}
+            파일을 끌어다 놓거나 클릭해서 선택<br>
+            <span class="text-[10px]">.csv 또는 .xlsx (벤더 강/약점 분석 페이지 내보내기 결과)</span>
+          {% else %}
+            Drop file or click to choose<br>
+            <span class="text-[10px]">.csv or .xlsx exported from vendor strengths page</span>
+          {% endif %}
+        </div>
+        <div id="v3-loaded-state" class="hidden text-left text-xs">
+          <span class="font-medium text-gray-800">📎 <span id="v3-loaded-name"></span></span>
+          <span class="text-gray-500 ml-2">(<span id="v3-loaded-size"></span> bytes)</span>
+          <button type="button" onclick="event.stopPropagation(); v3ClearFile()"
+                  class="ml-2 text-red-600 hover:underline">
+            {% if lang == 'ko' %}변경{% else %}change{% endif %}
+          </button>
+        </div>
+      </div>
+      <input id="v3-file-input" type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+             class="hidden" onchange="v3OnSelected(this)" required>
+
+      <div class="flex items-center justify-end mt-3">
+        <button type="submit"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium whitespace-nowrap">
+          🗂️ {% if lang == 'ko' %}불러오기{% else %}Load{% endif %}
+        </button>
+      </div>
+    </form>
+
+    <div id="competitive-v3-loading" class="htmx-indicator mt-4 flex items-center gap-2 text-sm text-gray-500">
+      <svg class="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      {% if lang == 'ko' %}파일 분석 중…{% else %}Parsing…{% endif %}
+    </div>
+  </div>
+
+  <div id="competitive-v3-results">
+    <div class="text-sm text-gray-500 italic">
+      {% if lang == 'ko' %}
+        파일을 업로드하면 업체별 강점 + 세부 요인이 표시됩니다. 각 reason 클릭 시 실제 리뷰 팝업.
+      {% else %}
+        Upload a file to see vendors with their strengths + detail reasons. Click any reason for reviews.
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ========== Review popup (single global) ========== #}
+<div id="v3-reviews-modal"
+     class="fixed inset-0 z-50 hidden bg-black/50 flex items-center justify-center p-4"
+     onclick="if (event.target === this) v3CloseReviews()">
+  <div class="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div class="px-5 py-3 border-b flex items-center gap-2 shrink-0">
+      <span class="text-base">💬</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs text-gray-500" id="v3-reviews-vendor-line"></div>
+        <div class="text-sm font-semibold text-gray-900 truncate" id="v3-reviews-reason-line"></div>
+      </div>
+      <button type="button" onclick="v3CloseReviews()"
+              class="text-gray-400 hover:text-gray-700 text-2xl leading-none px-2">×</button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-5" id="v3-reviews-body">
+      <div class="text-sm text-gray-500 italic">{% if lang == 'ko' %}리뷰 불러오는 중…{% else %}Loading…{% endif %}</div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .htmx-indicator { display: none; }
+  .htmx-request .htmx-indicator { display: flex; }
+  .htmx-request.htmx-indicator { display: flex; }
+  #v3-drop-zone.is-dragover { border-color: #2563eb; background-color: #eff6ff; }
+</style>
+
+<script>
+function v3OnSelected(input) {
+  const f = input.files && input.files[0];
+  if (!f) { v3ClearFile(); return; }
+  document.getElementById('v3-empty-state').classList.add('hidden');
+  document.getElementById('v3-loaded-state').classList.remove('hidden');
+  document.getElementById('v3-loaded-name').textContent = f.name;
+  document.getElementById('v3-loaded-size').textContent = f.size.toLocaleString();
+}
+function v3ClearFile() {
+  const inp = document.getElementById('v3-file-input');
+  inp.value = '';
+  document.getElementById('v3-empty-state').classList.remove('hidden');
+  document.getElementById('v3-loaded-state').classList.add('hidden');
+}
+(function() {
+  const zone = document.getElementById('v3-drop-zone');
+  if (!zone) return;
+  ['dragenter','dragover'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.classList.add('is-dragover');
+  }));
+  ['dragleave','drop'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.classList.remove('is-dragover');
+  }));
+  zone.addEventListener('drop', e => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files[0]) {
+      const inp = document.getElementById('v3-file-input');
+      inp.files = files;
+      v3OnSelected(inp);
+    }
+  });
+})();
+
+// ============================================================
+// Reason-click → review popup
+// ============================================================
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+async function v3OpenReviewsFor(btn) {
+  const vendorKey = btn.dataset.vendorKey;
+  const vendorDisplay = btn.dataset.vendorDisplay;
+  const category = btn.dataset.category;
+  const band = btn.dataset.band || 'positive';
+  const reasonText = btn.dataset.reasonText;
+  document.getElementById('v3-reviews-modal').classList.remove('hidden');
+  document.getElementById('v3-reviews-vendor-line').textContent =
+    vendorDisplay + ' · ' + category + ' · ' + (band === 'positive' ? '💪 강점' : '⚠️ 약점');
+  document.getElementById('v3-reviews-reason-line').textContent = reasonText;
+  const body = document.getElementById('v3-reviews-body');
+  body.innerHTML = '<div class="text-sm text-gray-500 italic">{% if lang == "ko" %}리뷰 불러오는 중…{% else %}Loading…{% endif %}</div>';
+  const params = new URLSearchParams({
+    vendor_key: vendorKey,
+    category_name: category,
+    band: band,
+    reason_text: reasonText,
+  });
+  try {
+    const res = await fetch('/competitive-v3/reason-reviews?' + params.toString());
+    if (!res.ok) {
+      body.innerHTML = '<div class="text-sm text-rose-700">HTTP ' + res.status + '</div>';
+      return;
+    }
+    const data = await res.json();
+    if (data.error === 'no_saved_card_for_this_strength') {
+      body.innerHTML = '<div class="border border-amber-200 bg-amber-50 rounded p-4 text-sm text-amber-800">' +
+        '<b>{% if lang == "ko" %}저장된 원인 분석 카드가 없습니다.{% else %}No saved reason card.{% endif %}</b><br>' +
+        '<span class="text-xs">{% if lang == "ko" %}/vendors 페이지에서 이 강점을 클릭해 원인을 분석하고 💾 카드로 저장한 뒤, CSV/Excel을 다시 내보내주세요.{% else %}Open this strength on /vendors, analyze + save its reasons, then re-export.{% endif %}</span>' +
+        '</div>';
+      return;
+    }
+    if (data.error === 'no_matching_reason_in_saved_card') {
+      body.innerHTML = '<div class="text-sm text-amber-800">{% if lang == "ko" %}카드는 있지만 이 reason 텍스트와 일치하는 항목이 없습니다 (CSV 생성 후 카드가 재분석됐을 수 있음).{% else %}Card exists but no reason matches this text.{% endif %}</div>';
+      return;
+    }
+    if (data.error === 'no_review_ids_on_saved_reason') {
+      body.innerHTML = '<div class="text-sm text-amber-800">{% if lang == "ko" %}이 reason에 연결된 리뷰 ID가 없습니다 (옛 형식의 카드일 수 있음 — 카드 재분석 후 다시 시도).{% else %}No review IDs on this reason (legacy card; re-analyze).{% endif %}</div>';
+      return;
+    }
+    const reviews = data.reviews || [];
+    if (!reviews.length) {
+      body.innerHTML = '<div class="text-sm text-gray-500 italic">{% if lang == "ko" %}리뷰 없음.{% else %}No reviews.{% endif %}</div>';
+      return;
+    }
+    body.innerHTML =
+      '<div class="text-[11px] text-gray-600 mb-3"><b>' + reviews.length + '</b> {% if lang == "ko" %}건의 리뷰{% else %} reviews{% endif %}</div>' +
+      '<ul class="space-y-2.5">' +
+      reviews.map(r => {
+        const stars = r.rating ? '★'.repeat(Math.max(0, Math.min(5, r.rating))) : '';
+        const sent = r.sentiment ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">' + escapeHtml(r.sentiment) + '</span>' : '';
+        const date = r.posted_at ? r.posted_at.slice(0, 10) : (r.collected_at ? r.collected_at.slice(0, 10) : '');
+        return '<li class="border-l-2 border-blue-300 pl-3 py-1.5">' +
+          '<div class="flex items-center gap-2 text-[10px] text-gray-500 mb-1">' +
+            (stars ? '<span class="text-amber-500">' + stars + '</span>' : '') + sent +
+            (date ? '<span class="ml-auto">' + date + '</span>' : '') +
+          '</div>' +
+          '<div class="text-[13px] text-gray-800 whitespace-pre-line break-words">' + escapeHtml(r.text) + '</div>' +
+          '</li>';
+      }).join('') +
+      '</ul>';
+  } catch (e) {
+    body.innerHTML = '<div class="text-sm text-rose-700">' + escapeHtml(String(e)) + '</div>';
+  }
+}
+function v3CloseReviews() {
+  document.getElementById('v3-reviews-modal').classList.add('hidden');
+}
+// Delegated click for reason buttons (works across HTMX swaps)
+document.body.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-v3-reason]');
+  if (btn) {
+    e.preventDefault();
+    v3OpenReviewsFor(btn);
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('v3-reviews-modal').classList.contains('hidden')) {
+    v3CloseReviews();
+  }
+});
+</script>
+{% endblock %}

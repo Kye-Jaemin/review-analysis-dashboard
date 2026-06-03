@@ -50,6 +50,7 @@
     <li><a href="#vendors">업체 강/약점 분석 페이지 (구 "업체 분석")</a></li>
     <li><a href="#competitive">경쟁력 분류 페이지 (베타, 구 "경쟁력 분석")</a></li>
     <li><a href="#competitive_v2">경쟁력 분류 v2 페이지 (베타, bottom-up 성공요인)</a></li>
+    <li><a href="#competitive_v3">경쟁력 분류 v3 페이지 (베타, 업체별 reason 뷰어 + 리뷰 팝업)</a></li>
     <li><a href="#mindmap">감성 원인 마인드맵</a></li>
     <li><a href="#reviews">전체 리뷰 보기 + 내보내기 + 번역 (구 "리뷰")</a></li>
     <li><a href="#workspace">워크스페이스 저장·불러오기</a></li>
@@ -362,6 +363,38 @@
     <li>데이터 시각화 / 통계 (12 mentions, 78 reviews)</li>
   </ol>
   각 카테고리 펼치면 멤버 reason + 출처 벤더 추적 가능.
+</div>
+
+<h2 id="competitive_v3">9.6 경쟁력 분류 v3 페이지 (베타) <span class="text-sm text-gray-500">(사이드바: <b>경쟁력 분류 v3(베타)</b>)</span></h2>
+<p><a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 분류 v3(베타)</a> — CSV 또는 Excel 업로드 후 <strong>업체별로 강점 카테고리 + 세부 요인</strong>을 그대로 펼쳐 보여주는 뷰어. LLM 호출 없음.</p>
+
+<ul>
+  <li><strong>입력</strong>: /vendors 내보내기 결과 (.csv 또는 .xlsx)</li>
+  <li><strong>출력 형식</strong>:
+    <pre class="bg-gray-50 border border-gray-200 rounded p-2 text-[11px] mt-1">
+[로고] Weight Watchers Program
+  ─────────────────────────
+  💪 체중 감량 성과 공유  83.1%  172건
+       • 포인트 추적 시스템(12)        ← 클릭 시 리뷰 팝업
+       • 음식 기록 편의성(11)
+       • 제로 포인트 음식(8)
+       • ...
+  💪 음식 추적 기능 사용성  72.4%  221건
+       • 바코드 스캐너(28)
+       • 포인트 자동 계산(18)
+       • ...</pre>
+  </li>
+  <li><strong>reason 클릭 → 리뷰 팝업</strong>: 해당 강점·카테고리의 저장된 VendorReasonCard를 조회 → 매칭 reason의 <code>review_ids</code>로 실제 리뷰 본문 hydrate → 별점·감정·날짜 함께 표시</li>
+  <li>카드가 없거나 reason 텍스트가 매칭 안 되면 안내 메시지 — /vendors에서 해당 강점 재분석 후 카드 저장</li>
+  <li>벤더 로고는 list_vendors() 캐시에서 display name 매칭으로 자동 enrich</li>
+  <li><strong>v1/v2와 차이</strong>: v1 = 사용자 factor 입력해 분류, v2 = bottom-up 클러스터링, <strong>v3 = 분류 없이 데이터 그대로 디스플레이 + 리뷰 drill-down</strong></li>
+  <li>저장 카드 없음 — 순수 뷰어. 페이지 재방문 시 파일 다시 업로드 필요</li>
+</ul>
+
+<div class="callout info">
+  <strong>사용 시나리오:</strong>
+  내보낸 CSV/Excel을 동료에게 공유하기 전에, "이 reason은 실제로 어떤 리뷰에서 나온 거지?" 를 빠르게 확인하고 싶을 때.
+  또는 /vendors 페이지에서 일일이 클릭하지 않고 한 화면에 모든 reasons를 펼쳐 보고 싶을 때.
 </div>
 
 <h2 id="mindmap">10. 감성 원인 마인드맵</h2>
