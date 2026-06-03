@@ -322,6 +322,18 @@ _EXPORT_HEADER = [
     "reasons",
 ]
 
+# Fixed-column subset (everything except the trailing reasons slot).
+# The CSV format keeps the trailing single "reasons" column for backward
+# compat; the XLSX format replaces it with N "reason 1", "reason 2",…
+# columns so each reason gets its own cell.
+_EXPORT_HEADER_FIXED = _EXPORT_HEADER[:-1]
+
+
+def _join_reasons(entries: list[tuple[str, int]]) -> str:
+    """Pack a row's reason entries into one cell as 'text(N); text(M); …'.
+    Same format the v3 parser already handles."""
+    return "; ".join(f"{name}({n})" for name, n in entries)
+
 
 async def _build_export_rows(
     session: AsyncSession,
@@ -365,14 +377,14 @@ async def _build_export_rows(
             key = (c.vendor_key, (c.category_name or "").strip().lower(), c.band)
             reason_map[key] = entries
 
-    def _join_reasons(entries: list[tuple[str, int]]) -> str:
-        return "; ".join(f"{name}({n})" for name, n in entries)
-
     # 30 % threshold matches the gray-out logic in vendors.html, so the
     # export and the on-screen "strong" rows are the same set when the
     # user keeps the default exclude_weak=1.
     WEAK_THRESHOLD = 0.30
 
+    # Each row's trailing cell is now a LIST of (text, count) reason
+    # entries — callers join (CSV) or spread to columns (XLSX). Empty
+    # list when include_reasons=0.
     rows: list[list] = []
     for v in vendors:
         if include in ("strengths", "both"):
@@ -391,7 +403,7 @@ async def _build_export_rows(
                     round(float(s.get("pos_score") or 0.0), 3),
                     (s.get("description") or "").strip(),
                     "Y" if s.get("small_sample") else "",
-                    _join_reasons(reason_map.get(key, [])) if include_reasons else "",
+                    reason_map.get(key, []) if include_reasons else [],
                 ])
         if include in ("weaknesses", "both"):
             for w in v.get("weaknesses") or []:
@@ -409,7 +421,7 @@ async def _build_export_rows(
                     round(float(w.get("neg_score") or 0.0), 3),
                     (w.get("description") or "").strip(),
                     "Y" if w.get("small_sample") else "",
-                    _join_reasons(reason_map.get(key, [])) if include_reasons else "",
+                    reason_map.get(key, []) if include_reasons else [],
                 ])
     return rows
 
@@ -446,8 +458,10 @@ async def vendors_export_csv(
     buf = io.StringIO()
     writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
     writer.writerow(_EXPORT_HEADER)
+    # CSV keeps the single-column "reasons" format for backward compat
+    # (v3 parser, existing user workflows). Join the entries inline.
     for r in body_rows:
-        writer.writerow(r)
+        writer.writerow(r[:-1] + [_join_reasons(r[-1])])
     # BOM lets Excel-on-Windows auto-detect UTF-8 for the Korean cells.
     body = ("﻿" + buf.getvalue()).encode("utf-8")
     return Response(
@@ -487,35 +501,57 @@ async def vendors_export_xlsx(
     ws = wb.active
     ws.title = "vendor_analysis"
 
+    # XLSX-specific layout: the trailing "reasons" slot becomes N
+    # "reason 1", "reason 2", ..., "reason {max}" columns — one per
+    # reason — so users can sort / filter / chart per reason in Excel
+    # without first splitting the semicolon-joined cell. Width matched
+    # to the actual widest row in this export (no empty trailing cols).
+    max_reasons = 0
+    for row in body_rows:
+        entries = row[-1] or []
+        if len(entries) > max_reasons:
+            max_reasons = len(entries)
+    reason_headers = [f"reason {i + 1}" for i in range(max_reasons)]
+    full_header = _EXPORT_HEADER_FIXED + reason_headers
+
     # Header row — bold + light gray fill so the autofilter dropdown
     # arrows show up against a backdrop.
     header_font = Font(bold=True)
     header_fill = PatternFill("solid", fgColor="E5E7EB")
-    for col_idx, label in enumerate(_EXPORT_HEADER, start=1):
+    for col_idx, label in enumerate(full_header, start=1):
         cell = ws.cell(row=1, column=col_idx, value=label)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="left", vertical="center")
 
-    # Body rows — numbers stay numeric so Excel can sort/aggregate.
+    # Body rows — fixed cells keep their numeric typing, then each
+    # reason entry lands in its own cell as 'text(N)' (same shape v3
+    # parses, just spread across columns instead of joined).
+    fixed_len = len(_EXPORT_HEADER_FIXED)
     for r_idx, row in enumerate(body_rows, start=2):
-        for c_idx, value in enumerate(row, start=1):
+        for c_idx, value in enumerate(row[:fixed_len], start=1):
             ws.cell(row=r_idx, column=c_idx, value=value)
+        entries = row[-1] or []
+        for i, (name, n) in enumerate(entries):
+            ws.cell(row=r_idx, column=fixed_len + 1 + i, value=f"{name}({n})")
 
-    # Column widths tuned for typical Korean content. Reasons can be
-    # long so wider; pct/count/wilson stay tight.
+    # Column widths tuned for typical Korean content. Fixed columns
+    # keep their bespoke widths; every reason column gets a uniform
+    # generous width since individual reasons are short-to-mid length.
     widths = {
         "vendor": 28, "type": 10, "category": 32,
         "pct": 8, "count": 8, "wilson_score": 12,
-        "description": 40, "small_sample": 12, "reasons": 60,
+        "description": 40, "small_sample": 12,
     }
-    for col_idx, label in enumerate(_EXPORT_HEADER, start=1):
+    for col_idx, label in enumerate(_EXPORT_HEADER_FIXED, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(label, 16)
+    for i in range(max_reasons):
+        ws.column_dimensions[get_column_letter(fixed_len + 1 + i)].width = 30
 
     # Quality-of-life: freeze the header row, enable autofilter on the
     # whole table, left-align everything for Korean readability.
     ws.freeze_panes = "A2"
-    last_col_letter = get_column_letter(len(_EXPORT_HEADER))
+    last_col_letter = get_column_letter(len(full_header))
     last_row = max(1, len(body_rows) + 1)
     ws.auto_filter.ref = f"A1:{last_col_letter}{last_row}"
 
