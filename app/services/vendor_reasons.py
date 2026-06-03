@@ -250,12 +250,43 @@ async def _call_claude(
             '       GOOD (causal mechanism):  "포인트 시스템이 칼로리를 의식하게 만들어줌", '
             '"AI coach kept me accountable", "커뮤니티 응원이 동기 부여"'
         )
+        phrasing_rule = (
+            f"CRITICAL — POSITIVE PHRASING (strength band):\n"
+            f"  Every reason MUST describe what the product DOES WELL,\n"
+            f"  NOT what is missing / lacking / broken / absent. Even a\n"
+            f"  review that is overall positive often contains a wish or\n"
+            f"  a complaint about a missing feature — those sentences\n"
+            f"  are SUGGESTIONS, not positive reasons.\n"
+            f"  Examples — these MUST NOT appear as positive reasons:\n"
+            f"    ✗ '특정 미량 영양소 추적기능 부재'  (mentions absence)\n"
+            f"    ✗ '특정 음식 인식 부족'             (mentions lack)\n"
+            f"    ✗ '광고 차단 미흡'                  (mentions inadequacy)\n"
+            f"    ✗ '~기능이 아쉬움' / '~을 추가했으면'\n"
+            f"    ✗ 'missing X', 'lack of Y', 'wish it had Z', 'no support for'\n"
+            f"  Re-frame as the POSITIVE feature that IS present:\n"
+            f"    ✓ '포괄적 영양소 추적'              (the feature working)\n"
+            f"    ✓ '폭넓은 음식 데이터베이스'        (the strength)\n"
+            f"    ✓ '광고 없는 깔끔한 UX'             (positive presence)\n"
+            f"    ✓ 'reliable barcode scanner', 'rich nutrient data'\n"
+            f"  Reviews that ONLY describe missing/broken aspects go into\n"
+            f"  simple_responses, NOT into the main reasons list. The user\n"
+            f"  is reading this panel to learn what the product is GOOD\n"
+            f"  at — wish-list items belong elsewhere.\n\n"
+        )
     else:
         outcome_examples = (
             '       BAD  (outcome statement):  "별로예요", "doesn\'t work for me", '
             '"실망", "useless"\n'
             '       GOOD (causal mechanism):  "동기화 오류로 데이터 손실", '
             '"광고가 너무 잦아 사용 흐름 끊김", "AI 인식이 부정확해 매번 수정 필요"'
+        )
+        phrasing_rule = (
+            f"CRITICAL — NEGATIVE PHRASING (weakness band):\n"
+            f"  Every reason MUST describe a PROBLEM, friction point, or\n"
+            f"  broken behavior. Praise framed as 'X is great' does NOT\n"
+            f"  belong here — even when the review is overall negative,\n"
+            f"  isolated praise is not a complaint reason. Reframe any\n"
+            f"  positive aside back into the underlying problem.\n\n"
         )
 
     system = (
@@ -265,6 +296,7 @@ async def _call_claude(
         f"Category: {category_name}\n"
         f"{description_line}"
         f"All reviews below share {polarity} sentiment about this category.\n\n"
+        f"{phrasing_rule}"
         f"CRITICAL — CAUSE vs OUTCOME:\n"
         f"  A review that only STATES the outcome (\"I lost weight!\", "
         f"\"앱이 별로\") is NOT a reason. A causal reason explains the\n"
@@ -380,6 +412,87 @@ async def _call_claude(
         simple_out["review_ids"] = _parse_review_ids(sr_raw.get("review_ids"))
 
     return {"reasons": reasons_out, "simple_responses": simple_out}
+
+
+# Substrings that almost always signal a negation / wish / absence
+# phrasing, regardless of whether the surrounding review is positive
+# overall. When the LLM produces a positive-band reason whose text
+# matches any of these, it gets pulled out of the reasons list and its
+# review_ids are reassigned to simple_responses (those reviews really
+# are positive overall — they just don't describe a working strength,
+# so they shouldn't appear under "이 업체가 잘 하는 것").
+#
+# Kept deliberately tight — words like "없음" are ambiguous (광고 없음
+# = positive presence-of-absence), so they're NOT in the list. Add a
+# substring here only when it's a near-unambiguous polarity flip.
+_POS_REASON_NEGATION_SUBSTRINGS = [
+    "부재",           # absence
+    "결핍",           # deficiency
+    "미흡",           # inadequate
+    "부족",           # lack / insufficient
+    "아쉽",           # 아쉽다 / 아쉬움 / 아쉬운 — wishful regret stem
+    "아쉬워",
+    "추가했으면",     # "wish they added"
+    "있었으면",       # "wish it had"
+    "미지원",         # not supported
+    "안 됨",          # doesn't work
+    "안됨",
+    "되지 않",        # doesn't (work / function)
+    "missing",
+    "lack of",
+    "lacks ",
+    "absent",
+    "absence",
+    "wish it had",
+    "wish there",
+    "no support for",
+    "needs ",         # "needs more X" wish framing
+    "would be nice",
+    "would love",
+]
+
+
+def _looks_like_pos_negation_reason(text: str) -> bool:
+    """True if the reason text reads like a wish / absence / complaint
+    rather than a positive feature description. Used only for positive
+    band reasons; negative band naturally welcomes these phrasings."""
+    if not text:
+        return False
+    low = str(text).lower()
+    return any(needle.lower() in low for needle in _POS_REASON_NEGATION_SUBSTRINGS)
+
+
+def _strip_negation_reasons_from_positive(
+    reasons: list[dict], simple: dict
+) -> tuple[list[dict], dict]:
+    """Filter positive-band reasons: any whose label matches a negation
+    substring is removed; its review_ids merge into simple_responses
+    (those reviews still belong to the positive sample — they just
+    don't justify being shown as a working strength). Counts get
+    re-synced from the resulting review_ids lengths.
+
+    Returns the surviving (reasons, simple)."""
+    kept: list[dict] = []
+    sim_ids = list(simple.get("review_ids") or [])
+    sim_examples = list(simple.get("examples") or [])
+    moved = 0
+    for r in reasons:
+        if _looks_like_pos_negation_reason(r.get("reason") or ""):
+            ids = list(r.get("review_ids") or [])
+            sim_ids.extend(ids)
+            # Borrow a couple of examples so the "단순 결과" tooltip stays
+            # informative — capped at 5 to match the simple-bucket budget.
+            for ex in (r.get("examples") or [])[:2]:
+                if ex and ex not in sim_examples and len(sim_examples) < 5:
+                    sim_examples.append(ex)
+            moved += 1
+        else:
+            kept.append(r)
+    if moved:
+        simple["review_ids"] = sim_ids
+        simple["count"] = len(sim_ids)
+        simple["examples"] = sim_examples
+    return kept, simple
 
 
 def _parse_review_ids(raw) -> list[int]:
@@ -565,6 +678,17 @@ async def extract_reasons(
     leftover = [r["id"] for r in sample if r["id"] not in assigned_ids]
     if leftover:
         san_simple["review_ids"] = list(san_simple.get("review_ids", [])) + leftover
+    # POSITIVE-BAND POLARITY GUARD: even after the prompt rule, the LLM
+    # occasionally surfaces reasons whose own LABEL is a negation /
+    # wish / absence phrase (e.g. "특정 미량 영양소 추적기능 부재" —
+    # technically a "positive sentiment" review mentioning a missing
+    # feature, but absolutely not a working strength). Strip those out
+    # and bucket their reviews into simple_responses. Skip for negative
+    # band — that band welcomes the same vocabulary.
+    if band == "positive":
+        san_reasons, san_simple = _strip_negation_reasons_from_positive(
+            san_reasons, san_simple
+        )
     # Truth override (bidirectional): the chart bar, the simple-box
     # badge, and the "전체 리뷰 보기 (N)" button MUST agree on the same
     # N. Sanitize already dropped duplicates and hallucinated IDs, so
