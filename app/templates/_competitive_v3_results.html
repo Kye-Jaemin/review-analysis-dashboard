@@ -70,7 +70,13 @@
             <div class="divide-y divide-gray-100">
               {% for c in v.categories %}
                 <div class="px-4 py-3">
-                  <div class="flex items-center gap-2 mb-2">
+                  {# Per-category stat strip:
+                       전체 답변수  = c.count  (total reviews in this category, all bands)
+                       긍정/부정 답변수 = round(count * pct / 100)  (the polarity slice)
+                       Reason 수    = len(c.reasons); >10 = bold blue accent #}
+                  {% set band_count = ((c.count or 0) * (c.pct or 0) / 100)|round|int %}
+                  {% set rn = c.reasons|length %}
+                  <div class="flex items-center gap-2 mb-2 flex-wrap">
                     {% if c.band == 'positive' %}
                       <span class="text-base">💪</span>
                       <span class="font-medium text-sm text-gray-900">{{ c.category }}</span>
@@ -80,7 +86,36 @@
                       <span class="font-medium text-sm text-gray-900">{{ c.category }}</span>
                       <span class="text-[11px] text-red-700 tabular-nums">{{ '%.1f'|format(c.pct) }}%</span>
                     {% endif %}
-                    <span class="text-[10px] text-gray-500 ml-auto">{{ '{:,}'.format(c.count) }} {% if lang == 'ko' %}건{% else %}reviews{% endif %}</span>
+
+                    <div class="flex items-center gap-x-2 ml-auto whitespace-nowrap tabular-nums text-[11px]">
+                      <span class="text-gray-500" title="{% if lang == 'ko' %}전체 답변수{% else %}Total responses{% endif %}">
+                        {% if lang == 'ko' %}전체{% else %}Total{% endif %}
+                        <b class="text-gray-800">{{ '{:,}'.format(c.count) }}</b>
+                      </span>
+                      <span class="text-gray-300">·</span>
+                      {% if c.band == 'positive' %}
+                        <span class="text-gray-500" title="{% if lang == 'ko' %}긍정 답변수{% else %}Positive responses{% endif %}">
+                          {% if lang == 'ko' %}긍정{% else %}Pos{% endif %}
+                          <b class="text-green-700">{{ '{:,}'.format(band_count) }}</b>
+                        </span>
+                      {% else %}
+                        <span class="text-gray-500" title="{% if lang == 'ko' %}부정 답변수{% else %}Negative responses{% endif %}">
+                          {% if lang == 'ko' %}부정{% else %}Neg{% endif %}
+                          <b class="text-red-700">{{ '{:,}'.format(band_count) }}</b>
+                        </span>
+                      {% endif %}
+                      <span class="text-gray-300">·</span>
+                      {% if rn > 10 %}
+                        <span class="text-blue-700 font-extrabold text-[13px] px-1.5 py-0.5 rounded bg-blue-50 ring-1 ring-blue-200"
+                              title="{% if lang == 'ko' %}Reason {{ rn }}개 (10개 초과 강조){% else %}{{ rn }} reasons (>10 highlighted){% endif %}">
+                          Reason <span class="tabular-nums">{{ rn }}</span>
+                        </span>
+                      {% else %}
+                        <span class="text-gray-500" title="{% if lang == 'ko' %}Reason 수{% else %}Reason count{% endif %}">
+                          Reason <b class="text-gray-800">{{ rn }}</b>
+                        </span>
+                      {% endif %}
+                    </div>
                   </div>
                   {% if c.reasons %}
                     <ul class="ml-7 space-y-1">
