@@ -7,6 +7,7 @@ it's just another view of the same vendor model.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -310,6 +311,16 @@ async def reviews_by_ids(
 # ----------------------------------------------------------------------------
 
 
+def _export_filename(ext: str) -> str:
+    """Stamp the export filename with the current local date+time so
+    repeated downloads land in the Downloads folder side-by-side instead
+    of overwriting each other. Format: `vendor_analysis_YYYYMMDD_HHMMSS.ext`.
+    ASCII-only so the Content-Disposition header is happy without RFC
+    5987 encoding."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"vendor_analysis_{ts}.{ext}"
+
+
 _EXPORT_HEADER = [
     "vendor",
     "type",
@@ -468,7 +479,9 @@ async def vendors_export_csv(
         content=body,
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": 'attachment; filename="vendor_analysis.csv"'
+            "Content-Disposition": (
+                f'attachment; filename="{_export_filename("csv")}"'
+            )
         },
     )
 
@@ -566,6 +579,8 @@ async def vendors_export_xlsx(
             "spreadsheetml.sheet"
         ),
         headers={
-            "Content-Disposition": 'attachment; filename="vendor_analysis.xlsx"'
+            "Content-Disposition": (
+                f'attachment; filename="{_export_filename("xlsx")}"'
+            )
         },
     )
