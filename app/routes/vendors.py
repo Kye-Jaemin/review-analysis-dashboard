@@ -501,18 +501,15 @@ async def vendors_export_xlsx(
     ws = wb.active
     ws.title = "vendor_analysis"
 
-    # XLSX-specific layout: the trailing "reasons" slot becomes N
-    # "reason 1", "reason 2", ..., "reason {max}" columns — one per
-    # reason — so users can sort / filter / chart per reason in Excel
-    # without first splitting the semicolon-joined cell. Width matched
-    # to the actual widest row in this export (no empty trailing cols).
-    max_reasons = 0
-    for row in body_rows:
-        entries = row[-1] or []
-        if len(entries) > max_reasons:
-            max_reasons = len(entries)
-    reason_headers = [f"reason {i + 1}" for i in range(max_reasons)]
-    full_header = _EXPORT_HEADER_FIXED + reason_headers
+    # XLSX-specific layout: one ROW per reason. A category with N
+    # reasons becomes N rows; the fixed cells (vendor / type /
+    # category / pct / count / wilson / description / small_sample)
+    # repeat on every row so Excel's autofilter & sort still work
+    # cleanly. The trailing column is a singular "reason" cell with
+    # one entry per row in the same "text(N)" shape the v3 parser
+    # already understands.
+    full_header = _EXPORT_HEADER_FIXED + ["reason"]
+    fixed_len = len(_EXPORT_HEADER_FIXED)
 
     # Header row — bold + light gray fill so the autofilter dropdown
     # arrows show up against a backdrop.
@@ -524,20 +521,25 @@ async def vendors_export_xlsx(
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="left", vertical="center")
 
-    # Body rows — fixed cells keep their numeric typing, then each
-    # reason entry lands in its own cell as 'text(N)' (same shape v3
-    # parses, just spread across columns instead of joined).
-    fixed_len = len(_EXPORT_HEADER_FIXED)
-    for r_idx, row in enumerate(body_rows, start=2):
-        for c_idx, value in enumerate(row[:fixed_len], start=1):
-            ws.cell(row=r_idx, column=c_idx, value=value)
+    # Body — expand each category row into per-reason rows. Categories
+    # with zero saved reasons still emit one row (blank reason cell)
+    # so the strength/weakness header itself doesn't disappear.
+    ws_row = 2
+    for row in body_rows:
+        fixed_cells = row[:fixed_len]
         entries = row[-1] or []
-        for i, (name, n) in enumerate(entries):
-            ws.cell(row=r_idx, column=fixed_len + 1 + i, value=f"{name}({n})")
+        if not entries:
+            for c_idx, value in enumerate(fixed_cells, start=1):
+                ws.cell(row=ws_row, column=c_idx, value=value)
+            ws_row += 1
+        else:
+            for name, n in entries:
+                for c_idx, value in enumerate(fixed_cells, start=1):
+                    ws.cell(row=ws_row, column=c_idx, value=value)
+                ws.cell(row=ws_row, column=fixed_len + 1, value=f"{name}({n})")
+                ws_row += 1
 
-    # Column widths tuned for typical Korean content. Fixed columns
-    # keep their bespoke widths; every reason column gets a uniform
-    # generous width since individual reasons are short-to-mid length.
+    # Column widths tuned for typical Korean content.
     widths = {
         "vendor": 28, "type": 10, "category": 32,
         "pct": 8, "count": 8, "wilson_score": 12,
@@ -545,14 +547,13 @@ async def vendors_export_xlsx(
     }
     for col_idx, label in enumerate(_EXPORT_HEADER_FIXED, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(label, 16)
-    for i in range(max_reasons):
-        ws.column_dimensions[get_column_letter(fixed_len + 1 + i)].width = 30
+    ws.column_dimensions[get_column_letter(fixed_len + 1)].width = 60
 
     # Quality-of-life: freeze the header row, enable autofilter on the
     # whole table, left-align everything for Korean readability.
     ws.freeze_panes = "A2"
     last_col_letter = get_column_letter(len(full_header))
-    last_row = max(1, len(body_rows) + 1)
+    last_row = max(1, ws_row - 1)
     ws.auto_filter.ref = f"A1:{last_col_letter}{last_row}"
 
     buf = io.BytesIO()

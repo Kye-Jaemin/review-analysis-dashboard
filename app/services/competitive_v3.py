@@ -55,39 +55,48 @@ def parse_reasons_cell(cell: str) -> list[dict]:
     return out
 
 
-_REASON_COL_RE = re.compile(r"^reason\s*\d+$", re.IGNORECASE)
+def _merge_split_reason_rows(rows: list[dict]) -> list[dict]:
+    """Fold rows from the row-per-reason XLSX layout back into a single
+    row per (vendor, type, category).
 
+    The new XLSX format emits one row per reason — vendor/category/pct
+    cells repeat, the trailing column is a singular `reason` cell with
+    one entry. This function detects that layout (presence of `reason`
+    or absence of `reasons`) and concatenates the entries into a single
+    `reasons` cell joined by "; ", so build_view sees the canonical
+    shape regardless of which export format the user uploaded.
 
-def _coalesce_reason_columns(row: dict) -> dict:
-    """If a row came from the new XLSX layout (each reason in its own
-    "reason 1" / "reason 2" / … column) and lacks a single "reasons"
-    cell, synthesize one by joining the per-column entries with "; ".
-    A no-op when "reasons" already exists or no reason-N columns are
-    present.
-
-    Both shapes feed the same downstream parse_reasons_cell, so the
-    caller doesn't have to branch.
+    Legacy CSV / one-row-per-category XLSX uploads pass through
+    unchanged because each (vendor, type, category) key appears only
+    once and already has its `reasons` cell populated.
     """
-    if (row.get("reasons") or "").strip():
-        return row
-    pieces: list[str] = []
-    # Stable order: numeric sort by the digit suffix (reason 1, 2, … 10).
-    keyed: list[tuple[int, str]] = []
-    for k, v in row.items():
-        if not k or not _REASON_COL_RE.match(str(k)):
+    merged: dict[tuple[str, str, str], dict] = {}
+    order: list[tuple[str, str, str]] = []
+    for r in rows:
+        if not isinstance(r, dict):
             continue
-        val = str(v or "").strip()
-        if not val:
+        key = (
+            (r.get("vendor") or "").strip(),
+            (r.get("type") or "").strip(),
+            (r.get("category") or "").strip(),
+        )
+        if not any(key):
+            # Junk row — let downstream skip it
+            order.append(key)
+            merged[key] = r
             continue
-        m = re.search(r"\d+", str(k))
-        idx = int(m.group(0)) if m else 9999
-        keyed.append((idx, val))
-    keyed.sort(key=lambda x: x[0])
-    pieces = [v for _, v in keyed]
-    if pieces:
-        row = dict(row)
-        row["reasons"] = "; ".join(pieces)
-    return row
+        single = (r.get("reason") or "").strip()
+        if key not in merged:
+            merged[key] = dict(r)
+            order.append(key)
+            if "reasons" not in merged[key]:
+                merged[key]["reasons"] = ""
+        if single:
+            existing = (merged[key].get("reasons") or "").strip()
+            merged[key]["reasons"] = (
+                f"{existing}; {single}" if existing else single
+            )
+    return [merged[k] for k in order]
 
 
 def parse_uploaded_file(filename: str, content: bytes) -> list[dict]:
@@ -95,10 +104,11 @@ def parse_uploaded_file(filename: str, content: bytes) -> list[dict]:
     rows. Dispatch by extension; both shapes have the same column names
     so downstream code doesn't care which path produced the data.
 
-    XLSX exports may use the new "one column per reason" layout (header
-    row: …, reason 1, reason 2, …). _coalesce_reason_columns folds
-    those back into a single "reasons" cell so build_view sees the
-    canonical shape regardless of which format the user uploaded.
+    XLSX exports use the row-per-reason layout (each reason in its own
+    row; vendor/category cells repeat). `_merge_split_reason_rows`
+    folds those back into one row per (vendor, type, category) with a
+    semicolon-joined `reasons` cell — same shape the legacy CSV
+    export produces — so build_view never branches on format.
 
     Returns rows as plain dicts with string values (caller can coerce).
     """
@@ -123,12 +133,12 @@ def parse_uploaded_file(filename: str, content: bytes) -> list[dict]:
                 v = r[i]
                 entry[h] = "" if v is None else str(v)
             if entry:
-                out.append(_coalesce_reason_columns(entry))
-        return out
+                out.append(entry)
+        return _merge_split_reason_rows(out)
     # default: CSV (handles BOM via utf-8-sig)
     text = content.decode("utf-8-sig", errors="replace")
     reader = _csv.DictReader(io.StringIO(text))
-    return [_coalesce_reason_columns(dict(r)) for r in reader]
+    return _merge_split_reason_rows([dict(r) for r in reader])
 
 
 def _row_band_from_type(t: str) -> str:
