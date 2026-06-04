@@ -1,0 +1,237 @@
+{# Categorized result partial for /competitive-v3.
+
+   Rendered when the uploaded file carries a top-level 카테고리 column
+   per reason — pivots the data around those top categories instead of
+   around vendors. Three sections:
+
+     1. Summary table — category × distribution (mirrors the Summary
+        sheet rows "카테고리 분포")
+     2. Vendor × Category heatmap — mirrors "벤더 × 카테고리 (리뷰 수 합계)"
+     3. Per-category drill-down — collapsible cards listing the
+        contributing vendors and their reasons, with reason-click
+        review popup hooked up via the same data-v3-reason buttons
+        as the per-vendor view. #}
+
+{% if error %}
+  <div class="border border-rose-200 bg-rose-50 rounded-md p-4 text-sm text-rose-800">
+    <div class="font-semibold mb-1">{% if lang == 'ko' %}파일을 처리하지 못했습니다.{% else %}Failed to process.{% endif %}</div>
+    <div>{{ error }}</div>
+  </div>
+{% elif result %}
+  <div class="space-y-5">
+
+    {# Mode banner + totals strip #}
+    <div class="flex items-center gap-2 flex-wrap">
+      <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800 ring-1 ring-blue-200">
+        🏷️ {% if lang == 'ko' %}카테고리 분류 모드{% else %}Categorized mode{% endif %}
+      </span>
+      {% if result._file_name %}<span class="text-[11px] text-gray-500">📎 {{ result._file_name }}</span>{% endif %}
+    </div>
+    <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
+      <span>{% if lang == 'ko' %}전체 리뷰{% else %}reviews{% endif %} <b class="text-blue-700">{{ '{:,}'.format(result.totals.reviews) }}</b></span>
+      <span>·</span>
+      <span>{% if lang == 'ko' %}reason 항목{% else %}reasons{% endif %} <b class="text-blue-700">{{ result.totals.reasons }}</b></span>
+      <span>·</span>
+      <span>{% if lang == 'ko' %}업체{% else %}vendors{% endif %} <b class="text-blue-700">{{ result.totals.vendors }}</b></span>
+      <span>·</span>
+      <span>{% if lang == 'ko' %}카테고리{% else %}categories{% endif %} <b class="text-blue-700">{{ result.totals.categories }}</b></span>
+    </div>
+
+    {# ====== 1. Category distribution table ====== #}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+      <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50">
+        📊 {% if lang == 'ko' %}카테고리 분포 (리뷰 수 기준){% else %}Category distribution (by review count){% endif %}
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-xs text-gray-600">
+            <tr>
+              <th class="text-left px-3 py-2">{% if lang == 'ko' %}카테고리{% else %}Category{% endif %}</th>
+              <th class="text-right px-3 py-2">{% if lang == 'ko' %}리뷰 수(합){% else %}Reviews{% endif %}</th>
+              <th class="text-right px-3 py-2 w-44">{% if lang == 'ko' %}비중{% else %}Share{% endif %}</th>
+              <th class="text-right px-3 py-2">{% if lang == 'ko' %}reason 항목수{% else %}Reasons{% endif %}</th>
+              <th class="text-right px-3 py-2">{% if lang == 'ko' %}업체 수{% else %}Vendors{% endif %}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {% for c in result.categories %}
+              <tr class="hover:bg-blue-50/40">
+                <td class="px-3 py-2 font-medium text-gray-900">
+                  <a href="#cat-{{ loop.index }}" class="hover:text-blue-700">{{ c.name }}</a>
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ '{:,}'.format(c.review_count) }}</td>
+                <td class="px-3 py-2">
+                  <div class="flex items-center justify-end gap-2">
+                    <div class="w-24 bg-gray-200 rounded h-1.5 overflow-hidden">
+                      <div class="bg-blue-500 h-full" style="width: {{ c.pct }}%"></div>
+                    </div>
+                    <span class="text-xs tabular-nums w-12 text-right">{{ '%.1f'|format(c.pct) }}%</span>
+                  </div>
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ c.reason_count }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ c.vendors|length }}</td>
+              </tr>
+            {% endfor %}
+            <tr class="font-semibold bg-gray-100">
+              <td class="px-3 py-2">{% if lang == 'ko' %}합계{% else %}Total{% endif %}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ '{:,}'.format(result.totals.reviews) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums text-xs">100.0%</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ result.totals.reasons }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ result.totals.vendors }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ====== 2. Vendor × Category heatmap ====== #}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+      <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50">
+        🔥 {% if lang == 'ko' %}벤더 × 카테고리 (리뷰 수 합계){% else %}Vendor × Category (review totals){% endif %}
+      </div>
+      <div class="overflow-x-auto">
+        <table class="text-xs tabular-nums">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="text-left px-2 py-1.5 sticky left-0 bg-gray-50 z-10 font-medium text-gray-700 min-w-[200px]">
+                {% if lang == 'ko' %}카테고리 \ 벤더{% else %}Category \ Vendor{% endif %}
+              </th>
+              {% for v in result.matrix.vendors %}
+                <th class="px-2 py-1.5 text-center font-medium text-gray-700 min-w-[80px]">
+                  {% if v.icon_url %}
+                    <img src="{{ v.icon_url }}" class="w-5 h-5 rounded mx-auto mb-0.5" alt="" onerror="this.style.display='none'">
+                  {% endif %}
+                  <div class="truncate max-w-[80px]" title="{{ v.display }}">{{ v.display[:12] }}{% if v.display|length > 12 %}…{% endif %}</div>
+                </th>
+              {% endfor %}
+              <th class="px-2 py-1.5 text-center font-bold text-gray-900 bg-gray-100 min-w-[60px]">{% if lang == 'ko' %}합계{% else %}Sum{% endif %}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {% set max_cell = result.matrix.max_cell %}
+            {% for cat in result.matrix.categories %}
+              {% set ri = loop.index0 %}
+              <tr>
+                <td class="px-2 py-1.5 sticky left-0 bg-white font-medium text-gray-800 truncate max-w-[200px]" title="{{ cat }}">
+                  {{ cat }}
+                </td>
+                {% for n in result.matrix.cells[ri] %}
+                  {% set intensity = (n / max_cell) %}
+                  <td class="px-2 py-1.5 text-center"
+                      {% if n > 0 %}style="background-color: rgba(59,130,246,{{ '%.2f'|format(intensity * 0.7) }})"{% endif %}>
+                    {% if n > 0 %}{{ '{:,}'.format(n) }}{% else %}<span class="text-gray-300">·</span>{% endif %}
+                  </td>
+                {% endfor %}
+                <td class="px-2 py-1.5 text-center font-semibold bg-gray-50">{{ '{:,}'.format(result.matrix.row_totals[ri]) }}</td>
+              </tr>
+            {% endfor %}
+            <tr class="font-semibold bg-gray-100">
+              <td class="px-2 py-1.5 sticky left-0 bg-gray-100">{% if lang == 'ko' %}합계{% else %}Sum{% endif %}</td>
+              {% for total in result.matrix.col_totals %}
+                <td class="px-2 py-1.5 text-center">{{ '{:,}'.format(total) }}</td>
+              {% endfor %}
+              <td class="px-2 py-1.5 text-center bg-gray-200">{{ '{:,}'.format(result.matrix.grand_total) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ====== 3. Per-category drill-down ====== #}
+    <div class="space-y-3">
+      <div class="text-sm font-semibold text-gray-900 flex items-center gap-2">
+        📋 {% if lang == 'ko' %}카테고리별 상세 (업체 + reason){% else %}Per-category detail (vendors + reasons){% endif %}
+        <span class="text-[10px] font-normal text-gray-500">
+          {% if lang == 'ko' %}각 reason 클릭 → 실제 리뷰 팝업{% else %}click any reason → review popup{% endif %}
+        </span>
+      </div>
+      {% for c in result.categories %}
+        <details id="cat-{{ loop.index }}" class="bg-white border border-gray-200 rounded-lg shadow-sm group" {% if loop.index <= 3 %}open{% endif %}>
+          <summary class="px-4 py-3 cursor-pointer hover:bg-gray-50 flex items-center gap-3 list-none">
+            <span class="text-xl shrink-0">🏷️</span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-semibold text-gray-900 truncate">{{ c.name }}</div>
+              <div class="text-[11px] text-gray-500 mt-0.5">
+                {% if lang == 'ko' %}
+                  리뷰 <b class="text-gray-800">{{ '{:,}'.format(c.review_count) }}</b>
+                  · <b class="text-blue-700">{{ '%.1f'|format(c.pct) }}%</b>
+                  · reason {{ c.reason_count }}항목
+                  · 업체 {{ c.vendors|length }}
+                {% else %}
+                  <b class="text-gray-800">{{ '{:,}'.format(c.review_count) }}</b> reviews
+                  · <b class="text-blue-700">{{ '%.1f'|format(c.pct) }}%</b>
+                  · {{ c.reason_count }} reasons
+                  · {{ c.vendors|length }} vendors
+                {% endif %}
+              </div>
+            </div>
+            <div class="w-32 bg-gray-200 rounded-full h-2 overflow-hidden shrink-0">
+              <div class="bg-blue-500 h-full" style="width: {{ c.pct }}%"></div>
+            </div>
+            <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </summary>
+          <div class="border-t divide-y divide-gray-100">
+            {% for v in c.vendors %}
+              <div class="px-4 py-3">
+                <div class="flex items-center gap-2 mb-2">
+                  {% if v.icon_url %}
+                    <img src="{{ v.icon_url }}" class="w-6 h-6 rounded shrink-0 object-cover border border-gray-200" alt="" onerror="this.style.display='none'">
+                  {% else %}
+                    <div class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center text-[10px] text-gray-500 shrink-0">
+                      {{ (v.display or v.key)[:2].upper() }}
+                    </div>
+                  {% endif %}
+                  <span class="text-sm font-medium text-gray-900 truncate" title="{{ v.display }}">{{ v.display }}</span>
+                  <span class="text-[10px] text-gray-500 ml-auto tabular-nums whitespace-nowrap">
+                    {% if lang == 'ko' %}
+                      리뷰 <b class="text-gray-700">{{ '{:,}'.format(v.review_count) }}</b> · {{ v.reasons|length }} reasons
+                    {% else %}
+                      <b class="text-gray-700">{{ '{:,}'.format(v.review_count) }}</b> reviews · {{ v.reasons|length }} reasons
+                    {% endif %}
+                  </span>
+                </div>
+                <ul class="ml-8 space-y-1">
+                  {% for r in v.reasons %}
+                    <li>
+                      <button type="button"
+                              data-v3-reason
+                              data-vendor-key="{{ v.key }}"
+                              data-vendor-display="{{ v.display }}"
+                              data-category="{{ r.vendor_category }}"
+                              data-band="{{ r.band }}"
+                              data-reason-text="{{ r.text }}"
+                              class="text-left text-[13px] text-gray-800 hover:text-blue-700 hover:underline cursor-pointer">
+                        <span>{% if r.band == 'positive' %}💪{% else %}⚠️{% endif %}</span>
+                        {{ r.text }}
+                        <span class="text-[10px] text-gray-500 tabular-nums">({{ r.count }})</span>
+                        <span class="text-[10px] text-gray-400 ml-1">— {{ r.vendor_category }}</span>
+                      </button>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+
+    <div class="text-[11px] text-gray-500 italic">
+      {% if lang == 'ko' %}
+        각 reason 클릭 시 저장된 원인 분석 카드를 조회해 실제 리뷰 본문을 팝업으로 표시합니다.
+        카드가 없거나 reason이 매칭되지 않으면 안내 메시지가 뜹니다 — /vendors에서 해당 강점을 다시 분석·저장하면 됩니다.
+      {% else %}
+        Clicking a reason fetches actual reviews from the saved reason card.
+        If the card is missing or text doesn't match, a hint appears — re-analyze on /vendors.
+      {% endif %}
+    </div>
+  </div>
+
+  <style>
+    /* Hide default disclosure triangle on Webkit */
+    summary::-webkit-details-marker { display: none; }
+    summary { list-style: none; }
+  </style>
+{% endif %}

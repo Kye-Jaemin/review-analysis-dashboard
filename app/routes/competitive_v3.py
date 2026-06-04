@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.services.competitive_v3 import (
+    build_categorized_view,
     build_view,
+    has_top_category,
     parse_uploaded_file,
     reason_reviews,
 )
@@ -44,8 +46,18 @@ async def competitive_v3_parse(
             result=None,
             csv_name=file.filename or "",
         )
+    # Auto-dispatch by file shape: when the upload carries a top-level
+    # 카테고리 column (the "categorized" export from the upstream
+    # classifier), render the category-pivot view; otherwise fall back
+    # to the per-vendor view.
+    categorized = has_top_category(rows)
     try:
-        result = await build_view(session, rows)
+        if categorized:
+            result = await build_categorized_view(session, rows)
+            template = "_competitive_v3_categorized.html"
+        else:
+            result = await build_view(session, rows)
+            template = "_competitive_v3_results.html"
     except Exception as e:  # noqa: BLE001
         return render(
             request,
@@ -57,7 +69,7 @@ async def competitive_v3_parse(
     result["_file_name"] = file.filename or "vendor_analysis"
     return render(
         request,
-        "_competitive_v3_results.html",
+        template,
         result=result,
         csv_name=file.filename or "vendor_analysis",
         error=None,
