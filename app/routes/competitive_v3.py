@@ -55,7 +55,13 @@ def _export_filename(prefix: str = "competitive_v3") -> str:
 async def competitive_v3_page(
     request: Request, session: AsyncSession = Depends(get_session)
 ):
-    cards = await list_v3_cards(session, include_hidden=False)
+    # Defensive: if the saved-cards table doesn't exist yet (e.g. the
+    # 0020 migration hasn't run on this DB), the page still renders —
+    # the saved-cards panel just shows empty.
+    try:
+        cards = await list_v3_cards(session, include_hidden=False)
+    except Exception:
+        cards = []
     return render(request, "competitive_v3.html", saved_cards=cards)
 
 
