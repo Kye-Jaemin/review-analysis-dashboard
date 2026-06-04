@@ -20,12 +20,30 @@
 {% elif result %}
   <div class="space-y-5">
 
-    {# Mode banner + totals strip #}
+    {# Mode banner + Save / Export action bar #}
     <div class="flex items-center gap-2 flex-wrap">
       <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800 ring-1 ring-blue-200">
-        🏷️ {% if lang == 'ko' %}카테고리 분류 모드{% else %}Categorized mode{% endif %}
+        🏷️ {% if lang == 'ko' %}카테고리 분류 결과{% else %}Categorized result{% endif %}
       </span>
+      {% if result._card_label %}
+        <span class="text-[11px] text-blue-700 font-medium">📌 {{ result._card_label }}</span>
+      {% endif %}
       {% if result._file_name %}<span class="text-[11px] text-gray-500">📎 {{ result._file_name }}</span>{% endif %}
+      <div class="ml-auto flex items-center gap-2">
+        {% if result._input_hash %}
+          <button type="button"
+                  onclick="v3SaveAsCard({{ result._input_hash|tojson }}, {{ (result._card_label or result._file_name or '')|tojson }})"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded shadow-sm"
+                  title="{% if lang == 'ko' %}이 분석 결과를 카드로 저장{% else %}Save as card{% endif %}">
+            💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}
+          </button>
+          <a href="/competitive-v3/export.xlsx?input_hash={{ result._input_hash }}"
+             class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded shadow-sm"
+             title="{% if lang == 'ko' %}엑셀 파일로 내보내기 (Summary + Vendor analysis 시트){% else %}Export xlsx (Summary + Vendor analysis sheets){% endif %}">
+            📥 {% if lang == 'ko' %}엑셀 내보내기{% else %}Export Excel{% endif %}
+          </a>
+        {% endif %}
+      </div>
     </div>
     <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
       <span>{% if lang == 'ko' %}전체 리뷰{% else %}reviews{% endif %} <b class="text-blue-700">{{ '{:,}'.format(result.totals.reviews) }}</b></span>

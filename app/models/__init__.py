@@ -7,6 +7,7 @@ from app.models.investigation import Investigation
 from app.models.auto_category import AutoCategory, ReviewAutoCategoryLink
 from app.models.competitive_card import CompetitiveFactorCard
 from app.models.competitive_v2_card import CompetitiveV2Card
+from app.models.competitive_v3_card import CompetitiveV3Card
 from app.models.vendor_reason_card import VendorReasonCard
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "ReviewManualCategoryLink",
     "CompetitiveFactorCard",
     "CompetitiveV2Card",
+    "CompetitiveV3Card",
     "VendorReasonCard",
 ]

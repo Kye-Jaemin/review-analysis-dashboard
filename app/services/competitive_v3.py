@@ -28,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Analysis, Review, VendorReasonCard
+from app.models import Analysis, CompetitiveV3Card, Review, VendorReasonCard
 from app.services.vendors import list_vendors, _vendor_key
 
 
@@ -361,6 +361,52 @@ async def build_view(
 # Render redeploys naturally clear it.
 _CAT_CACHE_TTL_SECONDS = 30 * 60
 _categorize_cache: dict[str, tuple[float, list[dict]]] = {}
+
+# Short-lived buffer of "current upload" results so the Save / Export
+# buttons in the result partial can recover the full rows + computed
+# view without re-uploading. Keyed by the same input hash returned in
+# the result payload. Trimmed naturally by TTL (also 30 min).
+_RECENT_UPLOADS_TTL = 30 * 60
+_recent_uploads: dict[str, tuple[float, dict]] = {}  # hash → {rows, result, filename}
+
+
+def remember_upload(input_hash: str, rows: list[dict], result: dict, filename: str) -> None:
+    _recent_uploads[input_hash] = (
+        time.time(),
+        {"rows": rows, "result": result, "filename": filename},
+    )
+
+
+def recall_upload(input_hash: str) -> Optional[dict]:
+    entry = _recent_uploads.get(input_hash)
+    if not entry:
+        return None
+    ts, data = entry
+    if time.time() - ts > _RECENT_UPLOADS_TTL:
+        _recent_uploads.pop(input_hash, None)
+        return None
+    return data
+
+
+def hash_rows(rows: list[dict]) -> str:
+    """Stable SHA256 of the canonical (reason, vendor, type, category, count)
+    set for an upload. Used both as the categorize-cache key and as the
+    short-lived 'recent uploads' lookup key returned to the template."""
+    canon: list[tuple] = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        canon.append((
+            str(r.get("reason") or "").strip(),
+            str(r.get("vendor") or "").strip(),
+            str(r.get("type") or "").strip(),
+            str(r.get("category") or "").strip(),
+            str(r.get("review_count") or r.get("count") or "0"),
+        ))
+    canon.sort()
+    return hashlib.sha256(
+        json.dumps(canon, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
 
 
 def _strip_fences(s: str) -> str:
@@ -944,3 +990,293 @@ async def reason_reviews(
         }
     out["reviews"] = [by_id[i] for i in review_ids if i in by_id]
     return out
+
+
+# ----------------------------------------------------------------------------
+# Saved-card CRUD (mirrors the v2 pattern)
+# ----------------------------------------------------------------------------
+
+
+async def list_v3_cards(
+    session: AsyncSession, *, include_hidden: bool = False
+) -> list[dict]:
+    stmt = select(CompetitiveV3Card)
+    if not include_hidden:
+        stmt = stmt.where(CompetitiveV3Card.hidden.is_(False))
+    stmt = stmt.order_by(CompetitiveV3Card.updated_at.desc())
+    rows = (await session.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": c.id,
+            "label": c.label,
+            "model_used": c.model_used,
+            "input_filename": c.input_filename,
+            "hidden": c.hidden,
+            "categories_count": len((c.result_payload or {}).get("categories") or []),
+            "totals": (c.result_payload or {}).get("totals") or {},
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+
+
+async def get_v3_card(session: AsyncSession, card_id: int) -> Optional[CompetitiveV3Card]:
+    return await session.get(CompetitiveV3Card, card_id)
+
+
+async def save_v3_card(
+    session: AsyncSession,
+    *,
+    label: str,
+    rows: list[dict],
+    result: dict,
+    model_used: Optional[str] = None,
+    input_filename: Optional[str] = None,
+) -> CompetitiveV3Card:
+    label = (label or "").strip()
+    if not label:
+        raise ValueError("label cannot be empty")
+    card = CompetitiveV3Card(
+        label=label[:200],
+        model_used=(model_used or "")[:100] or None,
+        input_filename=(input_filename or "")[:255] or None,
+        input_rows=list(rows or []),
+        result_payload=dict(result or {}),
+        hidden=False,
+    )
+    session.add(card)
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def update_v3_card_label(
+    session: AsyncSession, card_id: int, label: str
+) -> Optional[CompetitiveV3Card]:
+    card = await session.get(CompetitiveV3Card, card_id)
+    if not card:
+        return None
+    label = (label or "").strip()
+    if not label:
+        raise ValueError("label cannot be empty")
+    card.label = label[:200]
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def toggle_v3_card_hidden(
+    session: AsyncSession, card_id: int, hidden: bool
+) -> Optional[CompetitiveV3Card]:
+    card = await session.get(CompetitiveV3Card, card_id)
+    if not card:
+        return None
+    card.hidden = bool(hidden)
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def delete_v3_card(session: AsyncSession, card_id: int) -> bool:
+    card = await session.get(CompetitiveV3Card, card_id)
+    if not card:
+        return False
+    await session.delete(card)
+    await session.commit()
+    return True
+
+
+# ----------------------------------------------------------------------------
+# XLSX export — mirrors the user's vendor_analysis_categorized.xlsx
+# ----------------------------------------------------------------------------
+
+
+def export_categorized_xlsx(rows: list[dict], result: dict, *, title: Optional[str] = None) -> bytes:
+    """Build a two-sheet xlsx from a categorized rows + view payload:
+
+      Sheet "summary":
+        - Title row (bold)
+        - "카테고리 분포 (리뷰 수 기준)" section: category × distribution
+        - "벤더 × 카테고리 (리뷰 수 합계)" section: vendor × category matrix
+      Sheet "vendor_analysis":
+        - Same per-reason rows the user uploaded, with the 카테고리
+          column appended. Matches the format of the user's reference
+          file (vendor_analysis_categorized.xlsx).
+
+    Returns the workbook bytes.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+
+    # ---- Summary sheet ----
+    ws = wb.active
+    ws.title = "summary"
+
+    totals = (result or {}).get("totals") or {}
+    categories = (result or {}).get("categories") or []
+    matrix = (result or {}).get("matrix") or {}
+
+    bold = Font(bold=True)
+    section_fill = PatternFill("solid", fgColor="E5E7EB")
+    header_fill = PatternFill("solid", fgColor="F3F4F6")
+    total_fill = PatternFill("solid", fgColor="E5E7EB")
+
+    title_text = title or (
+        f"카테고리 요약 — Strength VoC "
+        f"(리뷰 {totals.get('reviews', 0):,}건 / "
+        f"reason {totals.get('reasons', 0)}항목 / "
+        f"{totals.get('vendors', 0)}개 벤더)"
+    )
+    ws.cell(row=1, column=1, value=title_text).font = Font(bold=True, size=12)
+
+    # Section 1 — category distribution
+    r = 3
+    ws.cell(row=r, column=1, value="카테고리 분포 (리뷰 수 기준)").font = bold
+    ws.cell(row=r, column=1).fill = section_fill
+    r += 1
+    dist_headers = ["카테고리", "리뷰 수(합)", "비중", "reason 항목수"]
+    for c_idx, h in enumerate(dist_headers, start=1):
+        cell = ws.cell(row=r, column=c_idx, value=h)
+        cell.font = bold
+        cell.fill = header_fill
+    r += 1
+    for cat in categories:
+        ws.cell(row=r, column=1, value=cat.get("name"))
+        ws.cell(row=r, column=2, value=int(cat.get("review_count") or 0))
+        ws.cell(row=r, column=3, value=(cat.get("pct") or 0) / 100.0).number_format = "0.0%"
+        ws.cell(row=r, column=4, value=int(cat.get("reason_count") or 0))
+        r += 1
+    ws.cell(row=r, column=1, value="합계").font = bold
+    ws.cell(row=r, column=2, value=int(totals.get("reviews") or 0)).font = bold
+    ws.cell(row=r, column=3, value=1.0 if totals.get("reviews") else 0.0).number_format = "0.0%"
+    ws.cell(row=r, column=3).font = bold
+    ws.cell(row=r, column=4, value=int(totals.get("reasons") or 0)).font = bold
+    for c_idx in range(1, 5):
+        ws.cell(row=r, column=c_idx).fill = total_fill
+    r += 2
+
+    # Section 2 — vendor × category matrix
+    ws.cell(row=r, column=1, value="벤더 × 카테고리 (리뷰 수 합계)").font = bold
+    ws.cell(row=r, column=1).fill = section_fill
+    r += 1
+    mx_cats = matrix.get("categories") or []
+    mx_vendors = matrix.get("vendors") or []
+    mx_cells = matrix.get("cells") or []
+    mx_row_totals = matrix.get("row_totals") or []
+    mx_col_totals = matrix.get("col_totals") or []
+    mx_grand_total = matrix.get("grand_total") or 0
+
+    matrix_headers = ["카테고리 \\ 벤더"] + [v.get("display") for v in mx_vendors] + ["합계"]
+    for c_idx, h in enumerate(matrix_headers, start=1):
+        cell = ws.cell(row=r, column=c_idx, value=h)
+        cell.font = bold
+        cell.fill = header_fill
+    r += 1
+    for ri, cat_name in enumerate(mx_cats):
+        ws.cell(row=r, column=1, value=cat_name).font = bold
+        for ci, n in enumerate(mx_cells[ri] if ri < len(mx_cells) else [], start=1):
+            ws.cell(row=r, column=1 + ci, value=int(n or 0))
+        # row total
+        ws.cell(
+            row=r,
+            column=1 + len(mx_vendors) + 1,
+            value=int(mx_row_totals[ri] or 0) if ri < len(mx_row_totals) else 0,
+        ).font = bold
+        r += 1
+    # column totals + grand total
+    ws.cell(row=r, column=1, value="합계").font = bold
+    for ci, n in enumerate(mx_col_totals, start=1):
+        cell = ws.cell(row=r, column=1 + ci, value=int(n or 0))
+        cell.font = bold
+        cell.fill = total_fill
+    cell = ws.cell(row=r, column=1 + len(mx_vendors) + 1, value=int(mx_grand_total or 0))
+    cell.font = bold
+    cell.fill = total_fill
+    ws.cell(row=r, column=1).fill = total_fill
+
+    # Column widths
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 16
+    for i in range(len(mx_vendors)):
+        ws.column_dimensions[get_column_letter(2 + i)].width = 18
+    ws.column_dimensions[get_column_letter(2 + len(mx_vendors))].width = 12
+
+    # ---- Vendor analysis sheet ----
+    ws2 = wb.create_sheet("vendor_analysis")
+    va_headers = [
+        "vendor", "type", "category", "pct", "count",
+        "wilson_score", "description", "small_sample",
+        "reason", "review_count", "카테고리",
+    ]
+    for c_idx, h in enumerate(va_headers, start=1):
+        cell = ws2.cell(row=1, column=c_idx, value=h)
+        cell.font = bold
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    r = 2
+    for raw in rows or []:
+        if not isinstance(raw, dict):
+            continue
+        if not (raw.get("reason") or "").strip():
+            continue
+        # Coerce common columns to their natural types when possible
+        try:
+            pct_v = float(raw.get("pct")) if raw.get("pct") not in (None, "") else None
+        except (TypeError, ValueError):
+            pct_v = raw.get("pct")
+        try:
+            count_v = int(float(raw.get("count"))) if raw.get("count") not in (None, "") else None
+        except (TypeError, ValueError):
+            count_v = raw.get("count")
+        try:
+            review_count_v = (
+                int(float(raw.get("review_count"))) if raw.get("review_count") not in (None, "") else None
+            )
+        except (TypeError, ValueError):
+            review_count_v = raw.get("review_count")
+        try:
+            wilson_v = (
+                float(raw.get("wilson_score")) if raw.get("wilson_score") not in (None, "") else None
+            )
+        except (TypeError, ValueError):
+            wilson_v = raw.get("wilson_score")
+
+        values = [
+            raw.get("vendor") or "",
+            raw.get("type") or "",
+            raw.get("category") or "",
+            pct_v,
+            count_v,
+            wilson_v,
+            raw.get("description") or "",
+            raw.get("small_sample") or "",
+            raw.get("reason") or "",
+            review_count_v,
+            raw.get("카테고리") or "",
+        ]
+        for c_idx, v in enumerate(values, start=1):
+            ws2.cell(row=r, column=c_idx, value=v)
+        r += 1
+
+    # Column widths
+    va_widths = {
+        "vendor": 28, "type": 10, "category": 32, "pct": 8, "count": 8,
+        "wilson_score": 12, "description": 40, "small_sample": 12,
+        "reason": 50, "review_count": 14, "카테고리": 28,
+    }
+    for c_idx, h in enumerate(va_headers, start=1):
+        ws2.column_dimensions[get_column_letter(c_idx)].width = va_widths.get(h, 16)
+    ws2.freeze_panes = "A2"
+    last_col_letter = get_column_letter(len(va_headers))
+    ws2.auto_filter.ref = f"A1:{last_col_letter}{max(1, r - 1)}"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

@@ -1,0 +1,67 @@
+{# Saved-cards list for /competitive-v3.
+
+   Inputs:
+     saved_cards     list of dicts (see list_v3_cards)
+     just_saved_id   optional int — the card just saved, highlighted #}
+
+{% if saved_cards %}
+  <div class="space-y-2">
+    {% for c in saved_cards %}
+      <div class="border border-gray-200 rounded-md bg-white shadow-sm hover:border-blue-300 transition-colors
+                  {% if just_saved_id and c.id == just_saved_id %}ring-2 ring-blue-400{% endif %}">
+        <div class="px-3 py-2 flex items-center gap-2">
+          <span class="text-base shrink-0">📌</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-900 truncate" title="{{ c.label }}">{{ c.label }}</div>
+            <div class="text-[10px] text-gray-500 flex flex-wrap gap-x-2">
+              {% if c.input_filename %}<span title="원본 파일">📎 {{ c.input_filename }}</span>{% endif %}
+              {% if c.totals %}
+                <span title="리뷰 수">📊 {{ '{:,}'.format(c.totals.reviews or 0) }}</span>
+                <span title="카테고리 수">🏷️ {{ c.totals.categories or 0 }}</span>
+              {% endif %}
+              {% if c.updated_at %}<span title="{{ c.updated_at }}">⏱️ {{ c.updated_at[:10] }}</span>{% endif %}
+            </div>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button type="button"
+                    hx-get="/competitive-v3/cards/{{ c.id }}/load"
+                    hx-target="#competitive-v3-results"
+                    hx-swap="innerHTML"
+                    class="px-2 py-1 text-[11px] bg-blue-600 hover:bg-blue-700 text-white rounded"
+                    title="{% if lang == 'ko' %}이 카드 불러오기{% else %}Load card{% endif %}">
+              📂 {% if lang == 'ko' %}불러오기{% else %}Load{% endif %}
+            </button>
+            <a href="/competitive-v3/export.xlsx?card_id={{ c.id }}"
+               class="px-2 py-1 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white rounded"
+               title="{% if lang == 'ko' %}엑셀 내보내기{% else %}Excel export{% endif %}">
+              📥 XLSX
+            </a>
+            <button type="button"
+                    onclick="v3RenameCard({{ c.id }}, {{ c.label|tojson }})"
+                    class="px-1.5 py-1 text-[11px] bg-gray-200 hover:bg-gray-300 text-gray-700 rounded"
+                    title="{% if lang == 'ko' %}이름 변경{% else %}Rename{% endif %}">
+              ✏️
+            </button>
+            <button type="button"
+                    hx-post="/competitive-v3/cards/{{ c.id }}/delete"
+                    hx-confirm="{% if lang == 'ko' %}이 카드를 삭제하시겠습니까?{% else %}Delete this card?{% endif %}"
+                    hx-target="#v3-saved-cards"
+                    hx-swap="innerHTML"
+                    class="px-1.5 py-1 text-[11px] bg-rose-100 hover:bg-rose-200 text-rose-700 rounded"
+                    title="{% if lang == 'ko' %}삭제{% else %}Delete{% endif %}">
+              🗑️
+            </button>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="text-xs text-gray-500 italic py-2">
+    {% if lang == 'ko' %}
+      저장된 카드가 없습니다. 분석 후 💾 저장 버튼으로 카드를 만드세요.
+    {% else %}
+      No saved cards. After analysis, click 💾 Save to create one.
+    {% endif %}
+  </div>
+{% endif %}

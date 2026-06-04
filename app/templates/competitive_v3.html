@@ -79,6 +79,22 @@
     </div>
   </div>
 
+  {# Saved cards panel — bookmarks of past LLM analyses, loadable
+     without re-running the LLM. Shows up above the results pane. #}
+  <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+    <div class="flex items-center justify-between mb-2">
+      <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
+        📌 {% if lang == 'ko' %}저장된 카드{% else %}Saved cards{% endif %}
+        <span class="text-[10px] font-normal text-gray-500">
+          {% if lang == 'ko' %}분석 결과를 카드로 저장하면 LLM 재호출 없이 다시 볼 수 있습니다{% else %}save analyses to revisit without re-calling the LLM{% endif %}
+        </span>
+      </div>
+    </div>
+    <div id="v3-saved-cards">
+      {% include "_competitive_v3_saved_cards.html" %}
+    </div>
+  </div>
+
   <div id="competitive-v3-results">
     <div class="text-sm text-gray-500 italic">
       {% if lang == 'ko' %}
@@ -229,6 +245,58 @@ async function v3OpenReviewsFor(btn) {
 }
 function v3CloseReviews() {
   document.getElementById('v3-reviews-modal').classList.add('hidden');
+}
+
+// ============================================================
+// Save current analysis as a card
+// ============================================================
+async function v3SaveAsCard(inputHash, defaultLabel) {
+  const label = prompt(
+    {% if lang == 'ko' %}'카드 이름을 입력하세요:'{% else %}'Card name:'{% endif %},
+    defaultLabel || ''
+  );
+  if (!label || !label.trim()) return;
+  const fd = new FormData();
+  fd.append('input_hash', inputHash);
+  fd.append('label', label.trim());
+  try {
+    const res = await fetch('/competitive-v3/save', { method: 'POST', body: fd });
+    if (!res.ok) {
+      alert({% if lang == 'ko' %}'저장 실패: '{% else %}'Save failed: '{% endif %} + res.status + ' ' + (await res.text()).slice(0, 200));
+      return;
+    }
+    const html = await res.text();
+    document.getElementById('v3-saved-cards').innerHTML = html;
+    // Re-process htmx attributes in the new content (load/delete buttons)
+    if (window.htmx) htmx.process(document.getElementById('v3-saved-cards'));
+  } catch (e) {
+    alert(String(e));
+  }
+}
+
+// ============================================================
+// Rename a saved card (prompt → POST → swap list)
+// ============================================================
+async function v3RenameCard(cardId, currentLabel) {
+  const next = prompt(
+    {% if lang == 'ko' %}'새 이름:'{% else %}'New name:'{% endif %},
+    currentLabel || ''
+  );
+  if (!next || !next.trim() || next.trim() === currentLabel) return;
+  const fd = new FormData();
+  fd.append('label', next.trim());
+  try {
+    const res = await fetch('/competitive-v3/cards/' + cardId + '/rename', { method: 'POST', body: fd });
+    if (!res.ok) {
+      alert({% if lang == 'ko' %}'이름 변경 실패'{% else %}'Rename failed'{% endif %});
+      return;
+    }
+    const html = await res.text();
+    document.getElementById('v3-saved-cards').innerHTML = html;
+    if (window.htmx) htmx.process(document.getElementById('v3-saved-cards'));
+  } catch (e) {
+    alert(String(e));
+  }
 }
 // Delegated click for reason buttons (works across HTMX swaps)
 document.body.addEventListener('click', (e) => {
