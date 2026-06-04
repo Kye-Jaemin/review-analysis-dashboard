@@ -518,10 +518,14 @@ async def vendors_export_xlsx(
     # reasons becomes N rows; the fixed cells (vendor / type /
     # category / pct / count / wilson / description / small_sample)
     # repeat on every row so Excel's autofilter & sort still work
-    # cleanly. The trailing column is a singular "reason" cell with
-    # one entry per row in the same "text(N)" shape the v3 parser
-    # already understands.
-    full_header = _EXPORT_HEADER_FIXED + ["reason"]
+    # cleanly. The trailing pair is "reason" (text(N) form, kept so the
+    # v3 parser's existing regex still works) followed by a NUMERIC
+    # "review_count" cell — Excel users asked for the integer count in
+    # its own cell so they can sort / pivot / chart on it directly
+    # without first regex-stripping the "(N)" suffix out of the reason
+    # text. The redundancy is intentional: v3 parser ignores
+    # review_count, Excel users ignore the "(N)" suffix.
+    full_header = _EXPORT_HEADER_FIXED + ["reason", "review_count"]
     fixed_len = len(_EXPORT_HEADER_FIXED)
 
     # Header row — bold + light gray fill so the autofilter dropdown
@@ -550,6 +554,11 @@ async def vendors_export_xlsx(
                 for c_idx, value in enumerate(fixed_cells, start=1):
                     ws.cell(row=ws_row, column=c_idx, value=value)
                 ws.cell(row=ws_row, column=fixed_len + 1, value=f"{name}({n})")
+                # Numeric typing so Excel treats it as a real number
+                # (SUM / AVERAGE / sort all work). int(n) cast is
+                # defensive — n is already int from _build_export_rows
+                # but the source may evolve.
+                ws.cell(row=ws_row, column=fixed_len + 2, value=int(n))
                 ws_row += 1
 
     # Column widths tuned for typical Korean content.
@@ -560,7 +569,8 @@ async def vendors_export_xlsx(
     }
     for col_idx, label in enumerate(_EXPORT_HEADER_FIXED, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(label, 16)
-    ws.column_dimensions[get_column_letter(fixed_len + 1)].width = 60
+    ws.column_dimensions[get_column_letter(fixed_len + 1)].width = 60   # reason
+    ws.column_dimensions[get_column_letter(fixed_len + 2)].width = 14   # review_count
 
     # Quality-of-life: freeze the header row, enable autofilter on the
     # whole table, left-align everything for Korean readability.
