@@ -7,21 +7,20 @@
 
   <div>
     <h1 class="text-2xl font-semibold flex items-center gap-2">
-      <span>🗂️</span>
-      <span>{% if lang == 'ko' %}경쟁력 분류 v3 (베타){% else %}Competitive factor v3 (beta){% endif %}</span>
+      <span>🏷️</span>
+      <span>{% if lang == 'ko' %}경쟁력 분류 (베타){% else %}Competitive factor (beta){% endif %}</span>
     </h1>
     <p class="text-sm text-gray-600 mt-1 max-w-3xl">
       {% if lang == 'ko' %}
         <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 내보낸 CSV 또는 Excel을 업로드하면,
-        업체별로 강점 카테고리와 그 안의 <b>세부 요인(reasons)</b>이 그대로 나열됩니다.
-        각 reason을 클릭하면 실제 리뷰 본문이 팝업으로 표시됩니다 (저장된 원인 분석 카드 필요).
-        LLM 호출 없음 — 순수 뷰어입니다.
+        모든 reason을 LLM(Claude)로 분석해 <b>약 10개의 범용 카테고리</b>로 자동 분류합니다.
+        결과: 카테고리 분포 표 + 벤더 × 카테고리 히트맵 + 카테고리별 상세 펼침.
+        각 reason 클릭 시 실제 리뷰 본문 팝업 (저장된 원인 분석 카드 필요).
       {% else %}
-        Upload a CSV or Excel exported from
-        <a href="/vendors" class="text-blue-600 hover:underline">vendor strengths/weaknesses</a>;
-        each vendor's strengths + their detail reasons are listed verbatim. Click any reason to
-        open the actual reviews in a popup (requires a saved reason card). No LLM call —
-        pure viewer.
+        Upload a CSV or Excel from <a href="/vendors" class="text-blue-600 hover:underline">vendor strengths/weaknesses</a>;
+        Claude clusters every reason into ~10 cross-vendor top-level categories.
+        Output: category distribution table + vendor × category heatmap + per-category drill-down.
+        Click any reason for the actual reviews (requires a saved reason card).
       {% endif %}
     </p>
   </div>
@@ -76,16 +75,18 @@
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
       </svg>
-      {% if lang == 'ko' %}파일 분석 중…{% else %}Parsing…{% endif %}
+      {% if lang == 'ko' %}LLM 카테고리 분류 중… (30초~1분 소요){% else %}Categorizing reasons via LLM… (30s–1min){% endif %}
     </div>
   </div>
 
   <div id="competitive-v3-results">
     <div class="text-sm text-gray-500 italic">
       {% if lang == 'ko' %}
-        파일을 업로드하면 업체별 강점 + 세부 요인이 표시됩니다. 각 reason 클릭 시 실제 리뷰 팝업.
+        파일을 업로드하면 LLM이 모든 reason을 분석해 약 10개의 카테고리로 분류한 결과를 표시합니다.
+        분포 표 · 벤더×카테고리 히트맵 · 카테고리별 상세 펼침. 각 reason 클릭 시 실제 리뷰 팝업.
       {% else %}
-        Upload a file to see vendors with their strengths + detail reasons. Click any reason for reviews.
+        Upload a file and the LLM clusters every reason into ~10 categories.
+        Distribution table · vendor × category heatmap · per-category drill-down. Click reasons for reviews.
       {% endif %}
     </div>
   </div>

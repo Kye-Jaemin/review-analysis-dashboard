@@ -17,13 +17,17 @@ extension/content-type.
 from __future__ import annotations
 
 import csv as _csv
+import hashlib
 import io
+import json
 import re
+import time
 from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models import Analysis, Review, VendorReasonCard
 from app.services.vendors import list_vendors, _vendor_key
 
@@ -346,6 +350,238 @@ async def build_view(
         "skipped_no_reasons": skipped_no_reasons,
         "vendors": vendors_out,
     }
+
+
+# ----------------------------------------------------------------------------
+# LLM categorization — assign each reason to one of ~10 cross-vendor categories
+# ----------------------------------------------------------------------------
+
+# In-memory cache: hash of (reason text list) → categorized rows. Lets a
+# user re-upload the same export without burning tokens. 30-min TTL so
+# Render redeploys naturally clear it.
+_CAT_CACHE_TTL_SECONDS = 30 * 60
+_categorize_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _strip_fences(s: str) -> str:
+    s = (s or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```\s*$", "", s)
+    return s.strip()
+
+
+def _categorize_cache_key(items: list[dict], lang: str, model: str) -> str:
+    """Hash of the canonical (reason text + vendor + count) tuples plus
+    lang + model — two uploads of the same data should hit the cache."""
+    canon = json.dumps(
+        sorted(
+            (i["reason"], i["vendor"], int(i["count"] or 0)) for i in items
+        ),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(
+        f"{model}|{lang}|{canon}".encode("utf-8")
+    ).hexdigest()
+
+
+def _build_categorize_prompt(
+    items: list[dict],
+    lang: str,
+    target_categories: int = 10,
+) -> tuple[str, str]:
+    """Build the (system, user) prompt for the categorize-reasons call.
+
+    items: list of {i, reason, vendor, vendor_category, count}
+    Returns (system_prompt, user_message).
+    """
+    lang_label = {"ko": "Korean", "en": "English"}.get(lang, "Korean")
+    total_reviews = sum(int(i.get("count") or 0) for i in items)
+    vendor_set = sorted({i["vendor"] for i in items if i.get("vendor")})
+
+    system = (
+        f"You are categorizing user-review REASONS (causal mechanisms for\n"
+        f"product strengths) into a small set of cross-vendor top-level\n"
+        f"categories. The dataset comes from {len(vendor_set)} vendors with\n"
+        f"{len(items)} reasons covering {total_reviews:,} reviews.\n\n"
+        f"Vendors: {', '.join(vendor_set)}\n\n"
+        f"GOAL\n"
+        f"  1. Discover ~{target_categories} top-level categories that group\n"
+        f"     these reasons by THEME (what aspect of the product the reason\n"
+        f"     describes). Aim for {max(8, target_categories - 2)}–"
+        f"{target_categories + 2} categories — go fewer when reasons cluster\n"
+        f"     tightly, more only when needed to avoid heterogeneous buckets.\n"
+        f"  2. Categories must be CROSS-VENDOR — every category should contain\n"
+        f"     reasons from at least 2 different vendors. Avoid single-vendor\n"
+        f"     buckets unless the theme is genuinely vendor-specific.\n"
+        f"  3. Assign EVERY input reason to exactly one category.\n\n"
+        f"CATEGORY NAMING RULES\n"
+        f"  - 4–18 character noun phrases in {lang_label}\n"
+        f"  - Use middle dot '·' to join related concepts (e.g. '칼로리·매크로·"
+        f"영양소 추적')\n"
+        f"  - VALUE-NEUTRAL — describe the theme, not whether it's positive\n"
+        f"    or negative. NOT '훌륭한 X', NOT 'X 문제'\n"
+        f"  - Reference examples from the user's prior dataset for tone:\n"
+        f"      '칼로리·매크로·영양소 추적'\n"
+        f"      '사진·바코드·음성 음식 입력'\n"
+        f"      '동기부여·책임감·습관 형성'\n"
+        f"      '운동·수면·건강 데이터 추적'\n"
+        f"      'UI/UX·사용 편의성'\n"
+        f"      '음식 DB·검색·레시피'\n"
+        f"      '교육·레슨·강사 콘텐츠'\n"
+        f"      '게임화·캐릭터·보상'\n"
+        f"      '무료·가격 가치'\n"
+        f"      '개인화 코칭·인사이트'\n"
+        f"      '커뮤니티·소셜'\n"
+        f"      '기기·앱 연동'\n"
+        f"    Re-use these names when a new reason cleanly fits; coin new\n"
+        f"    ones only when none of the above match.\n\n"
+        f"OUTPUT — JSON only, no prose, no markdown fences:\n"
+        f"{{\n"
+        f'  "categories": ["category A", "category B", ...],\n'
+        f'  "assignments": [\n'
+        f'    {{"i": 1, "category": "category A"}},\n'
+        f'    {{"i": 2, "category": "category B"}},\n'
+        f"    ...\n"
+        f"  ]\n"
+        f"}}\n\n"
+        f"`assignments` length MUST equal the number of input reasons\n"
+        f"({len(items)}). Every `category` value MUST appear in `categories`.\n"
+        f"Indexes MUST be 1..{len(items)} — no skips, no duplicates."
+    )
+
+    lines = []
+    for it in items:
+        lines.append(
+            f"[{it['i']}] {it['reason']}"
+            f" | vendor={it['vendor']}"
+            f" | from={it['vendor_category']}"
+            f" | reviews={it['count']}"
+        )
+    user_msg = "Reasons to categorize:\n" + "\n".join(lines)
+    return system, user_msg
+
+
+async def categorize_reasons_with_llm(
+    rows: list[dict],
+    *,
+    lang: str = "ko",
+    model: Optional[str] = None,
+    target_categories: int = 10,
+) -> list[dict]:
+    """Run a Claude call that classifies every reason into one of
+    ~target_categories cross-vendor top-level categories. Mutates each
+    row in place to add a "카테고리" key. Returns the same list.
+
+    The function expects RAW per-reason rows (one row per reason),
+    which is what parse_uploaded_file returns. Rows missing a usable
+    reason cell are skipped.
+    """
+    if not settings.ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+
+    # Extract the per-reason items the LLM will see.
+    items: list[dict] = []
+    item_to_row: dict[int, dict] = {}
+    for raw in rows or []:
+        if not isinstance(raw, dict):
+            continue
+        reason_text = str(raw.get("reason") or "").strip()
+        if not reason_text:
+            continue
+        # Strip "(N)" suffix if present so the LLM sees clean text.
+        m = _REASON_COUNT_RE.match(reason_text)
+        if m:
+            reason_text = m.group(1).strip()
+        try:
+            count = int(float(raw.get("review_count") or 0))
+        except (TypeError, ValueError):
+            count = 0
+        if not count and m:
+            try:
+                count = int(m.group(2))
+            except ValueError:
+                count = 0
+        vendor = str(raw.get("vendor") or "").strip()
+        vendor_category = str(raw.get("category") or "").strip()
+        idx = len(items) + 1
+        items.append({
+            "i": idx,
+            "reason": reason_text,
+            "vendor": vendor,
+            "vendor_category": vendor_category,
+            "count": count,
+        })
+        item_to_row[idx] = raw
+
+    if not items:
+        return rows
+
+    chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
+    if chosen_model not in settings.allowed_models:
+        chosen_model = settings.ANTHROPIC_MODEL
+
+    # Cache check.
+    cache_key = _categorize_cache_key(items, lang, chosen_model)
+    cached = _categorize_cache.get(cache_key)
+    if cached and time.time() - cached[0] < _CAT_CACHE_TTL_SECONDS:
+        cat_by_idx = cached[1]
+        for i, cat in cat_by_idx.items():
+            if i in item_to_row:
+                item_to_row[i]["카테고리"] = cat
+                item_to_row[i]["_v3_cached"] = True
+        return rows
+
+    system, user_msg = _build_categorize_prompt(items, lang, target_categories)
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    resp = await client.messages.create(
+        model=chosen_model,
+        max_tokens=8192,
+        temperature=0.0,
+        system=system,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    text = _strip_fences("".join(getattr(b, "text", "") for b in resp.content))
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"categorize LLM returned invalid JSON: {e}; raw={text[:200]!r}"
+        )
+
+    declared_categories = parsed.get("categories") or []
+    valid_cat_set = {str(c).strip() for c in declared_categories if str(c).strip()}
+    assignments_raw = parsed.get("assignments") or []
+
+    cat_by_idx: dict[int, str] = {}
+    for a in assignments_raw:
+        if not isinstance(a, dict):
+            continue
+        try:
+            i = int(a.get("i"))
+        except (TypeError, ValueError):
+            continue
+        cat = str(a.get("category") or "").strip()
+        if not cat:
+            continue
+        # Allow categories the LLM didn't declare in `categories` (defensive).
+        if cat not in valid_cat_set:
+            valid_cat_set.add(cat)
+        cat_by_idx[i] = cat
+
+    # Fallback: any reasons the LLM forgot get a "기타" bucket.
+    for i in item_to_row.keys():
+        if i not in cat_by_idx:
+            cat_by_idx[i] = "기타"
+
+    # Cache + apply.
+    _categorize_cache[cache_key] = (time.time(), cat_by_idx)
+    for i, cat in cat_by_idx.items():
+        if i in item_to_row:
+            item_to_row[i]["카테고리"] = cat
+
+    return rows
 
 
 # ----------------------------------------------------------------------------

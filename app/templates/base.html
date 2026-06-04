@@ -521,8 +521,11 @@
           ('/analyze', 'nav.analyze'),
           ('/reviews', 'nav.reviews'),
           ('/vendors', 'nav.vendors'),
-          ('/competitive', 'nav.competitive'),
-          ('/competitive-v2', 'nav.competitive_v2'),
+          {# v1 (/competitive) and v2 (/competitive-v2) removed from nav
+             on user request — v3 now does the categorization itself.
+             Routes are intentionally kept registered so existing
+             bookmarks/saved cards still resolve, just hidden from
+             the sidebar. #}
           ('/competitive-v3', 'nav.competitive_v3'),
           ('/howto', 'nav.howto'),
         ] %}
@@ -787,6 +790,9 @@
         // Competitive v2 — bottom-up success-factor clustering (Claude).
         if (method === 'POST' && path === '/competitive-v2/analyze-csv') return true;
         if (method === 'POST' && /^\/competitive-v2\/cards\/\d+\/reanalyze\/?$/.test(path)) return true;
+        // Competitive v3 — LLM categorization of uploaded reasons into
+        // ~10 cross-vendor top-level categories.
+        if (method === 'POST' && path === '/competitive-v3/parse') return true;
         // Vendor "why?" extraction (Claude). The card load / save
         // routes are NOT gated — they're pure DB reads.
         if (method === 'GET' && path === '/api/vendor-reasons') return true;

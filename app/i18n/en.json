@@ -10,9 +10,7 @@
     "analyze": "Classification & sentiment",
     "reviews": "All reviews",
     "vendors": "Vendor strengths/weaknesses",
-    "competitive": "Competitive factor (beta)",
-    "competitive_v2": "Competitive factor v2 (beta)",
-    "competitive_v3": "Competitive factor v3 (beta)",
+    "competitive_v3": "Competitive factor (beta)",
     "howto": "How to use"
   },
   "common": {

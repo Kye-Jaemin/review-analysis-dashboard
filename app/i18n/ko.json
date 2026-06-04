@@ -10,9 +10,7 @@
     "analyze": "리뷰 분류 및 긍부정 평가",
     "reviews": "전체 리뷰 보기",
     "vendors": "업체 강/약점 분석",
-    "competitive": "경쟁력 분류(베타)",
-    "competitive_v2": "경쟁력 분류 v2(베타)",
-    "competitive_v3": "경쟁력 분류 v3(베타)",
+    "competitive_v3": "경쟁력 분류(베타)",
     "howto": "사용법"
   },
   "common": {
