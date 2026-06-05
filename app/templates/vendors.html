@@ -760,19 +760,33 @@ function openReasonsModalFor(el) {
 // the viewport (16px padding from edges) and re-clamps on window resize.
 function _positionModalNear(el) {
   const content = document.getElementById('reasons-modal-content');
-  if (!content || !el) return;
-  // Reset any inline top so getBoundingClientRect measures the natural
-  // size after CSS lays it out.
-  content.style.top = '0px';
-  // Wait one frame so the content has reflowed with its current body.
+  if (!content) return;
+  // Wait one frame so the modal's current body has reflowed (height
+  // measurement reflects whatever state — empty / loading / loaded —
+  // we're being called from). We previously reset top to 0px before
+  // measuring, but getBoundingClientRect on the TRIGGER doesn't care
+  // what the modal's top is, and the reset caused a one-frame jump
+  // to viewport top that read as "popup in a strange place" right
+  // before rAF re-positioned it.
   requestAnimationFrame(() => {
-    const rect = el.getBoundingClientRect();
     const vpH = window.innerHeight;
-    const cH = content.offsetHeight || 480;
+    const cH = content.offsetHeight || Math.min(480, vpH * 0.6);
     const margin = 16;
-    // Anchor: slightly above the clicked item's top edge so the click
-    // target stays visible at the modal's top edge.
-    let top = rect.top - 24;
+    let top;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      // Sanity check: detached/hidden triggers produce 0×0 rects.
+      // Fall back to viewport center so the modal is at least visible.
+      if (rect.width > 0 && rect.height > 0) {
+        // Anchor slightly above the clicked item so it stays visible
+        // at the modal's top edge.
+        top = rect.top - 24;
+      } else {
+        top = (vpH - cH) / 2;
+      }
+    } else {
+      top = (vpH - cH) / 2;
+    }
     // Clamp so the whole modal stays in the viewport.
     if (top + cH > vpH - margin) top = vpH - cH - margin;
     if (top < margin) top = margin;
