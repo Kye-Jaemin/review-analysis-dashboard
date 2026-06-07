@@ -421,7 +421,7 @@ def _strip_fences(s: str) -> str:
 # into the cache key so cached results from the prior prompt version are
 # automatically invalidated. Saves users from "I changed the rules but
 # nothing happened" confusion.
-_CATEGORIZE_PROMPT_VERSION = "v2-2026-06-merge-device-into-health"
+_CATEGORIZE_PROMPT_VERSION = "v3-2026-06-feature-specific-usability-routing"
 
 
 def _categorize_cache_key(items: list[dict], lang: str, model: str) -> str:
@@ -502,6 +502,33 @@ def _build_categorize_prompt(
         f"    workflow continuity across apps, not health data per se.\n"
         f"    Suggested name: '외부 앱 연동·데이터 호환'. Create it only\n"
         f"    when ≥2 vendors have reasons fitting this distinct value.\n\n"
+        f"FEATURE-SPECIFIC USABILITY RULE — IMPORTANT:\n"
+        f"  When a reason describes how EASY / CONVENIENT / INTUITIVE\n"
+        f"  a SPECIFIC FEATURE is (the noun phrase identifies WHAT is\n"
+        f"  easy, not just THAT it's easy), route to that feature's\n"
+        f"  category — NOT to 'UI/UX·사용 편의성'. The UX bucket should\n"
+        f"  only collect reasons about APP-WIDE usability with no\n"
+        f"  specific feature attached.\n"
+        f"  Examples — route these to the FEATURE category:\n"
+        f"    ✗ NOT UI/UX:   '사진 음식 인식의 편리함'           → 사진·바코드·음성 음식 입력\n"
+        f"    ✗ NOT UI/UX:   '바코드 스캐너로 빠른 입력'         → 사진·바코드·음성 음식 입력\n"
+        f"    ✗ NOT UI/UX:   '음성 기록의 편의성'                → 사진·바코드·음성 음식 입력\n"
+        f"    ✗ NOT UI/UX:   '음식 검색이 빠름'                  → 음식 DB·검색·레시피\n"
+        f"    ✗ NOT UI/UX:   '레시피 추가가 간편'                → 음식 DB·검색·레시피\n"
+        f"    ✗ NOT UI/UX:   '운동 기록이 자동으로 동기화돼 편리' → 운동·수면·건강 데이터 추적\n"
+        f"    ✗ NOT UI/UX:   '칼로리 자동 계산이 편리'           → 칼로리·매크로·영양소 추적\n"
+        f"    ✗ NOT UI/UX:   '미팅 참석이 동기부여에 효과적'     → 동기부여·책임감·습관 형성\n"
+        f"    ✗ NOT UI/UX:   '커뮤니티 참여가 쉬움'              → 커뮤니티·소셜\n"
+        f"  Examples — these BELONG in UI/UX·사용 편의성:\n"
+        f"    ✓ '직관적 메뉴 구조와 깔끔한 디자인'\n"
+        f"    ✓ '앱 전반의 빠른 응답 속도'\n"
+        f"    ✓ '대시보드 한눈에 보이는 정보 배치'\n"
+        f"    ✓ '다크 모드 / 색상 테마 선택'\n"
+        f"    ✓ '광고 없는 깔끔한 화면'\n"
+        f"  Heuristic: if you can replace 'X 편리함' with the FEATURE\n"
+        f"  category's working name and the sentence still makes sense,\n"
+        f"  route there. UI/UX is the LAST resort — pick a feature\n"
+        f"  category first whenever a specific feature is named.\n\n"
         f"OUTPUT — JSON only, no prose, no markdown fences:\n"
         f"{{\n"
         f'  "categories": ["category A", "category B", ...],\n'
