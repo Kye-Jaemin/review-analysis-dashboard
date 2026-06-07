@@ -184,8 +184,30 @@ async def competitive_v3_card_load(
     card = await get_v3_card(session, card_id)
     if not card:
         raise HTTPException(404, "card not found")
-    result = dict(card.result_payload or {})
     rows = list(card.input_rows or [])
+    result = dict(card.result_payload or {})
+    # Self-heal: if the saved result_payload is missing the structured
+    # view fields (older / malformed cards), rebuild it from the saved
+    # input_rows. That way loading never 500s on a card whose payload
+    # got corrupted or saved before the categorized-view shape stabilised.
+    needs_rebuild = (
+        not result
+        or "categories" not in result
+        or "matrix" not in result
+        or "totals" not in result
+    )
+    if needs_rebuild and rows:
+        try:
+            result = await build_categorized_view(session, rows)
+        except Exception as e:  # noqa: BLE001
+            return render(
+                request,
+                "_competitive_v3_categorized.html",
+                error=f"저장된 카드를 표시할 수 없습니다: {e}",
+                result=None,
+                raw_rows=None,
+                csv_name=card.label,
+            )
     result["_input_hash"] = hash_rows(rows)
     result["_file_name"] = card.input_filename or card.label
     result["_card_id"] = card.id
