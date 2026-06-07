@@ -32,7 +32,7 @@
       <div class="ml-auto flex items-center gap-2">
         {% if raw_rows is defined and raw_rows %}
           <button type="button"
-                  onclick="v3SaveAsCard({{ (result._card_label or result._file_name or '')|tojson }})"
+                  onclick="v3SaveAsCard()"
                   class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded shadow-sm"
                   title="{% if lang == 'ko' %}이 분석 결과를 카드로 저장{% else %}Save as card{% endif %}">
             💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}

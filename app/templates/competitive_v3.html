@@ -273,15 +273,19 @@ function v3GetPayload() {
 // from the embedded payload — no server-side cache lookup, so it
 // works after worker restarts / free-tier process recycling.
 // ============================================================
-async function v3SaveAsCard(defaultLabel) {
+async function v3SaveAsCard() {
   const payload = v3GetPayload();
   if (!payload || !payload.rows) {
     alert({% if lang == 'ko' %}'페이지를 새로고침하거나 파일을 다시 업로드해 주세요. (분석 결과 누락)'{% else %}'Reload the page or re-upload the file (no payload found).'{% endif %});
     return;
   }
+  // Default name = card label (when viewing a loaded saved card) OR
+  // the source filename. Pulled from the payload so the template
+  // never has to inject untrusted strings into an HTML attribute.
+  const defaultLabel = (payload.result && payload.result._card_label) || payload.filename || '';
   const label = prompt(
     {% if lang == 'ko' %}'카드 이름을 입력하세요:'{% else %}'Card name:'{% endif %},
-    defaultLabel || ''
+    defaultLabel
   );
   if (!label || !label.trim()) return;
   const fd = new FormData();
@@ -336,10 +340,17 @@ function v3ExportXlsx() {
 // ============================================================
 // Rename a saved card (prompt → POST → swap list)
 // ============================================================
-async function v3RenameCard(cardId, currentLabel) {
+async function v3RenameCard(btn) {
+  // btn carries the card id + current label as data-attributes —
+  // safer than injecting the label string into a JS function call
+  // through Jinja, where embedded quotes would break the onclick
+  // HTML attribute (which is what was breaking the Save button).
+  const cardId = btn && btn.dataset && btn.dataset.cardId;
+  const currentLabel = (btn && btn.dataset && btn.dataset.cardLabel) || '';
+  if (!cardId) return;
   const next = prompt(
     {% if lang == 'ko' %}'새 이름:'{% else %}'New name:'{% endif %},
-    currentLabel || ''
+    currentLabel
   );
   if (!next || !next.trim() || next.trim() === currentLabel) return;
   const fd = new FormData();

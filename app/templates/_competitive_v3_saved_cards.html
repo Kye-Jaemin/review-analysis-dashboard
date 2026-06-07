@@ -37,7 +37,9 @@
               📥 XLSX
             </a>
             <button type="button"
-                    onclick="v3RenameCard({{ c.id }}, {{ c.label|tojson }})"
+                    data-card-id="{{ c.id }}"
+                    data-card-label="{{ c.label }}"
+                    onclick="v3RenameCard(this)"
                     class="px-1.5 py-1 text-[11px] bg-gray-200 hover:bg-gray-300 text-gray-700 rounded"
                     title="{% if lang == 'ko' %}이름 변경{% else %}Rename{% endif %}">
               ✏️
