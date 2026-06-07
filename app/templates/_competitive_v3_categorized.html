@@ -30,21 +30,43 @@
       {% endif %}
       {% if result._file_name %}<span class="text-[11px] text-gray-500">📎 {{ result._file_name }}</span>{% endif %}
       <div class="ml-auto flex items-center gap-2">
-        {% if result._input_hash %}
+        {% if raw_rows is defined and raw_rows %}
           <button type="button"
-                  onclick="v3SaveAsCard({{ result._input_hash|tojson }}, {{ (result._card_label or result._file_name or '')|tojson }})"
+                  onclick="v3SaveAsCard({{ (result._card_label or result._file_name or '')|tojson }})"
                   class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded shadow-sm"
                   title="{% if lang == 'ko' %}이 분석 결과를 카드로 저장{% else %}Save as card{% endif %}">
             💾 {% if lang == 'ko' %}카드로 저장{% else %}Save as card{% endif %}
           </button>
-          <a href="/competitive-v3/export.xlsx?input_hash={{ result._input_hash }}"
-             class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded shadow-sm"
-             title="{% if lang == 'ko' %}엑셀 파일로 내보내기 (Summary + Vendor analysis 시트){% else %}Export xlsx (Summary + Vendor analysis sheets){% endif %}">
+          <button type="button"
+                  onclick="v3ExportXlsx()"
+                  class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded shadow-sm"
+                  title="{% if lang == 'ko' %}엑셀 파일로 내보내기 (Summary + Vendor analysis 시트){% else %}Export xlsx (Summary + Vendor analysis sheets){% endif %}">
+            📥 {% if lang == 'ko' %}엑셀 내보내기{% else %}Export Excel{% endif %}
+          </button>
+        {% elif result._card_id %}
+          {# Loaded from a saved card — Save makes no sense; Export
+             uses the card_id GET path which doesn't need the embedded
+             payload. #}
+          <a href="/competitive-v3/export.xlsx?card_id={{ result._card_id }}"
+             class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded shadow-sm">
             📥 {% if lang == 'ko' %}엑셀 내보내기{% else %}Export Excel{% endif %}
           </a>
         {% endif %}
       </div>
     </div>
+
+    {# Embedded payload — used by v3SaveAsCard() and v3ExportXlsx() to
+       avoid relying on the server-side memory cache (which Render
+       free-tier wipes on every worker recycle). Rendered as JSON in
+       a <script> tag so the template doesn't have to escape it into
+       an HTML attribute. Only present for fresh uploads (raw_rows is
+       set by the parse route); saved-card loads don't need it
+       because Export uses card_id. #}
+    {% if raw_rows is defined and raw_rows %}
+      <script type="application/json" id="v3-payload">
+        {{ {"rows": raw_rows, "result": result, "filename": result._file_name or ""}|tojson|safe }}
+      </script>
+    {% endif %}
     <div class="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
       <span>{% if lang == 'ko' %}전체 리뷰{% else %}reviews{% endif %} <b class="text-blue-700">{{ '{:,}'.format(result.totals.reviews) }}</b></span>
       <span>·</span>

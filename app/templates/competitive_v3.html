@@ -253,30 +253,84 @@ function v3CloseReviews() {
 }
 
 // ============================================================
-// Save current analysis as a card
+// Read the rows + result payload embedded by the result partial.
+// Returns {rows, result, filename} or null if no fresh upload is
+// currently rendered (e.g. user is viewing a loaded saved card).
 // ============================================================
-async function v3SaveAsCard(inputHash, defaultLabel) {
+function v3GetPayload() {
+  const el = document.getElementById('v3-payload');
+  if (!el) return null;
+  try {
+    return JSON.parse(el.textContent || el.innerText || '{}');
+  } catch (e) {
+    console.error('v3 payload parse error', e);
+    return null;
+  }
+}
+
+// ============================================================
+// Save current analysis as a card. Posts rows + result directly
+// from the embedded payload — no server-side cache lookup, so it
+// works after worker restarts / free-tier process recycling.
+// ============================================================
+async function v3SaveAsCard(defaultLabel) {
+  const payload = v3GetPayload();
+  if (!payload || !payload.rows) {
+    alert({% if lang == 'ko' %}'페이지를 새로고침하거나 파일을 다시 업로드해 주세요. (분석 결과 누락)'{% else %}'Reload the page or re-upload the file (no payload found).'{% endif %});
+    return;
+  }
   const label = prompt(
     {% if lang == 'ko' %}'카드 이름을 입력하세요:'{% else %}'Card name:'{% endif %},
     defaultLabel || ''
   );
   if (!label || !label.trim()) return;
   const fd = new FormData();
-  fd.append('input_hash', inputHash);
   fd.append('label', label.trim());
+  fd.append('rows_json', JSON.stringify(payload.rows));
+  fd.append('result_json', JSON.stringify(payload.result || {}));
+  fd.append('filename', payload.filename || '');
   try {
     const res = await fetch('/competitive-v3/save', { method: 'POST', body: fd });
     if (!res.ok) {
-      alert({% if lang == 'ko' %}'저장 실패: '{% else %}'Save failed: '{% endif %} + res.status + ' ' + (await res.text()).slice(0, 200));
+      const body = (await res.text()).slice(0, 300);
+      alert({% if lang == 'ko' %}'저장 실패: '{% else %}'Save failed: '{% endif %} + res.status + ' ' + body);
       return;
     }
     const html = await res.text();
     document.getElementById('v3-saved-cards').innerHTML = html;
-    // Re-process htmx attributes in the new content (load/delete buttons)
     if (window.htmx) htmx.process(document.getElementById('v3-saved-cards'));
   } catch (e) {
     alert(String(e));
   }
+}
+
+// ============================================================
+// Export the current analysis as XLSX. Same payload model as
+// Save — rows + result come from the embedded <script> tag and
+// get POSTed; the browser downloads the response.
+// ============================================================
+function v3ExportXlsx() {
+  const payload = v3GetPayload();
+  if (!payload || !payload.rows) {
+    alert({% if lang == 'ko' %}'페이지를 새로고침하거나 파일을 다시 업로드해 주세요. (분석 결과 누락)'{% else %}'Reload the page or re-upload the file.'{% endif %});
+    return;
+  }
+  // Build an off-DOM form so the browser submits → downloads.
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/competitive-v3/export.xlsx';
+  form.style.display = 'none';
+  const addField = (name, value) => {
+    const i = document.createElement('input');
+    i.type = 'hidden'; i.name = name; i.value = value;
+    form.appendChild(i);
+  };
+  addField('rows_json', JSON.stringify(payload.rows));
+  addField('result_json', JSON.stringify(payload.result || {}));
+  document.body.appendChild(form);
+  form.submit();
+  // Defer removal so the browser has time to dispatch the request.
+  setTimeout(() => form.remove(), 1000);
 }
 
 // ============================================================

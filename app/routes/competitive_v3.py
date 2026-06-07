@@ -3,6 +3,7 @@ into ~10 cross-vendor categories; save snapshots; XLSX export.
 """
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from fastapi import (
@@ -111,15 +112,18 @@ async def competitive_v3_parse(
             csv_name=file.filename or "",
         )
     result["_file_name"] = file.filename or "vendor_analysis"
-    # Stash for the Save / Export buttons in the rendered partial.
-    input_hash = hash_rows(rows)
-    result["_input_hash"] = input_hash
+    result["_input_hash"] = hash_rows(rows)
     result["_model_used"] = settings.ANTHROPIC_MODEL
-    remember_upload(input_hash, rows, result, file.filename or "")
+    # Best-effort in-memory cache for back-compat callers that still
+    # pass input_hash; the canonical Save / Export path is now embedded
+    # JSON in the partial (see raw_rows below) so it survives worker
+    # restarts and free-tier process recycling.
+    remember_upload(result["_input_hash"], rows, result, file.filename or "")
     return render(
         request,
         "_competitive_v3_categorized.html",
         result=result,
+        raw_rows=rows,
         csv_name=file.filename or "vendor_analysis",
         error=None,
     )
@@ -128,29 +132,36 @@ async def competitive_v3_parse(
 @router.post("/competitive-v3/save")
 async def competitive_v3_save(
     request: Request,
-    input_hash: str = Form(...),
     label: str = Form(...),
+    rows_json: str = Form(...),
+    result_json: str = Form(...),
+    filename: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
-    """Persist the current upload's rows + result as a CompetitiveV3Card.
-    Returns the saved-cards list partial so the UI can re-render the
-    bookmarks panel."""
-    upload = recall_upload(input_hash)
-    if not upload:
-        raise HTTPException(
-            410,
-            "이 분석 결과는 만료되었습니다. 파일을 다시 업로드해 주세요. "
-            "(서버 메모리 캐시 TTL 30분)",
-        )
+    """Persist a v3 analysis as a CompetitiveV3Card.
+
+    Takes rows + result as JSON form fields embedded directly in the
+    result partial (no server-side cache lookup) so Save works after
+    worker restarts, Render free-tier process recycling, or just
+    after long browsing time. Returns the saved-cards list partial
+    so the UI can re-render the bookmarks panel inline.
+    """
     if not label.strip():
         raise HTTPException(422, "카드 이름이 비어있습니다.")
+    try:
+        rows = json.loads(rows_json)
+        result = json.loads(result_json)
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, f"invalid payload: {e}")
+    if not isinstance(rows, list) or not isinstance(result, dict):
+        raise HTTPException(422, "payload shape mismatch")
     card = await save_v3_card(
         session,
         label=label,
-        rows=upload["rows"],
-        result=upload["result"],
+        rows=rows,
+        result=result,
         model_used=settings.ANTHROPIC_MODEL,
-        input_filename=upload.get("filename"),
+        input_filename=(filename or "").strip() or None,
     )
     cards = await list_v3_cards(session, include_hidden=False)
     return render(
@@ -175,17 +186,17 @@ async def competitive_v3_card_load(
         raise HTTPException(404, "card not found")
     result = dict(card.result_payload or {})
     rows = list(card.input_rows or [])
-    input_hash = hash_rows(rows)
-    result["_input_hash"] = input_hash
+    result["_input_hash"] = hash_rows(rows)
     result["_file_name"] = card.input_filename or card.label
     result["_card_id"] = card.id
     result["_card_label"] = card.label
     result["_model_used"] = card.model_used
-    remember_upload(input_hash, rows, result, card.input_filename or card.label)
+    remember_upload(result["_input_hash"], rows, result, card.input_filename or card.label)
     return render(
         request,
         "_competitive_v3_categorized.html",
         result=result,
+        raw_rows=rows,
         csv_name=card.input_filename or card.label,
         error=None,
     )
@@ -238,40 +249,7 @@ async def competitive_v3_card_delete(
     )
 
 
-@router.get("/competitive-v3/export.xlsx")
-async def competitive_v3_export_xlsx(
-    input_hash: Optional[str] = Query(None),
-    card_id: Optional[int] = Query(None),
-    session: AsyncSession = Depends(get_session),
-):
-    """Download the categorized result as a two-sheet xlsx.
-    Source:
-      - card_id → resolve from the saved CompetitiveV3Card row
-      - input_hash → resolve from the short-lived upload cache
-    """
-    rows: Optional[list[dict]] = None
-    result: Optional[dict] = None
-    title_prefix = "competitive_v3"
-    if card_id:
-        card = await get_v3_card(session, card_id)
-        if not card:
-            raise HTTPException(404, "card not found")
-        rows = list(card.input_rows or [])
-        result = dict(card.result_payload or {})
-        title_prefix = (card.label or title_prefix)[:60].replace(" ", "_")
-    elif input_hash:
-        upload = recall_upload(input_hash)
-        if not upload:
-            raise HTTPException(
-                410, "분석 결과 캐시가 만료되었습니다. 다시 업로드해 주세요."
-            )
-        rows = upload["rows"]
-        result = upload["result"]
-    else:
-        raise HTTPException(
-            422, "input_hash 또는 card_id 중 하나가 필요합니다."
-        )
-
+def _xlsx_response(rows: list, result: dict, title_prefix: str) -> Response:
     body = export_categorized_xlsx(rows or [], result or {})
     return Response(
         content=body,
@@ -285,6 +263,52 @@ async def competitive_v3_export_xlsx(
             )
         },
     )
+
+
+@router.get("/competitive-v3/export.xlsx")
+async def competitive_v3_export_xlsx_get(
+    card_id: Optional[int] = Query(None),
+    input_hash: Optional[str] = Query(None),
+    session: AsyncSession = Depends(get_session),
+):
+    """GET path — saved cards (card_id) export here. Kept for direct
+    links from the saved-cards list. The input_hash path is left as a
+    best-effort fallback for the legacy memory cache."""
+    if card_id:
+        card = await get_v3_card(session, card_id)
+        if not card:
+            raise HTTPException(404, "card not found")
+        rows = list(card.input_rows or [])
+        result = dict(card.result_payload or {})
+        title_prefix = (card.label or "competitive_v3")[:60].replace(" ", "_")
+        return _xlsx_response(rows, result, title_prefix)
+    if input_hash:
+        upload = recall_upload(input_hash)
+        if upload:
+            return _xlsx_response(upload["rows"], upload["result"], "competitive_v3")
+        raise HTTPException(
+            410,
+            "분석 결과 캐시가 만료되었습니다. 페이지 상단의 📥 엑셀 내보내기 "
+            "버튼을 다시 누르거나, 먼저 카드로 저장한 뒤 카드에서 내보내세요.",
+        )
+    raise HTTPException(422, "card_id 또는 input_hash 중 하나가 필요합니다.")
+
+
+@router.post("/competitive-v3/export.xlsx")
+async def competitive_v3_export_xlsx_post(
+    rows_json: str = Form(...),
+    result_json: str = Form(...),
+):
+    """POST path — fresh-upload XLSX export. The current upload's rows
+    + result are submitted directly from the rendered partial so the
+    download works even after the server's in-memory upload cache has
+    expired (Render free-tier process recycling)."""
+    try:
+        rows = json.loads(rows_json)
+        result = json.loads(result_json)
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, f"invalid payload: {e}")
+    return _xlsx_response(rows, result, "competitive_v3")
 
 
 @router.get("/competitive-v3/reason-reviews")
