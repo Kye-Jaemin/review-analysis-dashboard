@@ -417,9 +417,17 @@ def _strip_fences(s: str) -> str:
     return s.strip()
 
 
+# Bump this whenever _build_categorize_prompt changes — its value goes
+# into the cache key so cached results from the prior prompt version are
+# automatically invalidated. Saves users from "I changed the rules but
+# nothing happened" confusion.
+_CATEGORIZE_PROMPT_VERSION = "v2-2026-06-merge-device-into-health"
+
+
 def _categorize_cache_key(items: list[dict], lang: str, model: str) -> str:
     """Hash of the canonical (reason text + vendor + count) tuples plus
-    lang + model — two uploads of the same data should hit the cache."""
+    lang + model + prompt version — two uploads of the same data with
+    the same prompt should hit the cache; prompt changes invalidate."""
     canon = json.dumps(
         sorted(
             (i["reason"], i["vendor"], int(i["count"] or 0)) for i in items
@@ -427,7 +435,7 @@ def _categorize_cache_key(items: list[dict], lang: str, model: str) -> str:
         ensure_ascii=False,
     )
     return hashlib.sha256(
-        f"{model}|{lang}|{canon}".encode("utf-8")
+        f"{_CATEGORIZE_PROMPT_VERSION}|{model}|{lang}|{canon}".encode("utf-8")
     ).hexdigest()
 
 
@@ -479,9 +487,21 @@ def _build_categorize_prompt(
         f"      '무료·가격 가치'\n"
         f"      '개인화 코칭·인사이트'\n"
         f"      '커뮤니티·소셜'\n"
-        f"      '기기·앱 연동'\n"
         f"    Re-use these names when a new reason cleanly fits; coin new\n"
         f"    ones only when none of the above match.\n\n"
+        f"SPECIAL MERGE RULES (apply BEFORE coining new categories):\n"
+        f"  - Wearable / device DATA collection (Apple Watch, Fitbit,\n"
+        f"    WHOOP, Oura ring → heart rate / steps / sleep / HRV /\n"
+        f"    workout metrics) → MERGE INTO '운동·수면·건강 데이터 추적'.\n"
+        f"    Don't split this off as its own 'device integration'\n"
+        f"    bucket — the value the user gets is the health data, not\n"
+        f"    the act of pairing.\n"
+        f"  - APP integration / interop (Apple Health / Google Fit /\n"
+        f"    MyFitnessPal / Strava sync, data export, ecosystem fit)\n"
+        f"    → SEPARATE category. The value is data portability and\n"
+        f"    workflow continuity across apps, not health data per se.\n"
+        f"    Suggested name: '외부 앱 연동·데이터 호환'. Create it only\n"
+        f"    when ≥2 vendors have reasons fitting this distinct value.\n\n"
         f"OUTPUT — JSON only, no prose, no markdown fences:\n"
         f"{{\n"
         f'  "categories": ["category A", "category B", ...],\n'

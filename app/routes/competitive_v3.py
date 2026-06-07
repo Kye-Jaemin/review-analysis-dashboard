@@ -57,12 +57,20 @@ async def competitive_v3_page(
 ):
     # Defensive: if the saved-cards table doesn't exist yet (e.g. the
     # 0020 migration hasn't run on this DB), the page still renders —
-    # the saved-cards panel just shows empty.
+    # the saved-cards panel just shows empty + a diagnostic message so
+    # we can see WHY it's empty (vs. silently swallowing errors that
+    # mask broken DB state).
+    cards: list[dict] = []
+    cards_error: Optional[str] = None
     try:
         cards = await list_v3_cards(session, include_hidden=False)
-    except Exception:
-        cards = []
-    return render(request, "competitive_v3.html", saved_cards=cards)
+    except Exception as e:  # noqa: BLE001
+        cards_error = f"{type(e).__name__}: {e}"
+    return render(
+        request, "competitive_v3.html",
+        saved_cards=cards,
+        cards_error=cards_error,
+    )
 
 
 @router.post("/competitive-v3/parse")

@@ -93,6 +93,11 @@
     <div id="v3-saved-cards">
       {% include "_competitive_v3_saved_cards.html" %}
     </div>
+    {% if cards_error %}
+      <div class="mt-2 text-[10px] text-rose-700 font-mono break-all">
+        ⚠ saved-cards load error: {{ cards_error }}
+      </div>
+    {% endif %}
   </div>
 
   <div id="competitive-v3-results">

@@ -13,7 +13,9 @@
   </div>
 </div>
 
-{% if investigations %}
+{# Strip is shown when there's at least one card to display OR the user
+   needs the "show hidden" toggle to see hidden ones. #}
+{% if investigations or hidden_count %}
 <div class="bg-white rounded shadow-sm px-4 py-3 mb-5">
   <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
     <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
@@ -26,7 +28,24 @@
         </label>
       </form>
       {% if active_investigation_id %}
-        <a href="/reviews" class="text-xs text-blue-600 hover:underline">✕ {{ t('dashboard.investigations_clear') }}</a>
+        <a href="/reviews{% if include_hidden %}?include_hidden=1{% endif %}" class="text-xs text-blue-600 hover:underline">✕ {{ t('dashboard.investigations_clear') }}</a>
+      {% endif %}
+      {# Hidden-cards toggle. Mirrors the dashboard's chip; preserves any
+         active investigation_id so toggling doesn't deselect the user. #}
+      {% if hidden_count or include_hidden %}
+        {% set toggle_qs = [] %}
+        {% if active_investigation_id %}{% set _ = toggle_qs.append('investigation_id=' ~ active_investigation_id) %}{% endif %}
+        {% if not include_hidden %}{% set _ = toggle_qs.append('include_hidden=1') %}{% endif %}
+        <a href="/reviews{% if toggle_qs %}?{{ toggle_qs|join('&') }}{% endif %}"
+           class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border shadow-sm whitespace-nowrap
+                  {{ 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200' if include_hidden
+                     else 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100' }}">
+          {% if include_hidden %}
+            {% if lang == 'ko' %}숨긴 카드 다시 숨기기{% else %}Hide hidden cards{% endif %}
+          {% else %}
+            🙈 {% if lang == 'ko' %}숨긴 카드 {{ hidden_count }}개 보기{% else %}Show {{ hidden_count }} hidden card{{ 's' if hidden_count != 1 else '' }}{% endif %}
+          {% endif %}
+        </a>
       {% endif %}
       <div class="text-xs text-gray-500">{{ t('dashboard.investigations_hint') }}</div>
     </div>
@@ -40,17 +59,23 @@
     } %}
     {% for inv in investigations %}
       {% set is_active = (active_investigation_id == inv.id) %}
-      {# Use a <div> here (not <a>) so we can nest a real <a> for the
-         "export card" link without browsers rewriting the DOM to escape
-         the nested anchor. Click anywhere on the card → navigates via JS. #}
+      {% set is_hidden = inv.hidden %}
+      {# Preserve include_hidden across clicks so the user stays in
+         the same view mode after selecting a card. #}
+      {% set click_url = '/reviews?investigation_id=' ~ inv.id ~ ('&include_hidden=1' if include_hidden else '') %}
       <div role="link" tabindex="0"
-           onclick="location.href='/reviews?investigation_id={{ inv.id }}'"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/reviews?investigation_id={{ inv.id }}'}"
+           onclick="location.href='{{ click_url }}'"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='{{ click_url }}'}"
            class="block border rounded p-3 transition flex flex-col gap-2 cursor-pointer
-                  {{ 'border-blue-500 bg-blue-50' if is_active else 'border-gray-200 hover:border-blue-300 bg-white' }}">
+                  {{ 'border-blue-500 bg-blue-50' if is_active
+                     else ('border-amber-200 bg-amber-50/40 hover:border-amber-400' if is_hidden
+                           else 'border-gray-200 hover:border-blue-300 bg-white') }}">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
-            <div class="font-semibold text-sm truncate" title="{{ inv.label }}">{{ inv.label }}</div>
+            <div class="font-semibold text-sm truncate flex items-center gap-1" title="{{ inv.label }}">
+              {% if is_hidden %}<span class="text-amber-600" title="{% if lang == 'ko' %}숨김{% else %}hidden{% endif %}">🙈</span>{% endif %}
+              <span class="truncate">{{ inv.label }}</span>
+            </div>
             <div class="text-[10px] text-gray-500 mt-0.5">{{ (inv.updated_at or '')[:10] }}</div>
           </div>
           <div class="text-right shrink-0">

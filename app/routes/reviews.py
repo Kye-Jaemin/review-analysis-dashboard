@@ -112,6 +112,13 @@ async def list_reviews(
     to_date: Optional[str] = None,
     q: Optional[str] = None,
     investigation_id: Optional[str] = None,
+    include_hidden: int = Query(
+        0,
+        description=(
+            "1 = also show hidden investigation cards in the strip on top. "
+            "Matches the same toggle on /dashboard. Default 0."
+        ),
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     source_id_i = _parse_int(source_id)
@@ -149,10 +156,22 @@ async def list_reviews(
     sources = (await session.execute(select(Source).order_by(Source.label))).scalars().all()
     categories = (await session.execute(select(Category).order_by(Category.path))).scalars().all()
 
-    # Investigation cards for the top row.
-    inv_rows = (
-        await session.execute(select(Investigation).order_by(Investigation.updated_at.desc()))
-    ).scalars().all()
+    # Investigation cards for the top row. Honour the same "show hidden"
+    # toggle the dashboard uses — by default hidden cards are filtered
+    # out, and a small chip on the page offers to bring them back.
+    inv_stmt = select(Investigation).order_by(Investigation.updated_at.desc())
+    if not include_hidden:
+        inv_stmt = inv_stmt.where(Investigation.hidden.is_(False))
+    inv_rows = (await session.execute(inv_stmt)).scalars().all()
+    # Count hidden cards separately so the toggle chip can display the
+    # number ("🙈 숨긴 카드 N개 보기"). Cheap COUNT query — runs once.
+    hidden_count = (
+        await session.execute(
+            select(func.count(Investigation.id)).where(
+                Investigation.hidden.is_(True)
+            )
+        )
+    ).scalar() or 0
     source_map = {s.id: s for s in sources}
     cat_map = {c.id: c for c in categories}
     # Per-source review counts so each card can show its grand total too.
@@ -187,6 +206,7 @@ async def list_reviews(
             "sources": inv_src_items, "roots": inv_root_items,
             "review_count": total_reviews,
             "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
+            "hidden": bool(inv.hidden),
         })
 
     filters = {
@@ -221,6 +241,8 @@ async def list_reviews(
         total_pages=total_pages,
         qs=qs,
         pagination_qs=pagination_qs,
+        include_hidden=bool(include_hidden),
+        hidden_count=int(hidden_count),
     )
 
 
