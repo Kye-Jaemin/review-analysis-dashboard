@@ -1157,6 +1157,47 @@ def export_categorized_xlsx(rows: list[dict], result: dict, *, title: Optional[s
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
+    # Pastel palette for per-category row fills. Light enough that
+    # black cell text stays readable against any of these; distinct
+    # enough that scanning the sheet, the eye picks out category
+    # blocks at a glance. ~15 colors so 10–12 category exports stay
+    # within unique fills, with a graceful wrap on the unusual >15 case.
+    _CATEGORY_PALETTE = [
+        "FFE4E1",  # misty rose
+        "DCEFFF",  # baby blue
+        "E2F5D8",  # tea green
+        "FFF1D6",  # cream / peach
+        "ECDDFC",  # lavender
+        "FFE0F0",  # pink lace
+        "D8F5EB",  # mint
+        "FFE0B5",  # apricot
+        "DBE3FF",  # periwinkle
+        "FFCFCF",  # blush
+        "E8F8D6",  # light lime
+        "E0E0FF",  # very pale indigo
+        "FFFAC8",  # pale lemon
+        "FCD6FF",  # pale orchid
+        "D6F8FF",  # pale cyan
+    ]
+
+    def _palette_for(categories_list: list[dict]) -> dict[str, PatternFill]:
+        """Map each unique category name → a PatternFill. Order is
+        determined by the categories list (already sorted by review
+        count desc by build_categorized_view) so the biggest category
+        always gets palette[0]. Stable across runs for the same input."""
+        out: dict[str, PatternFill] = {}
+        idx = 0
+        for c in categories_list or []:
+            if not isinstance(c, dict):
+                continue
+            name = (c.get("name") or "").strip()
+            if not name or name in out:
+                continue
+            color = _CATEGORY_PALETTE[idx % len(_CATEGORY_PALETTE)]
+            out[name] = PatternFill("solid", fgColor=color)
+            idx += 1
+        return out
+
     wb = Workbook()
 
     # ---- Summary sheet ----
@@ -1171,6 +1212,11 @@ def export_categorized_xlsx(rows: list[dict], result: dict, *, title: Optional[s
     section_fill = PatternFill("solid", fgColor="E5E7EB")
     header_fill = PatternFill("solid", fgColor="F3F4F6")
     total_fill = PatternFill("solid", fgColor="E5E7EB")
+
+    # Build the per-category color map once — used to tint distribution
+    # rows, matrix rows, and (most importantly) the vendor_analysis
+    # rows so users can scan category clusters at a glance in Excel.
+    cat_fills = _palette_for(categories)
 
     title_text = title or (
         f"카테고리 요약 — Strength VoC "
@@ -1192,10 +1238,17 @@ def export_categorized_xlsx(rows: list[dict], result: dict, *, title: Optional[s
         cell.fill = header_fill
     r += 1
     for cat in categories:
-        ws.cell(row=r, column=1, value=cat.get("name"))
+        cat_name = (cat.get("name") or "").strip()
+        fill = cat_fills.get(cat_name)
+        ws.cell(row=r, column=1, value=cat_name)
         ws.cell(row=r, column=2, value=int(cat.get("review_count") or 0))
         ws.cell(row=r, column=3, value=(cat.get("pct") or 0) / 100.0).number_format = "0.0%"
         ws.cell(row=r, column=4, value=int(cat.get("reason_count") or 0))
+        # Tint the entire distribution row so the user can pair the
+        # color to vendor_analysis rows of the same category.
+        if fill is not None:
+            for c_idx in range(1, len(dist_headers) + 1):
+                ws.cell(row=r, column=c_idx).fill = fill
         r += 1
     ws.cell(row=r, column=1, value="합계").font = bold
     ws.cell(row=r, column=2, value=int(totals.get("reviews") or 0)).font = bold
@@ -1224,7 +1277,14 @@ def export_categorized_xlsx(rows: list[dict], result: dict, *, title: Optional[s
         cell.fill = header_fill
     r += 1
     for ri, cat_name in enumerate(mx_cats):
-        ws.cell(row=r, column=1, value=cat_name).font = bold
+        label_cell = ws.cell(row=r, column=1, value=cat_name)
+        label_cell.font = bold
+        # Color only the category label cell in the matrix — the
+        # numeric body cells stay uncolored so users can still read
+        # them as a plain heatmap.
+        fill = cat_fills.get((cat_name or "").strip())
+        if fill is not None:
+            label_cell.fill = fill
         for ci, n in enumerate(mx_cells[ri] if ri < len(mx_cells) else [], start=1):
             ws.cell(row=r, column=1 + ci, value=int(n or 0))
         # row total
@@ -1295,6 +1355,7 @@ def export_categorized_xlsx(rows: list[dict], result: dict, *, title: Optional[s
         except (TypeError, ValueError):
             wilson_v = raw.get("wilson_score")
 
+        cat_name_v = (raw.get("카테고리") or "").strip()
         values = [
             raw.get("vendor") or "",
             raw.get("type") or "",
@@ -1306,10 +1367,13 @@ def export_categorized_xlsx(rows: list[dict], result: dict, *, title: Optional[s
             raw.get("small_sample") or "",
             raw.get("reason") or "",
             review_count_v,
-            raw.get("카테고리") or "",
+            cat_name_v,
         ]
+        row_fill = cat_fills.get(cat_name_v) if cat_name_v else None
         for c_idx, v in enumerate(values, start=1):
-            ws2.cell(row=r, column=c_idx, value=v)
+            cell = ws2.cell(row=r, column=c_idx, value=v)
+            if row_fill is not None:
+                cell.fill = row_fill
         r += 1
 
     # Column widths
