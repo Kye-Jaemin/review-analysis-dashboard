@@ -678,6 +678,7 @@ async function v3CriterionReviews(btn) {
         category_name: b.dataset.category,
         band: b.dataset.band || 'positive',
         reason_text: b.dataset.reasonText,
+        count: parseInt(b.dataset.count || '0', 10) || 0,
       });
     }
   });
@@ -711,7 +712,7 @@ function v3RenderCriterionReviews(data) {
   const cats = data.categories || [];
   const missingNote = data.missing_cards
     ? '<div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">' +
-      '⚠ {% if lang == "ko" %}일부 강·약점은 저장된 원인 분석 카드가 없어 제외됐습니다 (' + data.missing_cards + '건). /vendors에서 분석·저장 후 다시 시도하세요.{% else %}Some strengths were skipped (no saved reason card): ' + data.missing_cards + '. Analyze + save them on /vendors.{% endif %}</div>'
+      'ℹ {% if lang == "ko" %}일부 강·약점은 저장된 원인 카드가 없어 요약·숫자만 표시됩니다 (' + data.missing_cards + '건). 원문 리뷰까지 보려면 /vendors에서 분석·저장 후 다시 시도하세요.{% else %}Some strengths show summary + counts only (no saved reason card): ' + data.missing_cards + '. Analyze + save on /vendors to view raw reviews.{% endif %}</div>'
     : '';
   if (!cats.length) {
     return missingNote + '<div class="text-sm text-gray-500 italic">{% if lang == "ko" %}표시할 리뷰가 없습니다.{% else %}No reviews to show.{% endif %}</div>';
@@ -720,7 +721,8 @@ function v3RenderCriterionReviews(data) {
   const head =
     '<div class="text-[11px] text-gray-600 mb-3">' +
       '{% if lang == "ko" %}카테고리{% else %}categories{% endif %} <b>' + cats.length + '</b> · ' +
-      '{% if lang == "ko" %}리뷰{% else %}reviews{% endif %} <b>' + (data.total_reviews || 0).toLocaleString() + '</b>' +
+      '{% if lang == "ko" %}피드백{% else %}feedback{% endif %} <b>' + (data.total_feedback || 0).toLocaleString() + '</b>' +
+      (data.total_reviews ? ' · 💬<b>' + data.total_reviews.toLocaleString() + '</b>' : '') +
     '</div>';
   // Category → vendor rows ("업체명 : 리뷰 수 (보기)"), each vendor row
   // expands to its reviews.
@@ -738,32 +740,31 @@ function v3RenderCriterionReviews(data) {
               '<span class="text-gray-400 tabular-nums whitespace-nowrap">' + (rs.count || 0).toLocaleString() + '</span>' +
             '</li>').join('') + '</ul>'
         : '<div class="text-[11px] text-gray-400 italic mb-2">{% if lang == "ko" %}요약할 피드백이 없습니다.{% else %}No feedback summary.{% endif %}</div>';
-      // Full reviews behind a collapse — only when raw reviews exist.
+      // Full reviews behind a collapse — only when raw review bodies exist.
       const fullReviews = reviews.length
         ? '<details class="border-t border-gray-200 pt-1">' +
             '<summary class="cursor-pointer list-none text-[11px] text-indigo-600 hover:underline">' +
-              '▾ {% if lang == "ko" %}전체 리뷰{% else %}All reviews{% endif %} (' + reviews.length.toLocaleString() + ')' +
+              '▾ {% if lang == "ko" %}원문 리뷰{% else %}Raw reviews{% endif %} (' + reviews.length.toLocaleString() + ')' +
             '</summary>' +
             '<ul class="space-y-2.5 mt-2">' + reviews.map(v3ReviewItemHtml).join('') + '</ul>' +
           '</details>'
         : '<div class="border-t border-gray-200 pt-1 text-[11px] text-gray-400 italic">' +
-            '{% if lang == "ko" %}원문 리뷰 없음 — 요약만 제공 (원인 카드에 리뷰 ID 미저장){% else %}No raw reviews — summary only{% endif %}</div>';
-      // Header metric: review count if any, else the feedback count.
-      const metric = v.review_count > 0
-        ? ': ' + v.review_count.toLocaleString() + ' ' + unit
-        : '· {% if lang == "ko" %}피드백{% else %}feedback{% endif %} ' + reasons.length.toLocaleString();
+            '{% if lang == "ko" %}원문 리뷰 없음 — 요약·숫자만 제공 (원인 카드 미저장){% else %}No raw reviews — summary + counts only{% endif %}</div>';
+      // Header metric: the summable feedback count (works with or without
+      // raw review bodies). Append a 💬 hint when bodies are viewable.
+      const metric = (v.feedback_total || 0).toLocaleString() + ' ' + unit +
+        (v.review_count > 0 ? ' <span class="text-gray-400">· 💬' + v.review_count.toLocaleString() + '</span>' : '');
       return '<details class="border-t border-gray-100 first:border-0">' +
         '<summary class="px-3 py-1.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 list-none text-[13px]">' +
           '<span class="font-medium text-gray-900 truncate">' + escapeHtml(v.display) + '</span>' +
-          '<span class="text-gray-500 tabular-nums whitespace-nowrap">' + metric + '</span>' +
+          '<span class="text-gray-500 tabular-nums whitespace-nowrap">: ' + metric + '</span>' +
           '<span class="ml-auto text-[11px] text-indigo-600 whitespace-nowrap">👁 {% if lang == "ko" %}보기{% else %}view{% endif %}</span>' +
         '</summary>' +
         '<div class="px-3 pb-2 pt-1 bg-gray-50/40">' + feedback + fullReviews + '</div>' +
       '</details>';
     }).join('');
-    const catMetric = (cat.review_count || 0) > 0
-      ? (cat.review_count || 0).toLocaleString() + ' ' + unit
-      : '{% if lang == "ko" %}피드백{% else %}feedback{% endif %} ' + (cat.reason_count || 0).toLocaleString();
+    const catMetric = (cat.feedback_total || 0).toLocaleString() + ' ' + unit +
+      ((cat.review_count || 0) > 0 ? ' · 💬' + cat.review_count.toLocaleString() : '');
     return '<div class="mb-3">' +
       '<div class="text-sm font-semibold text-gray-900 mb-1">' +
         (ci + 1) + '. ' + escapeHtml(cat.name) +

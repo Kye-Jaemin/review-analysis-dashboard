@@ -1252,20 +1252,30 @@ async def criterion_reviews(
     (top_category, vendor) — deduped within each bucket. One hydrate
     query at the end.
 
+    When NO card exists (or a specific reason isn't in the card), the
+    feedback summary + its count are still taken straight from the
+    uploaded file's descriptor (`reason_text` + `count`), so the numbers
+    add up even though the raw review bodies aren't viewable. Such a
+    vendor shows review_count 0 but a non-empty `feedback_total`.
+
     Returns:
       {
         "categories": [
           {
             "name": str,                 # the AI category (criterion member)
-            "review_count": int,         # displayed reviews in this category
+            "review_count": int,         # hydrated review bodies in this cat
+            "reason_count": int,         # number of distinct feedback lines
+            "feedback_total": int,       # Σ reason counts (the summable number)
             "vendors": [
-              {key, display, review_count, reviews: [ {id, text, ...}, ... ]},
-              ...                        # sorted by review_count desc
+              {key, display, review_count, reason_count, feedback_total,
+               reasons: [{text, count}], reviews: [{id, text, ...}]},
+              ...                        # reviews-first, then feedback weight
             ]
           },
           ...                            # in the order they first appear
         ],
-        "total_reviews": int,            # distinct reviews hydrated
+        "total_reviews": int,            # distinct review bodies hydrated
+        "total_feedback": int,           # Σ feedback_total across categories
         "matched_reasons": int,
         "missing_cards": int,            # (vendor,cat,band) with no saved card
       }
@@ -1289,8 +1299,12 @@ async def criterion_reviews(
         rt = (d.get("reason_text") or "").strip()
         if not vk or not cat or not rt:
             continue
+        try:
+            file_count = int(float(d.get("count") or 0))
+        except (TypeError, ValueError):
+            file_count = 0
         top = (d.get("top_category") or "").strip() or cat
-        card_groups[(vk, cat.lower(), band)].append((rt, top))
+        card_groups[(vk, cat.lower(), band)].append((rt, top, file_count))
         if vk not in vendor_display and (d.get("vendor_display") or "").strip():
             vendor_display[vk] = d["vendor_display"].strip()
         if top not in top_seen:
@@ -1307,6 +1321,16 @@ async def criterion_reviews(
     matched_reasons = 0
     missing_cards = 0
 
+    def _record_reason(key, text, count):
+        text = (text or "").strip()
+        if not text:
+            return
+        rkey = _reason_norm(text)
+        if rkey in bucket_reason_seen[key]:
+            return
+        bucket_reason_seen[key].add(rkey)
+        bucket_reasons[key].append({"text": text, "count": max(0, int(count or 0))})
+
     for (vk, cat_lower, band), items in card_groups.items():
         cards = (
             await session.execute(
@@ -1321,47 +1345,51 @@ async def criterion_reviews(
             if (c.category_name or "").strip().lower() == cat_lower:
                 card = c
                 break
-        if not card:
-            missing_cards += 1
-            continue
-        payload = card.reasons
-        if isinstance(payload, dict):
-            reason_list = payload.get("reasons") or []
-        elif isinstance(payload, list):
-            reason_list = payload
-        else:
-            reason_list = []
         idx: dict[str, dict] = {}
-        for r in reason_list:
-            if isinstance(r, dict):
-                idx.setdefault(_reason_norm(r.get("reason") or ""), r)
+        if card is None:
+            missing_cards += 1
+        else:
+            payload = card.reasons
+            if isinstance(payload, dict):
+                reason_list = payload.get("reasons") or []
+            elif isinstance(payload, list):
+                reason_list = payload
+            else:
+                reason_list = []
+            for r in reason_list:
+                if isinstance(r, dict):
+                    idx.setdefault(_reason_norm(r.get("reason") or ""), r)
 
-        for rt, top in items:
-            entry = idx.get(_reason_norm(rt))
-            if not entry:
-                continue
-            matched_reasons += 1
+        for rt, top, file_count in items:
             key = (top, vk)
-            seen = bucket_seen[key]
-            ids = bucket_ids[key]
-            valid_ids = [
-                int(x) for x in (entry.get("review_ids") or [])
-                if isinstance(x, (int, str)) and str(x).isdigit()
-            ]
-            for xi in valid_ids:
-                if xi not in seen:
-                    seen.add(xi)
-                    ids.append(xi)
-            # Record the reason as a feedback-summary line (deduped).
-            rtext = (entry.get("reason") or rt).strip()
-            try:
-                rcount = int(entry.get("count"))
-            except (TypeError, ValueError):
-                rcount = len(valid_ids)
-            rkey = _reason_norm(rtext)
-            if rtext and rkey not in bucket_reason_seen[key]:
-                bucket_reason_seen[key].add(rkey)
-                bucket_reasons[key].append({"text": rtext, "count": rcount})
+            # Touch the buckets so the vendor appears even with 0 reviews.
+            bucket_seen[key]
+            bucket_ids[key]
+            entry = idx.get(_reason_norm(rt))
+            if entry is not None:
+                # Card hit — pull real review_ids + the card's reason text/count.
+                matched_reasons += 1
+                seen = bucket_seen[key]
+                ids = bucket_ids[key]
+                valid_ids = [
+                    int(x) for x in (entry.get("review_ids") or [])
+                    if isinstance(x, (int, str)) and str(x).isdigit()
+                ]
+                for xi in valid_ids:
+                    if xi not in seen:
+                        seen.add(xi)
+                        ids.append(xi)
+                rtext = entry.get("reason") or rt
+                try:
+                    rcount = int(entry.get("count"))
+                except (TypeError, ValueError):
+                    rcount = len(valid_ids) or file_count
+                _record_reason(key, rtext, rcount)
+            else:
+                # No card (or reason not in the card) — still surface the
+                # feedback + its count straight from the uploaded file, so
+                # the numbers add up even without viewable raw reviews.
+                _record_reason(key, rt, file_count)
 
     # Hydrate every collected id in one query (capped).
     all_ids: list[int] = []
@@ -1422,11 +1450,13 @@ async def criterion_reviews(
             )
             if not revs and not reasons:
                 continue
+            feedback_total = sum(int(r.get("count") or 0) for r in reasons)
             vendors.append({
                 "key": vk,
                 "display": vendor_display.get(vk, vk),
                 "review_count": len(revs),
                 "reason_count": len(reasons),
+                "feedback_total": feedback_total,
                 "reasons": reasons,
                 "reviews": revs,
             })
@@ -1435,21 +1465,20 @@ async def criterion_reviews(
         # Reviews-first, then by total feedback weight, so feedback-only
         # vendors sort after those with real reviews but still show.
         vendors.sort(
-            key=lambda v: (
-                -v["review_count"],
-                -sum(int(r.get("count") or 0) for r in v["reasons"]),
-            )
+            key=lambda v: (-v["review_count"], -v["feedback_total"])
         )
         categories_out.append({
             "name": top,
             "review_count": sum(v["review_count"] for v in vendors),
             "reason_count": sum(v["reason_count"] for v in vendors),
+            "feedback_total": sum(v["feedback_total"] for v in vendors),
             "vendors": vendors,
         })
 
     return {
         "categories": categories_out,
         "total_reviews": len(by_id),
+        "total_feedback": sum(c["feedback_total"] for c in categories_out),
         "matched_reasons": matched_reasons,
         "missing_cards": missing_cards,
     }

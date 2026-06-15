@@ -165,10 +165,14 @@ async def test_criterion_reviews_feedback_only_no_review_ids(app_client):
 
 
 @pytest.mark.asyncio
-async def test_criterion_reviews_missing_card(app_client):
+async def test_criterion_reviews_no_card_uses_file_counts(app_client):
+    """No saved card → still surface the reason + its file count so the
+    numbers add up (just no raw review bodies). This is the WeightWatchers
+    case: present in the upload, but never reason-analyzed on /vendors."""
     descriptors = [
-        {"top_category": "X", "vendor_key": "nope", "vendor_display": "Nope",
-         "category_name": "X", "band": "positive", "reason_text": "whatever"},
+        {"top_category": "무료·가격 가치", "vendor_key": "weightwatchers",
+         "vendor_display": "Weight Watchers", "category_name": "가격",
+         "band": "positive", "reason_text": "구독 가치가 높음", "count": 14},
     ]
     r = await app_client.post(
         "/competitive-v3/criterion-reviews",
@@ -176,8 +180,17 @@ async def test_criterion_reviews_missing_card(app_client):
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["categories"] == []
     assert data["missing_cards"] == 1
+    assert len(data["categories"]) == 1
+    cat = data["categories"][0]
+    assert cat["feedback_total"] == 14
+    v = cat["vendors"][0]
+    assert v["display"] == "Weight Watchers"
+    assert v["review_count"] == 0          # no bodies
+    assert v["reviews"] == []
+    assert v["feedback_total"] == 14       # number still adds up
+    assert [rs["text"] for rs in v["reasons"]] == ["구독 가치가 높음"]
+    assert data["total_feedback"] == 14
 
 
 @pytest.mark.asyncio
