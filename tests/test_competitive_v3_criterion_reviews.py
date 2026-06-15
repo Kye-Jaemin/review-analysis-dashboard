@@ -125,6 +125,46 @@ async def test_criterion_reviews_splits_by_top_category(app_client):
 
 
 @pytest.mark.asyncio
+async def test_criterion_reviews_feedback_only_no_review_ids(app_client):
+    """A reason with NO review_ids still surfaces its feedback summary;
+    the vendor appears with review_count 0 but a non-empty reasons list."""
+    from app.db import AsyncSessionLocal
+    from app.models import Source, SourceType, VendorReasonCard
+
+    async with AsyncSessionLocal() as s:
+        src = Source(type=SourceType.reddit, label="t3", config={})
+        s.add(src)
+        await s.flush()
+        s.add(VendorReasonCard(
+            vendor_key="gamma", vendor_display="Gamma", category_name="가격",
+            band="positive", label="가격", sample_size=0, source_ids_snapshot=[src.id],
+            reasons=[
+                {"reason": "무료로 충분히 쓸 만함", "count": 9, "examples": [], "review_ids": []},
+            ],
+        ))
+        await s.commit()
+
+    descriptors = [
+        {"top_category": "무료·가격 가치", "vendor_key": "gamma", "vendor_display": "Gamma",
+         "category_name": "가격", "band": "positive", "reason_text": "무료로 충분히 쓸 만함"},
+    ]
+    r = await app_client.post(
+        "/competitive-v3/criterion-reviews",
+        data={"descriptors_json": json.dumps(descriptors)},
+    )
+    data = r.json()
+    assert len(data["categories"]) == 1
+    v = data["categories"][0]["vendors"][0]
+    assert v["key"] == "gamma"
+    assert v["review_count"] == 0
+    assert v["reviews"] == []
+    # The feedback summary is still present.
+    assert [rs["text"] for rs in v["reasons"]] == ["무료로 충분히 쓸 만함"]
+    assert v["reason_count"] == 1
+    assert data["categories"][0]["reason_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_criterion_reviews_missing_card(app_client):
     descriptors = [
         {"top_category": "X", "vendor_key": "nope", "vendor_display": "Nope",

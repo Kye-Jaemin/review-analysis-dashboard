@@ -738,26 +738,36 @@ function v3RenderCriterionReviews(data) {
               '<span class="text-gray-400 tabular-nums whitespace-nowrap">' + (rs.count || 0).toLocaleString() + '</span>' +
             '</li>').join('') + '</ul>'
         : '<div class="text-[11px] text-gray-400 italic mb-2">{% if lang == "ko" %}요약할 피드백이 없습니다.{% else %}No feedback summary.{% endif %}</div>';
-      const fullReviews =
-        '<details class="border-t border-gray-200 pt-1">' +
-          '<summary class="cursor-pointer list-none text-[11px] text-indigo-600 hover:underline">' +
-            '▾ {% if lang == "ko" %}전체 리뷰{% else %}All reviews{% endif %} (' + reviews.length.toLocaleString() + ')' +
-          '</summary>' +
-          '<ul class="space-y-2.5 mt-2">' + reviews.map(v3ReviewItemHtml).join('') + '</ul>' +
-        '</details>';
+      // Full reviews behind a collapse — only when raw reviews exist.
+      const fullReviews = reviews.length
+        ? '<details class="border-t border-gray-200 pt-1">' +
+            '<summary class="cursor-pointer list-none text-[11px] text-indigo-600 hover:underline">' +
+              '▾ {% if lang == "ko" %}전체 리뷰{% else %}All reviews{% endif %} (' + reviews.length.toLocaleString() + ')' +
+            '</summary>' +
+            '<ul class="space-y-2.5 mt-2">' + reviews.map(v3ReviewItemHtml).join('') + '</ul>' +
+          '</details>'
+        : '<div class="border-t border-gray-200 pt-1 text-[11px] text-gray-400 italic">' +
+            '{% if lang == "ko" %}원문 리뷰 없음 — 요약만 제공 (원인 카드에 리뷰 ID 미저장){% else %}No raw reviews — summary only{% endif %}</div>';
+      // Header metric: review count if any, else the feedback count.
+      const metric = v.review_count > 0
+        ? ': ' + v.review_count.toLocaleString() + ' ' + unit
+        : '· {% if lang == "ko" %}피드백{% else %}feedback{% endif %} ' + reasons.length.toLocaleString();
       return '<details class="border-t border-gray-100 first:border-0">' +
         '<summary class="px-3 py-1.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 list-none text-[13px]">' +
           '<span class="font-medium text-gray-900 truncate">' + escapeHtml(v.display) + '</span>' +
-          '<span class="text-gray-500 tabular-nums whitespace-nowrap">: ' + v.review_count.toLocaleString() + ' ' + unit + '</span>' +
+          '<span class="text-gray-500 tabular-nums whitespace-nowrap">' + metric + '</span>' +
           '<span class="ml-auto text-[11px] text-indigo-600 whitespace-nowrap">👁 {% if lang == "ko" %}보기{% else %}view{% endif %}</span>' +
         '</summary>' +
         '<div class="px-3 pb-2 pt-1 bg-gray-50/40">' + feedback + fullReviews + '</div>' +
       '</details>';
     }).join('');
+    const catMetric = (cat.review_count || 0) > 0
+      ? (cat.review_count || 0).toLocaleString() + ' ' + unit
+      : '{% if lang == "ko" %}피드백{% else %}feedback{% endif %} ' + (cat.reason_count || 0).toLocaleString();
     return '<div class="mb-3">' +
       '<div class="text-sm font-semibold text-gray-900 mb-1">' +
         (ci + 1) + '. ' + escapeHtml(cat.name) +
-        ' <span class="text-[11px] font-normal text-gray-500">· ' + (cat.review_count || 0).toLocaleString() + ' ' + unit + '</span>' +
+        ' <span class="text-[11px] font-normal text-gray-500">· ' + catMetric + '</span>' +
       '</div>' +
       '<div class="border border-gray-200 rounded-md overflow-hidden">' +
         (vrows || '<div class="px-3 py-2 text-[11px] text-gray-400 italic">{% if lang == "ko" %}리뷰 없음{% else %}no reviews{% endif %}</div>') +

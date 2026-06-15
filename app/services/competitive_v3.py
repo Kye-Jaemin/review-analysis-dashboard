@@ -1402,6 +1402,9 @@ async def criterion_reviews(
             }
 
     # Assemble categories → vendors in first-seen category order.
+    # Include a vendor when it has reviews OR a feedback summary (reasons),
+    # so the "key feedback" survives even for cards that stored no
+    # review_ids (legacy / outcome-only reasons).
     cats_acc: dict[str, dict[str, list[int]]] = defaultdict(dict)
     for (top, vk), ids in bucket_ids.items():
         cats_acc[top][vk] = ids
@@ -1413,25 +1416,34 @@ async def criterion_reviews(
         vendors: list[dict] = []
         for vk, ids in vmap.items():
             revs = [by_id[i] for i in ids if i in cap_set and i in by_id]
-            if not revs:
-                continue
             reasons = sorted(
                 bucket_reasons.get((top, vk), []),
                 key=lambda r: -int(r.get("count") or 0),
             )
+            if not revs and not reasons:
+                continue
             vendors.append({
                 "key": vk,
                 "display": vendor_display.get(vk, vk),
                 "review_count": len(revs),
+                "reason_count": len(reasons),
                 "reasons": reasons,
                 "reviews": revs,
             })
         if not vendors:
             continue
-        vendors.sort(key=lambda v: -v["review_count"])
+        # Reviews-first, then by total feedback weight, so feedback-only
+        # vendors sort after those with real reviews but still show.
+        vendors.sort(
+            key=lambda v: (
+                -v["review_count"],
+                -sum(int(r.get("count") or 0) for r in v["reasons"]),
+            )
+        )
         categories_out.append({
             "name": top,
             "review_count": sum(v["review_count"] for v in vendors),
+            "reason_count": sum(v["reason_count"] for v in vendors),
             "vendors": vendors,
         })
 
