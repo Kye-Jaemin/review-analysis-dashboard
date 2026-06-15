@@ -1300,6 +1300,10 @@ async def criterion_reviews(
     # (top_category, vendor_key) → ordered unique review ids.
     bucket_ids: dict[tuple[str, str], list[int]] = defaultdict(list)
     bucket_seen: dict[tuple[str, str], set[int]] = defaultdict(set)
+    # (top_category, vendor_key) → de-duped reason summaries [{text, count}]
+    # — the "main feedback" shown before the full review list expands.
+    bucket_reasons: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    bucket_reason_seen: dict[tuple[str, str], set[str]] = defaultdict(set)
     matched_reasons = 0
     missing_cards = 0
 
@@ -1340,12 +1344,24 @@ async def criterion_reviews(
             key = (top, vk)
             seen = bucket_seen[key]
             ids = bucket_ids[key]
-            for x in (entry.get("review_ids") or []):
-                if isinstance(x, (int, str)) and str(x).isdigit():
-                    xi = int(x)
-                    if xi not in seen:
-                        seen.add(xi)
-                        ids.append(xi)
+            valid_ids = [
+                int(x) for x in (entry.get("review_ids") or [])
+                if isinstance(x, (int, str)) and str(x).isdigit()
+            ]
+            for xi in valid_ids:
+                if xi not in seen:
+                    seen.add(xi)
+                    ids.append(xi)
+            # Record the reason as a feedback-summary line (deduped).
+            rtext = (entry.get("reason") or rt).strip()
+            try:
+                rcount = int(entry.get("count"))
+            except (TypeError, ValueError):
+                rcount = len(valid_ids)
+            rkey = _reason_norm(rtext)
+            if rtext and rkey not in bucket_reason_seen[key]:
+                bucket_reason_seen[key].add(rkey)
+                bucket_reasons[key].append({"text": rtext, "count": rcount})
 
     # Hydrate every collected id in one query (capped).
     all_ids: list[int] = []
@@ -1399,10 +1415,15 @@ async def criterion_reviews(
             revs = [by_id[i] for i in ids if i in cap_set and i in by_id]
             if not revs:
                 continue
+            reasons = sorted(
+                bucket_reasons.get((top, vk), []),
+                key=lambda r: -int(r.get("count") or 0),
+            )
             vendors.append({
                 "key": vk,
                 "display": vendor_display.get(vk, vk),
                 "review_count": len(revs),
+                "reasons": reasons,
                 "reviews": revs,
             })
         if not vendors:

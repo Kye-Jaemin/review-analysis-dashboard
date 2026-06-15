@@ -726,16 +726,34 @@ function v3RenderCriterionReviews(data) {
   // expands to its reviews.
   const blocks = cats.map((cat, ci) => {
     const vendors = cat.vendors || [];
-    const vrows = vendors.map(v =>
-      '<details class="border-t border-gray-100 first:border-0">' +
+    const vrows = vendors.map(v => {
+      const reasons = v.reasons || [];
+      const reviews = v.reviews || [];
+      const feedback = reasons.length
+        ? '<div class="text-[11px] font-semibold text-gray-700 mb-1">💡 {% if lang == "ko" %}주요 피드백{% else %}Key feedback{% endif %}</div>' +
+          '<ul class="space-y-0.5 mb-2">' + reasons.map(rs =>
+            '<li class="text-[12px] text-gray-700 flex gap-1.5">' +
+              '<span class="text-indigo-400">•</span>' +
+              '<span class="flex-1">' + escapeHtml(rs.text) + '</span>' +
+              '<span class="text-gray-400 tabular-nums whitespace-nowrap">' + (rs.count || 0).toLocaleString() + '</span>' +
+            '</li>').join('') + '</ul>'
+        : '<div class="text-[11px] text-gray-400 italic mb-2">{% if lang == "ko" %}요약할 피드백이 없습니다.{% else %}No feedback summary.{% endif %}</div>';
+      const fullReviews =
+        '<details class="border-t border-gray-200 pt-1">' +
+          '<summary class="cursor-pointer list-none text-[11px] text-indigo-600 hover:underline">' +
+            '▾ {% if lang == "ko" %}전체 리뷰{% else %}All reviews{% endif %} (' + reviews.length.toLocaleString() + ')' +
+          '</summary>' +
+          '<ul class="space-y-2.5 mt-2">' + reviews.map(v3ReviewItemHtml).join('') + '</ul>' +
+        '</details>';
+      return '<details class="border-t border-gray-100 first:border-0">' +
         '<summary class="px-3 py-1.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 list-none text-[13px]">' +
           '<span class="font-medium text-gray-900 truncate">' + escapeHtml(v.display) + '</span>' +
           '<span class="text-gray-500 tabular-nums whitespace-nowrap">: ' + v.review_count.toLocaleString() + ' ' + unit + '</span>' +
           '<span class="ml-auto text-[11px] text-indigo-600 whitespace-nowrap">👁 {% if lang == "ko" %}보기{% else %}view{% endif %}</span>' +
         '</summary>' +
-        '<ul class="px-3 pb-2 pt-1 space-y-2.5 bg-gray-50/40">' + (v.reviews || []).map(v3ReviewItemHtml).join('') + '</ul>' +
-      '</details>'
-    ).join('');
+        '<div class="px-3 pb-2 pt-1 bg-gray-50/40">' + feedback + fullReviews + '</div>' +
+      '</details>';
+    }).join('');
     return '<div class="mb-3">' +
       '<div class="text-sm font-semibold text-gray-900 mb-1">' +
         (ci + 1) + '. ' + escapeHtml(cat.name) +

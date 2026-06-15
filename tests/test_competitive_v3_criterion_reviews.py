@@ -74,6 +74,9 @@ async def test_criterion_reviews_groups_and_dedups(app_client):
     assert cat["review_count"] == 3
     assert data["matched_reasons"] == 2
     assert data["missing_cards"] == 0
+    # Feedback summary = the matched reasons (text + count), no LLM.
+    assert {rs["text"] for rs in v["reasons"]} == {"빠른 입력", "정확한 인식"}
+    assert all(rs["count"] == 2 for rs in v["reasons"])
 
 
 @pytest.mark.asyncio
