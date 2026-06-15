@@ -77,6 +77,60 @@
       <span>{% if lang == 'ko' %}카테고리{% else %}categories{% endif %} <b class="text-blue-700">{{ result.totals.categories }}</b></span>
     </div>
 
+    {# Data for the competitive-criteria mapping UI. Emitted for BOTH
+       fresh uploads and loaded saved cards (unlike v3-payload, which is
+       fresh-upload only) so the section hydrates in either case. JS in
+       competitive_v3.html reads this on htmx:afterSwap. #}
+    {% set crit_cats = [] %}
+    {% for c in result.categories %}
+      {% set _ = crit_cats.append({
+        "name": c.name,
+        "review_count": c.review_count,
+        "vendor_count": c.vendors|length,
+        "vendor_keys": c.vendors|map(attribute='key')|list,
+      }) %}
+    {% endfor %}
+    <script type="application/json" id="v3-criteria-data">
+      {{ {"categories": crit_cats, "total_reviews": result.totals.reviews, "criteria": result._criteria, "card_id": result._card_id}|tojson|safe }}
+    </script>
+
+    {# ====== Competitive criteria mapping ====== #}
+    <div class="bg-white border border-indigo-200 rounded-lg shadow-sm">
+      <div class="px-4 py-2.5 border-b bg-indigo-50/60 flex items-center gap-2 flex-wrap">
+        <span class="text-sm font-semibold text-gray-900">
+          🧭 {% if lang == 'ko' %}경쟁력 기준 매핑{% else %}Competitive criteria mapping{% endif %}
+        </span>
+        <span class="text-[10px] text-gray-500">
+          {% if lang == 'ko' %}AI 카테고리를 상위 경쟁력 기준으로 그룹화 (AI 제안 후 드롭다운으로 조정){% else %}group AI categories into higher-level criteria (AI suggests, adjust via dropdown){% endif %}
+        </span>
+        <div class="ml-auto flex items-center gap-2">
+          <button type="button" onclick="v3SuggestCriteria(this)"
+                  class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded shadow-sm">
+            🤖 {% if lang == 'ko' %}AI 자동 그룹화{% else %}AI auto-group{% endif %}
+          </button>
+          <button type="button" onclick="v3AddCriterion()"
+                  class="px-2.5 py-1.5 border border-gray-300 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded">
+            ＋ {% if lang == 'ko' %}기준 추가{% else %}Add criterion{% endif %}
+          </button>
+          <button type="button" onclick="v3SaveCriteria(this)"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded shadow-sm">
+            💾 {% if lang == 'ko' %}저장{% else %}Save{% endif %}
+          </button>
+        </div>
+      </div>
+      <div class="p-4">
+        <div id="v3-criteria-cards"
+             class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+        <div id="v3-criteria-empty" class="text-sm text-gray-500 italic">
+          {% if lang == 'ko' %}
+            아직 경쟁력 기준이 없습니다. <b>🤖 AI 자동 그룹화</b>를 누르면 위 카테고리들을 상위 기준으로 묶어줍니다.
+          {% else %}
+            No criteria yet. Click <b>🤖 AI auto-group</b> to bucket the categories above into criteria.
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
     {# ====== 1. Category distribution table ====== #}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
       <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50">

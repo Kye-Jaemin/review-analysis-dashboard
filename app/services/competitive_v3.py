@@ -912,6 +912,195 @@ async def build_categorized_view(
 
 
 # ----------------------------------------------------------------------------
+# Competitive criteria — group the AI categories into higher-level buckets
+# ----------------------------------------------------------------------------
+
+# Bump when _build_criteria_prompt changes — invalidates cached groupings.
+_CRITERIA_PROMPT_VERSION = "v3-criteria-2026-06-initial"
+_CRITERIA_CACHE_TTL_SECONDS = 30 * 60
+_criteria_cache: dict[str, tuple[float, dict]] = {}
+
+# Catch-all bucket for categories the LLM forgot to assign.
+_UNASSIGNED_NAME = "미분류"
+
+
+def _criteria_cache_key(category_names: list[str], lang: str, model: str) -> str:
+    canon = json.dumps(sorted(category_names), ensure_ascii=False)
+    return hashlib.sha256(
+        f"{_CRITERIA_PROMPT_VERSION}|{model}|{lang}|{canon}".encode("utf-8")
+    ).hexdigest()
+
+
+def _normalize_criteria(parsed: dict, category_names: list[str]) -> dict:
+    """Turn a raw LLM grouping response into the canonical
+    {"groups": [{"name", "categories": [...]}, ...]} shape.
+
+    Guarantees:
+      - every input category appears exactly once across all groups
+      - categories the LLM dropped / mislabelled land in a trailing
+        '미분류' group
+      - declared-but-empty criteria are omitted
+      - group order follows the LLM's declared `criteria` order, with
+        any extra criteria (only seen in assignments) appended after.
+
+    Pure function — no LLM, no I/O — so it's unit-testable.
+    """
+    valid = list(dict.fromkeys(n for n in category_names if n))  # de-dupe, keep order
+    valid_set = set(valid)
+
+    declared = []
+    for c in (parsed.get("criteria") or []):
+        name = str(c).strip()
+        if name and name not in declared:
+            declared.append(name)
+
+    # category → criterion, first assignment wins.
+    assigned: dict[str, str] = {}
+    order_extra: list[str] = []
+    for a in (parsed.get("assignments") or []):
+        if not isinstance(a, dict):
+            continue
+        cat = str(a.get("category") or "").strip()
+        crit = str(a.get("criterion") or "").strip()
+        if not cat or not crit or cat not in valid_set or cat in assigned:
+            continue
+        assigned[cat] = crit
+        if crit not in declared and crit not in order_extra:
+            order_extra.append(crit)
+
+    # Build groups in stable order: declared criteria first, then extras.
+    groups: dict[str, list[str]] = {}
+    for cat in valid:  # iterate categories in input order for stable membership
+        crit = assigned.get(cat, _UNASSIGNED_NAME)
+        groups.setdefault(crit, []).append(cat)
+
+    ordered_names = [c for c in declared if c in groups]
+    ordered_names += [c for c in order_extra if c in groups and c not in ordered_names]
+    # Any remaining criteria keys (e.g. the unassigned bucket) at the end.
+    for c in groups:
+        if c not in ordered_names and c != _UNASSIGNED_NAME:
+            ordered_names.append(c)
+    if _UNASSIGNED_NAME in groups:
+        ordered_names.append(_UNASSIGNED_NAME)
+
+    return {
+        "groups": [
+            {"name": name, "categories": groups[name]}
+            for name in ordered_names
+            if groups.get(name)
+        ]
+    }
+
+
+def _build_criteria_prompt(
+    categories: list[dict], lang: str, target_groups: int = 5
+) -> tuple[str, str]:
+    """Build (system, user) for the criteria-grouping call.
+
+    categories: [{"name", "review_count", "vendor_count"}]
+    """
+    lang_label = {"ko": "Korean", "en": "English"}.get(lang, "Korean")
+    names = [str(c.get("name") or "").strip() for c in categories if (c.get("name") or "").strip()]
+    system = (
+        f"You group product-feature CATEGORIES into a smaller set of\n"
+        f"higher-level COMPETITIVE CRITERIA — the strategic capability\n"
+        f"buckets a product manager would use to compare competitors\n"
+        f"(e.g. '코칭/Action 제안 프로그램' might group '동기부여·습관 형성',\n"
+        f"'개인화 코칭·인사이트', '게임화·보상', '커뮤니티·소셜').\n\n"
+        f"GOAL\n"
+        f"  1. Discover ~{target_groups} competitive criteria that group the\n"
+        f"     {len(names)} input categories by the STRATEGIC CAPABILITY they\n"
+        f"     represent. Aim for {max(3, target_groups - 2)}–"
+        f"{target_groups + 1} groups.\n"
+        f"  2. Assign EVERY input category to exactly ONE criterion.\n"
+        f"  3. Criteria names: 4–24 character noun phrases in {lang_label},\n"
+        f"     VALUE-NEUTRAL (describe the capability, not good/bad). Use\n"
+        f"     '/' or '·' to join related ideas when natural.\n\n"
+        f"OUTPUT — JSON only, no prose, no markdown fences:\n"
+        f"{{\n"
+        f'  "criteria": ["criterion A", "criterion B", ...],\n'
+        f'  "assignments": [\n'
+        f'    {{"category": "<exact input category name>", "criterion": "criterion A"}},\n'
+        f"    ...\n"
+        f"  ]\n"
+        f"}}\n\n"
+        f"`assignments` MUST cover all {len(names)} input categories exactly\n"
+        f"once. Every `category` MUST be copied verbatim from the input list.\n"
+        f"Every `criterion` MUST appear in `criteria`."
+    )
+    lines = []
+    for c in categories:
+        nm = str(c.get("name") or "").strip()
+        if not nm:
+            continue
+        rc = int(c.get("review_count") or 0)
+        vc = int(c.get("vendor_count") or 0)
+        lines.append(f"- {nm} | reviews={rc} | vendors={vc}")
+    user_msg = "Categories to group:\n" + "\n".join(lines)
+    return system, user_msg
+
+
+async def suggest_criteria_with_llm(
+    categories: list[dict],
+    *,
+    lang: str = "ko",
+    model: Optional[str] = None,
+    target_groups: int = 5,
+) -> dict:
+    """Run a Claude call that groups the v3 AI categories into ~target_groups
+    competitive criteria. Returns the canonical
+    {"groups": [{"name", "categories": [...]}], "_model_used": str} shape.
+
+    categories: [{"name", "review_count", "vendor_count"}] — extra keys
+    ignored. Cached by category-name set + lang + model + prompt version.
+    """
+    category_names = [
+        str(c.get("name") or "").strip()
+        for c in (categories or [])
+        if isinstance(c, dict) and (c.get("name") or "").strip()
+    ]
+    if not category_names:
+        return {"groups": [], "_model_used": None}
+
+    if not settings.ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+
+    chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
+    if chosen_model not in settings.allowed_models:
+        chosen_model = settings.ANTHROPIC_MODEL
+
+    cache_key = _criteria_cache_key(category_names, lang, chosen_model)
+    cached = _criteria_cache.get(cache_key)
+    if cached and time.time() - cached[0] < _CRITERIA_CACHE_TTL_SECONDS:
+        out = dict(cached[1])
+        out["_model_used"] = chosen_model
+        return out
+
+    system, user_msg = _build_criteria_prompt(categories, lang, target_groups)
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    resp = await client.messages.create(
+        model=chosen_model,
+        max_tokens=4096,
+        temperature=0.0,
+        system=system,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    text = _strip_fences("".join(getattr(b, "text", "") for b in resp.content))
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"criteria LLM returned invalid JSON: {e}; raw={text[:200]!r}"
+        )
+    result = _normalize_criteria(parsed, category_names)
+    _criteria_cache[cache_key] = (time.time(), result)
+    out = dict(result)
+    out["_model_used"] = chosen_model
+    return out
+
+
+# ----------------------------------------------------------------------------
 # Click-a-reason → fetch real reviews
 # ----------------------------------------------------------------------------
 
@@ -1060,6 +1249,7 @@ async def list_v3_cards(
             "input_filename": c.input_filename,
             "hidden": c.hidden,
             "categories_count": len((c.result_payload or {}).get("categories") or []),
+            "criteria_count": len((c.criteria_mapping or {}).get("groups") or []),
             "totals": (c.result_payload or {}).get("totals") or {},
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
@@ -1080,6 +1270,7 @@ async def save_v3_card(
     result: dict,
     model_used: Optional[str] = None,
     input_filename: Optional[str] = None,
+    criteria_mapping: Optional[dict] = None,
 ) -> CompetitiveV3Card:
     label = (label or "").strip()
     if not label:
@@ -1090,6 +1281,7 @@ async def save_v3_card(
         input_filename=(input_filename or "")[:255] or None,
         input_rows=list(rows or []),
         result_payload=dict(result or {}),
+        criteria_mapping=dict(criteria_mapping) if criteria_mapping else None,
         hidden=False,
     )
     session.add(card)
@@ -1108,6 +1300,36 @@ async def update_v3_card_label(
     if not label:
         raise ValueError("label cannot be empty")
     card.label = label[:200]
+    await session.commit()
+    await session.refresh(card)
+    return card
+
+
+async def update_v3_card_criteria(
+    session: AsyncSession, card_id: int, criteria_mapping: Optional[dict]
+) -> Optional[CompetitiveV3Card]:
+    """Persist (or clear) the competitive-criteria grouping on a saved
+    card. Pass None / empty to clear. Normalizes to the canonical
+    {"groups": [{"name", "categories": [...]}]} shape, dropping junk."""
+    card = await session.get(CompetitiveV3Card, card_id)
+    if not card:
+        return None
+    if not criteria_mapping or not (criteria_mapping.get("groups")):
+        card.criteria_mapping = None
+    else:
+        clean_groups = []
+        for g in criteria_mapping.get("groups") or []:
+            if not isinstance(g, dict):
+                continue
+            name = str(g.get("name") or "").strip()
+            cats = [
+                str(c).strip()
+                for c in (g.get("categories") or [])
+                if str(c).strip()
+            ]
+            if name and cats:
+                clean_groups.append({"name": name[:200], "categories": cats})
+        card.criteria_mapping = {"groups": clean_groups} if clean_groups else None
     await session.commit()
     await session.refresh(card)
     return card

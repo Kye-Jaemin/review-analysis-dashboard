@@ -35,7 +35,9 @@ from app.services.competitive_v3 import (
     recall_upload,
     remember_upload,
     save_v3_card,
+    suggest_criteria_with_llm,
     toggle_v3_card_hidden,
+    update_v3_card_criteria,
     update_v3_card_label,
 )
 from app.templating import render
@@ -136,6 +138,7 @@ async def competitive_v3_save(
     rows_json: str = Form(...),
     result_json: str = Form(...),
     filename: str = Form(""),
+    criteria_json: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
     """Persist a v3 analysis as a CompetitiveV3Card.
@@ -155,6 +158,14 @@ async def competitive_v3_save(
         raise HTTPException(422, f"invalid payload: {e}")
     if not isinstance(rows, list) or not isinstance(result, dict):
         raise HTTPException(422, "payload shape mismatch")
+    criteria_mapping: Optional[dict] = None
+    if (criteria_json or "").strip():
+        try:
+            parsed_criteria = json.loads(criteria_json)
+        except json.JSONDecodeError as e:
+            raise HTTPException(422, f"invalid criteria payload: {e}")
+        if isinstance(parsed_criteria, dict) and parsed_criteria.get("groups"):
+            criteria_mapping = parsed_criteria
     card = await save_v3_card(
         session,
         label=label,
@@ -162,6 +173,7 @@ async def competitive_v3_save(
         result=result,
         model_used=settings.ANTHROPIC_MODEL,
         input_filename=(filename or "").strip() or None,
+        criteria_mapping=criteria_mapping,
     )
     cards = await list_v3_cards(session, include_hidden=False)
     return render(
@@ -213,6 +225,7 @@ async def competitive_v3_card_load(
     result["_card_id"] = card.id
     result["_card_label"] = card.label
     result["_model_used"] = card.model_used
+    result["_criteria"] = card.criteria_mapping or None
     remember_upload(result["_input_hash"], rows, result, card.input_filename or card.label)
     return render(
         request,
@@ -354,3 +367,49 @@ async def competitive_v3_reason_reviews(
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, str(e))
+
+
+@router.post("/competitive-v3/criteria/suggest")
+async def competitive_v3_criteria_suggest(
+    request: Request,
+    categories_json: str = Form(...),
+):
+    """Group the current analysis's AI categories into ~5 competitive
+    criteria via Claude. Stateless (no DB write) — the browser holds the
+    grouping and persists it later via Save / card-criteria update.
+
+    categories_json: JSON list of {name, review_count, vendor_count}.
+    Returns {"groups": [{name, categories: [...]}], "_model_used": str}.
+    """
+    try:
+        categories = json.loads(categories_json)
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, f"invalid categories payload: {e}")
+    if not isinstance(categories, list):
+        raise HTTPException(422, "categories must be a list")
+    lang = getattr(request.state, "lang", "ko")
+    try:
+        return await suggest_criteria_with_llm(categories, lang=lang)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, str(e))
+
+
+@router.post("/competitive-v3/cards/{card_id}/criteria")
+async def competitive_v3_card_criteria(
+    card_id: int,
+    criteria_json: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """Persist (or clear) the competitive-criteria grouping on a saved
+    card. Used when the user edits the mapping on a loaded card without
+    re-saving the whole analysis."""
+    try:
+        mapping = json.loads(criteria_json) if (criteria_json or "").strip() else None
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, f"invalid criteria payload: {e}")
+    if mapping is not None and not isinstance(mapping, dict):
+        raise HTTPException(422, "criteria payload must be an object")
+    card = await update_v3_card_criteria(session, card_id, mapping)
+    if not card:
+        raise HTTPException(404, "card not found")
+    return {"ok": True, "card_id": card.id, "criteria": card.criteria_mapping}

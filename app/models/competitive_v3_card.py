@@ -38,6 +38,15 @@ class CompetitiveV3Card(Base):
     result_payload: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
     )
+    # Human-curated grouping of the AI categories into higher-level
+    # "competitive criteria". Shape:
+    #   {"groups": [{"name": str, "categories": [str, ...]}, ...]}
+    # Stored in its own column (not folded into result_payload) so it
+    # survives the self-heal rebuild of result_payload on card load.
+    # NULL until the user runs / saves a criteria mapping.
+    criteria_mapping: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSON, nullable=True
+    )
     hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

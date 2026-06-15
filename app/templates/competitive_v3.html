@@ -293,6 +293,10 @@ async function v3SaveAsCard() {
   fd.append('rows_json', JSON.stringify(payload.rows));
   fd.append('result_json', JSON.stringify(payload.result || {}));
   fd.append('filename', payload.filename || '');
+  // Fold in the competitive-criteria grouping (if the user built one)
+  // so a single Save persists both the analysis and the mapping.
+  const critJson = v3CriteriaPayloadJson();
+  if (critJson) fd.append('criteria_json', critJson);
   try {
     const res = await fetch('/competitive-v3/save', { method: 'POST', body: fd });
     if (!res.ok) {
@@ -368,6 +372,292 @@ async function v3RenameCard(btn) {
     alert(String(e));
   }
 }
+// ============================================================
+// Competitive criteria mapping (AI-grouped, dropdown-adjustable)
+// ============================================================
+const V3_UNASSIGNED = '미분류';
+let v3CritState = null; // {groups, catStats, totalReviews, cardId}
+
+function v3InitCriteria() {
+  const el = document.getElementById('v3-criteria-data');
+  const wrap = document.getElementById('v3-criteria-cards');
+  if (!el || !wrap) { v3CritState = null; return; }
+  let data;
+  try { data = JSON.parse(el.textContent || '{}'); } catch (e) { return; }
+  const catStats = {};
+  (data.categories || []).forEach(c => {
+    catStats[c.name] = {
+      review_count: c.review_count || 0,
+      vendor_keys: c.vendor_keys || [],
+    };
+  });
+  const allNames = (data.categories || []).map(c => c.name);
+  const groups = [];
+  const saved = data.criteria && data.criteria.groups;
+  if (saved && saved.length) {
+    const seen = new Set();
+    saved.forEach(g => {
+      const cats = (g.categories || []).filter(n => catStats[n] && !seen.has(n));
+      cats.forEach(n => seen.add(n));
+      if (g.name && cats.length) groups.push({ name: g.name, categories: cats });
+    });
+    const leftovers = allNames.filter(n => !seen.has(n));
+    if (leftovers.length) groups.push({ name: V3_UNASSIGNED, categories: leftovers });
+  }
+  v3CritState = {
+    groups: groups,
+    catStats: catStats,
+    totalReviews: data.total_reviews || 0,
+    cardId: data.card_id || null,
+  };
+  v3RenderCriteria();
+}
+
+function v3FindGroup(name) {
+  return v3CritState.groups.find(g => g.name === name);
+}
+function v3RemoveCategoryEverywhere(cat) {
+  v3CritState.groups.forEach(g => {
+    g.categories = g.categories.filter(c => c !== cat);
+  });
+}
+function v3CleanupGroups() {
+  // Drop the auto-derived 미분류 bucket when empty; keep user-created
+  // empty groups so a freshly-added criterion doesn't vanish.
+  v3CritState.groups = v3CritState.groups.filter(
+    g => g.name !== V3_UNASSIGNED || g.categories.length
+  );
+}
+
+function v3RenderCriteria() {
+  const wrap = document.getElementById('v3-criteria-cards');
+  const empty = document.getElementById('v3-criteria-empty');
+  if (!wrap || !v3CritState) return;
+  const groups = v3CritState.groups;
+  if (!groups.length) {
+    wrap.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  wrap.innerHTML = groups.map(g => v3CritCardHtml(g)).join('');
+}
+
+function v3CritCardHtml(g) {
+  const stats = v3CritState.catStats;
+  let reviews = 0;
+  const vkeys = new Set();
+  g.categories.forEach(n => {
+    const s = stats[n];
+    if (!s) return;
+    reviews += s.review_count || 0;
+    (s.vendor_keys || []).forEach(k => vkeys.add(k));
+  });
+  const total = v3CritState.totalReviews || 0;
+  const share = total ? (reviews / total * 100) : 0;
+  const isUnassigned = g.name === V3_UNASSIGNED;
+  const nameEsc = escapeHtml(g.name);
+  const otherGroups = v3CritState.groups.filter(x => x.name !== g.name);
+
+  const catRows = g.categories.map(n => {
+    const s = stats[n] || {};
+    let opts = '<option value="">{% if lang == "ko" %}이동…{% else %}move…{% endif %}</option>';
+    otherGroups.forEach(og => {
+      opts += '<option value="' + escapeHtml(og.name) + '">→ ' + escapeHtml(og.name) + '</option>';
+    });
+    if (!isUnassigned) {
+      opts += '<option value="__UNASSIGNED__">→ ' + V3_UNASSIGNED + '</option>';
+    }
+    opts += '<option value="__NEW__">＋ {% if lang == "ko" %}새 기준…{% else %}new criterion…{% endif %}</option>';
+    return '<li class="flex items-center gap-1.5 py-0.5">' +
+      '<span class="flex-1 min-w-0 text-[13px] text-gray-800 truncate" title="' + escapeHtml(n) + '">' + escapeHtml(n) + '</span>' +
+      '<span class="text-[10px] text-gray-400 tabular-nums shrink-0">' + (s.review_count || 0).toLocaleString() + '</span>' +
+      '<select data-cat="' + escapeHtml(n) + '" onchange="v3MoveCategory(this)" ' +
+        'class="text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white shrink-0">' + opts + '</select>' +
+      '</li>';
+  }).join('');
+
+  const header =
+    '<div class="flex items-center gap-1.5 mb-1.5">' +
+      '<span class="text-base shrink-0">' + (isUnassigned ? '📥' : '🧭') + '</span>' +
+      '<span class="flex-1 min-w-0 text-sm font-semibold text-gray-900 truncate" title="' + nameEsc + '">' + nameEsc + '</span>' +
+      (isUnassigned ? '' :
+        '<button type="button" data-crit="' + nameEsc + '" onclick="v3RenameCriterion(this)" ' +
+          'class="text-[11px] text-gray-400 hover:text-gray-700 px-1" title="{% if lang == "ko" %}이름 변경{% else %}Rename{% endif %}">✏️</button>' +
+        '<button type="button" data-crit="' + nameEsc + '" onclick="v3DeleteCriterion(this)" ' +
+          'class="text-[11px] text-rose-400 hover:text-rose-700 px-1" title="{% if lang == "ko" %}삭제 (소속은 미분류로){% else %}Delete (members → unassigned){% endif %}">🗑️</button>') +
+    '</div>';
+
+  const statline =
+    '<div class="text-[10px] text-gray-500 mb-2 flex flex-wrap gap-x-2 tabular-nums">' +
+      '<span>{% if lang == "ko" %}리뷰{% else %}reviews{% endif %} <b class="text-indigo-700">' + reviews.toLocaleString() + '</b></span>' +
+      '<span>· <b class="text-indigo-700">' + share.toFixed(1) + '%</b></span>' +
+      '<span>· {% if lang == "ko" %}카테고리{% else %}cats{% endif %} ' + g.categories.length + '</span>' +
+      '<span>· {% if lang == "ko" %}업체{% else %}vendors{% endif %} ' + vkeys.size + '</span>' +
+    '</div>';
+
+  const body = g.categories.length
+    ? '<ul class="divide-y divide-gray-100">' + catRows + '</ul>'
+    : '<div class="text-[11px] text-gray-400 italic py-1">{% if lang == "ko" %}비어 있음 — 다른 카드에서 카테고리를 이동하세요{% else %}empty — move categories here{% endif %}</div>';
+
+  return '<div class="border rounded-lg p-3 ' +
+    (isUnassigned ? 'border-amber-200 bg-amber-50/40' : 'border-indigo-200 bg-indigo-50/30') + '">' +
+    header + statline + body + '</div>';
+}
+
+function v3MoveCategory(sel) {
+  if (!v3CritState) return;
+  const cat = sel.dataset.cat;
+  const target = sel.value;
+  if (!cat || !target) return;
+  v3RemoveCategoryEverywhere(cat);
+  if (target === '__NEW__') {
+    const name = (prompt({% if lang == 'ko' %}'새 경쟁력 기준 이름:'{% else %}'New criterion name:'{% endif %}, '') || '').trim();
+    if (!name) { v3RenderCriteria(); return; }
+    let g = v3FindGroup(name);
+    if (!g) { g = { name: name, categories: [] }; v3CritState.groups.push(g); }
+    g.categories.push(cat);
+  } else if (target === '__UNASSIGNED__') {
+    let g = v3FindGroup(V3_UNASSIGNED);
+    if (!g) { g = { name: V3_UNASSIGNED, categories: [] }; v3CritState.groups.push(g); }
+    g.categories.push(cat);
+  } else {
+    const g = v3FindGroup(target);
+    if (g) g.categories.push(cat);
+  }
+  v3CleanupGroups();
+  v3RenderCriteria();
+}
+
+function v3AddCriterion() {
+  if (!v3CritState) {
+    alert({% if lang == 'ko' %}'먼저 파일을 분석하거나 카드를 불러오세요.'{% else %}'Analyze a file or load a card first.'{% endif %});
+    return;
+  }
+  const name = (prompt({% if lang == 'ko' %}'새 경쟁력 기준 이름:'{% else %}'New criterion name:'{% endif %}, '') || '').trim();
+  if (!name) return;
+  if (v3FindGroup(name)) { alert({% if lang == 'ko' %}'같은 이름의 기준이 이미 있습니다.'{% else %}'A criterion with that name already exists.'{% endif %}); return; }
+  // Insert before the 미분류 bucket if present.
+  const idx = v3CritState.groups.findIndex(g => g.name === V3_UNASSIGNED);
+  const g = { name: name, categories: [] };
+  if (idx >= 0) v3CritState.groups.splice(idx, 0, g); else v3CritState.groups.push(g);
+  v3RenderCriteria();
+}
+
+function v3RenameCriterion(btn) {
+  if (!v3CritState) return;
+  const cur = btn.dataset.crit;
+  const next = (prompt({% if lang == 'ko' %}'새 이름:'{% else %}'New name:'{% endif %}, cur) || '').trim();
+  if (!next || next === cur) return;
+  if (next === V3_UNASSIGNED) { alert({% if lang == 'ko' %}'예약된 이름입니다.'{% else %}'Reserved name.'{% endif %}); return; }
+  if (v3FindGroup(next)) { alert({% if lang == 'ko' %}'같은 이름의 기준이 이미 있습니다.'{% else %}'Name already in use.'{% endif %}); return; }
+  const g = v3FindGroup(cur);
+  if (g) g.name = next;
+  v3RenderCriteria();
+}
+
+function v3DeleteCriterion(btn) {
+  if (!v3CritState) return;
+  const name = btn.dataset.crit;
+  const g = v3FindGroup(name);
+  if (!g) return;
+  if (g.categories.length) {
+    let u = v3FindGroup(V3_UNASSIGNED);
+    if (!u) { u = { name: V3_UNASSIGNED, categories: [] }; v3CritState.groups.push(u); }
+    u.categories.push(...g.categories);
+  }
+  v3CritState.groups = v3CritState.groups.filter(x => x !== g);
+  v3RenderCriteria();
+}
+
+// Canonical mapping payload for persistence (excludes the auto-derived
+// 미분류 bucket — it's recomputed from leftovers on reload).
+function v3CriteriaPayloadJson() {
+  if (!v3CritState) return '';
+  const groups = v3CritState.groups
+    .filter(g => g.name !== V3_UNASSIGNED && g.categories.length)
+    .map(g => ({ name: g.name, categories: g.categories.slice() }));
+  if (!groups.length) return '';
+  return JSON.stringify({ groups: groups });
+}
+
+async function v3SuggestCriteria(btn) {
+  if (!v3CritState) {
+    alert({% if lang == 'ko' %}'먼저 파일을 분석하거나 카드를 불러오세요.'{% else %}'Analyze a file or load a card first.'{% endif %});
+    return;
+  }
+  const hasExisting = v3CritState.groups.some(g => g.name !== V3_UNASSIGNED && g.categories.length);
+  if (hasExisting && !confirm({% if lang == 'ko' %}'현재 매핑을 AI 제안으로 덮어쓸까요?'{% else %}'Overwrite the current mapping with AI suggestions?'{% endif %})) return;
+  const cats = Object.keys(v3CritState.catStats).map(n => ({
+    name: n,
+    review_count: v3CritState.catStats[n].review_count || 0,
+    vendor_count: (v3CritState.catStats[n].vendor_keys || []).length,
+  }));
+  if (!cats.length) return;
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = {% if lang == 'ko' %}'AI 그룹화 중…'{% else %}'Grouping…'{% endif %}; }
+  try {
+    const fd = new FormData();
+    fd.append('categories_json', JSON.stringify(cats));
+    const res = await fetch('/competitive-v3/criteria/suggest', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300);
+      alert({% if lang == 'ko' %}'AI 그룹화 실패: '{% else %}'Auto-group failed: '{% endif %} + res.status + ' ' + body);
+      return;
+    }
+    const data = await res.json();
+    const seen = new Set();
+    const groups = [];
+    (data.groups || []).forEach(g => {
+      const c = (g.categories || []).filter(n => v3CritState.catStats[n] && !seen.has(n));
+      c.forEach(n => seen.add(n));
+      if (g.name && c.length) groups.push({ name: g.name, categories: c });
+    });
+    const leftovers = Object.keys(v3CritState.catStats).filter(n => !seen.has(n));
+    if (leftovers.length) groups.push({ name: V3_UNASSIGNED, categories: leftovers });
+    v3CritState.groups = groups;
+    v3RenderCriteria();
+  } catch (e) {
+    alert(String(e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+async function v3SaveCriteria(btn) {
+  if (!v3CritState) {
+    alert({% if lang == 'ko' %}'먼저 파일을 분석하거나 카드를 불러오세요.'{% else %}'Analyze a file or load a card first.'{% endif %});
+    return;
+  }
+  // Loaded saved card → update just the mapping on that card.
+  if (v3CritState.cardId) {
+    const cj = v3CriteriaPayloadJson();
+    try {
+      const fd = new FormData();
+      fd.append('criteria_json', cj || '');
+      const res = await fetch('/competitive-v3/cards/' + v3CritState.cardId + '/criteria', { method: 'POST', body: fd });
+      if (!res.ok) {
+        alert({% if lang == 'ko' %}'저장 실패: '{% else %}'Save failed: '{% endif %} + res.status);
+        return;
+      }
+      alert({% if lang == 'ko' %}'경쟁력 기준 매핑을 저장했습니다.'{% else %}'Criteria mapping saved.'{% endif %});
+    } catch (e) {
+      alert(String(e));
+    }
+    return;
+  }
+  // Fresh upload → save as a new card (which now also persists criteria).
+  v3SaveAsCard();
+}
+
+// Re-init the criteria UI whenever the results pane is (re)rendered —
+// covers both fresh-upload parse and saved-card load.
+document.body.addEventListener('htmx:afterSwap', (e) => {
+  if (e.target && e.target.id === 'competitive-v3-results') {
+    v3InitCriteria();
+  }
+});
+
 // Delegated click for reason buttons (works across HTMX swaps)
 document.body.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-v3-reason]');
