@@ -183,6 +183,20 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+// Shared review <li> renderer — used by both the reason popup and the
+// criterion (vendor-grouped) popup.
+function v3ReviewItemHtml(r) {
+  const stars = r.rating ? '★'.repeat(Math.max(0, Math.min(5, r.rating))) : '';
+  const sent = r.sentiment ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">' + escapeHtml(r.sentiment) + '</span>' : '';
+  const date = r.posted_at ? r.posted_at.slice(0, 10) : (r.collected_at ? r.collected_at.slice(0, 10) : '');
+  return '<li class="border-l-2 border-blue-300 pl-3 py-1.5">' +
+    '<div class="flex items-center gap-2 text-[10px] text-gray-500 mb-1">' +
+      (stars ? '<span class="text-amber-500">' + stars + '</span>' : '') + sent +
+      (date ? '<span class="ml-auto">' + date + '</span>' : '') +
+    '</div>' +
+    '<div class="text-[13px] text-gray-800 whitespace-pre-line break-words">' + escapeHtml(r.text) + '</div>' +
+    '</li>';
+}
 async function v3OpenReviewsFor(btn) {
   const vendorKey = btn.dataset.vendorKey;
   const vendorDisplay = btn.dataset.vendorDisplay;
@@ -230,20 +244,7 @@ async function v3OpenReviewsFor(btn) {
     }
     body.innerHTML =
       '<div class="text-[11px] text-gray-600 mb-3"><b>' + reviews.length + '</b> {% if lang == "ko" %}건의 리뷰{% else %} reviews{% endif %}</div>' +
-      '<ul class="space-y-2.5">' +
-      reviews.map(r => {
-        const stars = r.rating ? '★'.repeat(Math.max(0, Math.min(5, r.rating))) : '';
-        const sent = r.sentiment ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">' + escapeHtml(r.sentiment) + '</span>' : '';
-        const date = r.posted_at ? r.posted_at.slice(0, 10) : (r.collected_at ? r.collected_at.slice(0, 10) : '');
-        return '<li class="border-l-2 border-blue-300 pl-3 py-1.5">' +
-          '<div class="flex items-center gap-2 text-[10px] text-gray-500 mb-1">' +
-            (stars ? '<span class="text-amber-500">' + stars + '</span>' : '') + sent +
-            (date ? '<span class="ml-auto">' + date + '</span>' : '') +
-          '</div>' +
-          '<div class="text-[13px] text-gray-800 whitespace-pre-line break-words">' + escapeHtml(r.text) + '</div>' +
-          '</li>';
-      }).join('') +
-      '</ul>';
+      '<ul class="space-y-2.5">' + reviews.map(v3ReviewItemHtml).join('') + '</ul>';
   } catch (e) {
     body.innerHTML = '<div class="text-sm text-rose-700">' + escapeHtml(String(e)) + '</div>';
   }
@@ -500,9 +501,15 @@ function v3CritCardHtml(g) {
     ? '<ul class="divide-y divide-gray-100">' + catRows + '</ul>'
     : '<div class="text-[11px] text-gray-400 italic py-1">{% if lang == "ko" %}비어 있음 — 다른 카드에서 카테고리를 이동하세요{% else %}empty — move categories here{% endif %}</div>';
 
+  const reviewsBtn = g.categories.length
+    ? '<button type="button" data-crit="' + nameEsc + '" onclick="v3CriterionReviews(this)" ' +
+        'class="mt-2 w-full text-[11px] font-medium text-indigo-700 border border-indigo-200 hover:bg-indigo-100/60 rounded px-2 py-1.5">' +
+        '👁 {% if lang == "ko" %}이 기준의 업체별 리뷰 보기{% else %}View reviews by vendor{% endif %}</button>'
+    : '';
+
   return '<div class="border rounded-lg p-3 ' +
     (isUnassigned ? 'border-amber-200 bg-amber-50/40' : 'border-indigo-200 bg-indigo-50/30') + '">' +
-    header + statline + body + '</div>';
+    header + statline + body + reviewsBtn + '</div>';
 }
 
 function v3MoveCategory(sel) {
@@ -648,6 +655,81 @@ async function v3SaveCriteria(btn) {
   }
   // Fresh upload → save as a new card (which now also persists criteria).
   v3SaveAsCard();
+}
+
+// ============================================================
+// Criterion → reviews grouped by vendor (reuses the review modal)
+// ============================================================
+async function v3CriterionReviews(btn) {
+  if (!v3CritState) return;
+  const name = btn.dataset.crit;
+  const g = v3FindGroup(name);
+  if (!g) return;
+  const memberSet = new Set(g.categories);
+  // Flatten the criterion's member categories into reason descriptors,
+  // collected from the per-category drill-down buttons in the DOM.
+  const descriptors = [];
+  document.querySelectorAll('[data-v3-reason]').forEach(b => {
+    if (memberSet.has(b.dataset.topCategory)) {
+      descriptors.push({
+        vendor_key: b.dataset.vendorKey,
+        vendor_display: b.dataset.vendorDisplay,
+        category_name: b.dataset.category,
+        band: b.dataset.band || 'positive',
+        reason_text: b.dataset.reasonText,
+      });
+    }
+  });
+  const modal = document.getElementById('v3-reviews-modal');
+  modal.classList.remove('hidden');
+  document.getElementById('v3-reviews-vendor-line').textContent =
+    '🧭 ' + name + ' · {% if lang == "ko" %}업체별 리뷰{% else %}reviews by vendor{% endif %}';
+  document.getElementById('v3-reviews-reason-line').textContent = g.categories.join(', ');
+  const body = document.getElementById('v3-reviews-body');
+  if (!descriptors.length) {
+    body.innerHTML = '<div class="text-sm text-gray-500 italic">{% if lang == "ko" %}이 기준에 연결된 reason이 없습니다.{% else %}No reasons under this criterion.{% endif %}</div>';
+    return;
+  }
+  body.innerHTML = '<div class="text-sm text-gray-500 italic">{% if lang == "ko" %}리뷰 불러오는 중…{% else %}Loading…{% endif %}</div>';
+  try {
+    const fd = new FormData();
+    fd.append('descriptors_json', JSON.stringify(descriptors));
+    const res = await fetch('/competitive-v3/criterion-reviews', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const t = (await res.text()).slice(0, 300);
+      body.innerHTML = '<div class="text-sm text-rose-700">HTTP ' + res.status + ' ' + escapeHtml(t) + '</div>';
+      return;
+    }
+    body.innerHTML = v3RenderCriterionReviews(await res.json());
+  } catch (e) {
+    body.innerHTML = '<div class="text-sm text-rose-700">' + escapeHtml(String(e)) + '</div>';
+  }
+}
+
+function v3RenderCriterionReviews(data) {
+  const vendors = data.vendors || [];
+  const missingNote = data.missing_cards
+    ? '<div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">' +
+      '⚠ {% if lang == "ko" %}일부 강·약점은 저장된 원인 분석 카드가 없어 제외됐습니다 (' + data.missing_cards + '건). /vendors에서 분석·저장 후 다시 시도하세요.{% else %}Some strengths were skipped (no saved reason card): ' + data.missing_cards + '. Analyze + save them on /vendors.{% endif %}</div>'
+    : '';
+  if (!vendors.length) {
+    return missingNote + '<div class="text-sm text-gray-500 italic">{% if lang == "ko" %}표시할 리뷰가 없습니다.{% else %}No reviews to show.{% endif %}</div>';
+  }
+  const head =
+    '<div class="text-[11px] text-gray-600 mb-3">' +
+      '{% if lang == "ko" %}업체{% else %}vendors{% endif %} <b>' + vendors.length + '</b> · ' +
+      '{% if lang == "ko" %}리뷰{% else %}reviews{% endif %} <b>' + (data.total_reviews || 0).toLocaleString() + '</b>' +
+    '</div>';
+  const blocks = vendors.map((v, i) =>
+    '<details class="border border-gray-200 rounded-md mb-2" ' + (i === 0 ? 'open' : '') + '>' +
+      '<summary class="px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center gap-2 list-none">' +
+        '<span class="text-sm font-medium text-gray-900 truncate">' + escapeHtml(v.display) + '</span>' +
+        '<span class="text-[11px] text-gray-500 ml-auto tabular-nums">' + v.review_count.toLocaleString() + ' {% if lang == "ko" %}건{% else %}reviews{% endif %}</span>' +
+      '</summary>' +
+      '<ul class="px-3 pb-3 space-y-2.5">' + (v.reviews || []).map(v3ReviewItemHtml).join('') + '</ul>' +
+    '</details>'
+  ).join('');
+  return missingNote + head + blocks;
 }
 
 // Re-init the criteria UI whenever the results pane is (re)rendered —

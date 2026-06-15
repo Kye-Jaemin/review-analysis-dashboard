@@ -1228,6 +1228,163 @@ async def reason_reviews(
     return out
 
 
+async def criterion_reviews(
+    session: AsyncSession,
+    *,
+    descriptors: list[dict],
+    max_reviews: int = 2000,
+) -> dict:
+    """Aggregate reviews for a whole competitive criterion, grouped by
+    vendor.
+
+    A criterion bundles several v3 AI categories; each category has, per
+    vendor, a set of reasons. `descriptors` is the flattened list of
+    those reasons (collected client-side from the per-category drill-down
+    buttons), each:
+      {vendor_key, vendor_display, category_name, band, reason_text}
+
+    For every distinct (vendor_key, category_name, band) we chase the
+    saved VendorReasonCard (same lookup as reason_reviews), match the
+    requested reason texts inside it, union their review_ids per vendor
+    (dedup across categories/reasons), then hydrate once from the DB.
+
+    Returns:
+      {
+        "vendors": [
+          {key, display, review_count, reviews: [ {id, text, ...}, ... ]},
+          ...   # sorted by review_count desc
+        ],
+        "total_reviews": int,        # deduped across vendors' own sets
+        "matched_reasons": int,
+        "missing_cards": int,        # (vendor,cat,band) with no saved card
+      }
+    """
+    from collections import defaultdict
+
+    grouped: dict[tuple[str, str, str], list[str]] = defaultdict(list)
+    vendor_display: dict[str, str] = {}
+    for d in descriptors or []:
+        if not isinstance(d, dict):
+            continue
+        vk = (d.get("vendor_key") or "").strip()
+        cat = (d.get("category_name") or "").strip()
+        band = (d.get("band") or "positive").strip().lower()
+        if band not in ("positive", "negative"):
+            band = "positive"
+        rt = (d.get("reason_text") or "").strip()
+        if not vk or not cat or not rt:
+            continue
+        grouped[(vk, cat.lower(), band)].append(rt)
+        if vk not in vendor_display and (d.get("vendor_display") or "").strip():
+            vendor_display[vk] = d["vendor_display"].strip()
+
+    per_vendor_ids: dict[str, list[int]] = {}
+    per_vendor_seen: dict[str, set[int]] = {}
+    matched_reasons = 0
+    missing_cards = 0
+
+    for (vk, cat_lower, band), reason_texts in grouped.items():
+        cards = (
+            await session.execute(
+                select(VendorReasonCard)
+                .where(VendorReasonCard.vendor_key == vk)
+                .where(VendorReasonCard.band == band)
+                .where(VendorReasonCard.hidden.is_(False))
+            )
+        ).scalars().all()
+        card = None
+        for c in cards:
+            if (c.category_name or "").strip().lower() == cat_lower:
+                card = c
+                break
+        if not card:
+            missing_cards += 1
+            continue
+        payload = card.reasons
+        if isinstance(payload, dict):
+            reason_list = payload.get("reasons") or []
+        elif isinstance(payload, list):
+            reason_list = payload
+        else:
+            reason_list = []
+        idx: dict[str, dict] = {}
+        for r in reason_list:
+            if isinstance(r, dict):
+                idx.setdefault(_reason_norm(r.get("reason") or ""), r)
+
+        seen = per_vendor_seen.setdefault(vk, set())
+        ids = per_vendor_ids.setdefault(vk, [])
+        for rt in reason_texts:
+            entry = idx.get(_reason_norm(rt))
+            if not entry:
+                continue
+            matched_reasons += 1
+            for x in (entry.get("review_ids") or []):
+                if isinstance(x, (int, str)) and str(x).isdigit():
+                    xi = int(x)
+                    if xi not in seen:
+                        seen.add(xi)
+                        ids.append(xi)
+
+    # Hydrate every collected id in one query (capped).
+    all_ids: list[int] = []
+    global_seen: set[int] = set()
+    for ids in per_vendor_ids.values():
+        for i in ids:
+            if i not in global_seen:
+                global_seen.add(i)
+                all_ids.append(i)
+    if len(all_ids) > max_reviews:
+        all_ids = all_ids[:max_reviews]
+    cap_set = set(all_ids)
+
+    by_id: dict[int, dict] = {}
+    if all_ids:
+        rows = (
+            await session.execute(
+                select(
+                    Review.id, Review.text, Review.rating, Review.author,
+                    Review.posted_at, Review.collected_at,
+                    Analysis.sentiment, Analysis.sentiment_score,
+                )
+                .join(Analysis, Analysis.review_id == Review.id, isouter=True)
+                .where(Review.id.in_(all_ids))
+            )
+        ).all()
+        for rid, text, rating, author, posted, collected, sent, sscore in rows:
+            s_key = sent.value if hasattr(sent, "value") else (str(sent) if sent else None)
+            by_id[int(rid)] = {
+                "id": int(rid),
+                "text": text or "",
+                "rating": int(rating) if rating is not None else None,
+                "author": author or "",
+                "posted_at": posted.isoformat() if posted else None,
+                "collected_at": collected.isoformat() if collected else None,
+                "sentiment": s_key,
+                "sentiment_score": int(sscore) if sscore is not None else None,
+            }
+
+    vendors_out: list[dict] = []
+    for vk, ids in per_vendor_ids.items():
+        revs = [by_id[i] for i in ids if i in cap_set and i in by_id]
+        if not revs:
+            continue
+        vendors_out.append({
+            "key": vk,
+            "display": vendor_display.get(vk, vk),
+            "review_count": len(revs),
+            "reviews": revs,
+        })
+    vendors_out.sort(key=lambda v: -v["review_count"])
+
+    return {
+        "vendors": vendors_out,
+        "total_reviews": len(by_id),
+        "matched_reasons": matched_reasons,
+        "missing_cards": missing_cards,
+    }
+
+
 # ----------------------------------------------------------------------------
 # Saved-card CRUD (mirrors the v2 pattern)
 # ----------------------------------------------------------------------------

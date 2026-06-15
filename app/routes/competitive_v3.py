@@ -24,6 +24,7 @@ from app.db import get_session
 from app.services.competitive_v3 import (
     build_categorized_view,
     categorize_reasons_with_llm,
+    criterion_reviews,
     delete_v3_card,
     export_categorized_xlsx,
     get_v3_card,
@@ -390,6 +391,31 @@ async def competitive_v3_criteria_suggest(
     lang = getattr(request.state, "lang", "ko")
     try:
         return await suggest_criteria_with_llm(categories, lang=lang)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, str(e))
+
+
+@router.post("/competitive-v3/criterion-reviews")
+async def competitive_v3_criterion_reviews(
+    descriptors_json: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """Aggregate reviews for one competitive criterion, grouped by vendor.
+
+    The browser flattens the criterion's member categories into a list of
+    reason descriptors (from the per-category drill-down buttons) and
+    POSTs them here. Read-only — chases the saved VendorReasonCards and
+    hydrates their review_ids. No LLM call."""
+    try:
+        descriptors = json.loads(descriptors_json)
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, f"invalid descriptors payload: {e}")
+    if not isinstance(descriptors, list):
+        raise HTTPException(422, "descriptors must be a list")
+    if len(descriptors) > 5000:
+        descriptors = descriptors[:5000]
+    try:
+        return await criterion_reviews(session, descriptors=descriptors)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, str(e))
 
