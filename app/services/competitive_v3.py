@@ -1235,34 +1235,49 @@ async def criterion_reviews(
     max_reviews: int = 2000,
 ) -> dict:
     """Aggregate reviews for a whole competitive criterion, grouped by
-    vendor.
+    the criterion's member CATEGORY and then by VENDOR.
 
     A criterion bundles several v3 AI categories; each category has, per
     vendor, a set of reasons. `descriptors` is the flattened list of
     those reasons (collected client-side from the per-category drill-down
     buttons), each:
-      {vendor_key, vendor_display, category_name, band, reason_text}
+      {top_category, vendor_key, vendor_display, category_name, band, reason_text}
+    where `top_category` is the v3 AI category (criterion member) the
+    reason was assigned to, and `category_name` is the vendor's own
+    strength/weakness category used to chase the saved VendorReasonCard.
 
     For every distinct (vendor_key, category_name, band) we chase the
     saved VendorReasonCard (same lookup as reason_reviews), match the
-    requested reason texts inside it, union their review_ids per vendor
-    (dedup across categories/reasons), then hydrate once from the DB.
+    requested reason texts inside it, then bucket the review_ids by
+    (top_category, vendor) — deduped within each bucket. One hydrate
+    query at the end.
 
     Returns:
       {
-        "vendors": [
-          {key, display, review_count, reviews: [ {id, text, ...}, ... ]},
-          ...   # sorted by review_count desc
+        "categories": [
+          {
+            "name": str,                 # the AI category (criterion member)
+            "review_count": int,         # displayed reviews in this category
+            "vendors": [
+              {key, display, review_count, reviews: [ {id, text, ...}, ... ]},
+              ...                        # sorted by review_count desc
+            ]
+          },
+          ...                            # in the order they first appear
         ],
-        "total_reviews": int,        # deduped across vendors' own sets
+        "total_reviews": int,            # distinct reviews hydrated
         "matched_reasons": int,
-        "missing_cards": int,        # (vendor,cat,band) with no saved card
+        "missing_cards": int,            # (vendor,cat,band) with no saved card
       }
     """
     from collections import defaultdict
 
-    grouped: dict[tuple[str, str, str], list[str]] = defaultdict(list)
+    # Group reasons by the VendorReasonCard lookup key; remember each
+    # reason's owning top_category so results can be re-grouped.
+    card_groups: dict[tuple[str, str, str], list[tuple[str, str]]] = defaultdict(list)
     vendor_display: dict[str, str] = {}
+    top_order: list[str] = []
+    top_seen: set[str] = set()
     for d in descriptors or []:
         if not isinstance(d, dict):
             continue
@@ -1274,16 +1289,21 @@ async def criterion_reviews(
         rt = (d.get("reason_text") or "").strip()
         if not vk or not cat or not rt:
             continue
-        grouped[(vk, cat.lower(), band)].append(rt)
+        top = (d.get("top_category") or "").strip() or cat
+        card_groups[(vk, cat.lower(), band)].append((rt, top))
         if vk not in vendor_display and (d.get("vendor_display") or "").strip():
             vendor_display[vk] = d["vendor_display"].strip()
+        if top not in top_seen:
+            top_seen.add(top)
+            top_order.append(top)
 
-    per_vendor_ids: dict[str, list[int]] = {}
-    per_vendor_seen: dict[str, set[int]] = {}
+    # (top_category, vendor_key) → ordered unique review ids.
+    bucket_ids: dict[tuple[str, str], list[int]] = defaultdict(list)
+    bucket_seen: dict[tuple[str, str], set[int]] = defaultdict(set)
     matched_reasons = 0
     missing_cards = 0
 
-    for (vk, cat_lower, band), reason_texts in grouped.items():
+    for (vk, cat_lower, band), items in card_groups.items():
         cards = (
             await session.execute(
                 select(VendorReasonCard)
@@ -1312,13 +1332,14 @@ async def criterion_reviews(
             if isinstance(r, dict):
                 idx.setdefault(_reason_norm(r.get("reason") or ""), r)
 
-        seen = per_vendor_seen.setdefault(vk, set())
-        ids = per_vendor_ids.setdefault(vk, [])
-        for rt in reason_texts:
+        for rt, top in items:
             entry = idx.get(_reason_norm(rt))
             if not entry:
                 continue
             matched_reasons += 1
+            key = (top, vk)
+            seen = bucket_seen[key]
+            ids = bucket_ids[key]
             for x in (entry.get("review_ids") or []):
                 if isinstance(x, (int, str)) and str(x).isdigit():
                     xi = int(x)
@@ -1329,7 +1350,7 @@ async def criterion_reviews(
     # Hydrate every collected id in one query (capped).
     all_ids: list[int] = []
     global_seen: set[int] = set()
-    for ids in per_vendor_ids.values():
+    for ids in bucket_ids.values():
         for i in ids:
             if i not in global_seen:
                 global_seen.add(i)
@@ -1364,21 +1385,37 @@ async def criterion_reviews(
                 "sentiment_score": int(sscore) if sscore is not None else None,
             }
 
-    vendors_out: list[dict] = []
-    for vk, ids in per_vendor_ids.items():
-        revs = [by_id[i] for i in ids if i in cap_set and i in by_id]
-        if not revs:
+    # Assemble categories → vendors in first-seen category order.
+    cats_acc: dict[str, dict[str, list[int]]] = defaultdict(dict)
+    for (top, vk), ids in bucket_ids.items():
+        cats_acc[top][vk] = ids
+    categories_out: list[dict] = []
+    for top in top_order:
+        vmap = cats_acc.get(top)
+        if not vmap:
             continue
-        vendors_out.append({
-            "key": vk,
-            "display": vendor_display.get(vk, vk),
-            "review_count": len(revs),
-            "reviews": revs,
+        vendors: list[dict] = []
+        for vk, ids in vmap.items():
+            revs = [by_id[i] for i in ids if i in cap_set and i in by_id]
+            if not revs:
+                continue
+            vendors.append({
+                "key": vk,
+                "display": vendor_display.get(vk, vk),
+                "review_count": len(revs),
+                "reviews": revs,
+            })
+        if not vendors:
+            continue
+        vendors.sort(key=lambda v: -v["review_count"])
+        categories_out.append({
+            "name": top,
+            "review_count": sum(v["review_count"] for v in vendors),
+            "vendors": vendors,
         })
-    vendors_out.sort(key=lambda v: -v["review_count"])
 
     return {
-        "vendors": vendors_out,
+        "categories": categories_out,
         "total_reviews": len(by_id),
         "matched_reasons": matched_reasons,
         "missing_cards": missing_cards,
