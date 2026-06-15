@@ -194,6 +194,53 @@ async def test_criterion_reviews_no_card_uses_file_counts(app_client):
 
 
 @pytest.mark.asyncio
+async def test_criterion_reviews_sorted_by_feedback_desc(app_client):
+    """Vendors rank by feedback_total desc even when the bigger number
+    has no raw review bodies (no saved card)."""
+    from app.db import AsyncSessionLocal
+    from app.models import Review, Source, SourceType, VendorReasonCard
+
+    async with AsyncSessionLocal() as s:
+        src = Source(type=SourceType.web, label="t4", config={})
+        s.add(src)
+        await s.flush()
+        # Small vendor WITH review bodies (2 reviews, count 2).
+        small_ids = []
+        for i in range(1, 3):
+            rv = Review(source_id=src.id, external_id=f"w{i}", text=f"x{i}",
+                        posted_at=datetime(2024, 1, 1))
+            s.add(rv)
+            await s.flush()
+            small_ids.append(rv.id)
+        s.add(VendorReasonCard(
+            vendor_key="small", vendor_display="Small", category_name="가격",
+            band="positive", label="가격", sample_size=2, source_ids_snapshot=[src.id],
+            reasons=[{"reason": "저렴함", "count": 2, "examples": [], "review_ids": small_ids}],
+        ))
+        await s.commit()
+
+    descriptors = [
+        # Big number, NO card → bodies absent but count 30.
+        {"top_category": "무료·가격 가치", "vendor_key": "big", "vendor_display": "Big",
+         "category_name": "가격", "band": "positive", "reason_text": "가성비 최고", "count": 30},
+        # Small number, WITH bodies.
+        {"top_category": "무료·가격 가치", "vendor_key": "small", "vendor_display": "Small",
+         "category_name": "가격", "band": "positive", "reason_text": "저렴함", "count": 2},
+    ]
+    r = await app_client.post(
+        "/competitive-v3/criterion-reviews",
+        data={"descriptors_json": json.dumps(descriptors)},
+    )
+    data = r.json()
+    vendors = data["categories"][0]["vendors"]
+    # Big (30, no bodies) ranks above Small (2, with bodies).
+    assert [v["display"] for v in vendors] == ["Big", "Small"]
+    assert [v["feedback_total"] for v in vendors] == [30, 2]
+    assert vendors[0]["review_count"] == 0
+    assert vendors[1]["review_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_criterion_reviews_bad_payload(app_client):
     r = await app_client.post(
         "/competitive-v3/criterion-reviews",

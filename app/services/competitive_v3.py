@@ -1269,10 +1269,10 @@ async def criterion_reviews(
             "vendors": [
               {key, display, review_count, reason_count, feedback_total,
                reasons: [{text, count}], reviews: [{id, text, ...}]},
-              ...                        # reviews-first, then feedback weight
+              ...                        # by feedback_total desc
             ]
           },
-          ...                            # in the order they first appear
+          ...                            # by feedback_total desc
         ],
         "total_reviews": int,            # distinct review bodies hydrated
         "total_feedback": int,           # Σ feedback_total across categories
@@ -1462,10 +1462,10 @@ async def criterion_reviews(
             })
         if not vendors:
             continue
-        # Reviews-first, then by total feedback weight, so feedback-only
-        # vendors sort after those with real reviews but still show.
+        # Sort by the summable number (feedback_total) desc — review
+        # bodies aren't required to rank. review_count is the tiebreak.
         vendors.sort(
-            key=lambda v: (-v["review_count"], -v["feedback_total"])
+            key=lambda v: (-v["feedback_total"], -v["review_count"])
         )
         categories_out.append({
             "name": top,
@@ -1474,6 +1474,10 @@ async def criterion_reviews(
             "feedback_total": sum(v["feedback_total"] for v in vendors),
             "vendors": vendors,
         })
+
+    # Categories ranked by their summable feedback total, desc. Stable
+    # sort keeps first-seen order for ties.
+    categories_out.sort(key=lambda c: -c["feedback_total"])
 
     return {
         "categories": categories_out,
