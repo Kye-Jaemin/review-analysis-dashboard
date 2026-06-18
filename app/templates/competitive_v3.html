@@ -115,10 +115,10 @@
 
 {# ========== Review popup (single global) ========== #}
 <div id="v3-reviews-modal"
-     class="fixed inset-0 z-50 hidden bg-black/50 flex items-center justify-center p-4"
+     class="v3-modal-backdrop fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
      onclick="if (event.target === this) v3CloseReviews()">
-  <div class="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-    <div class="px-5 py-3 border-b flex items-center gap-2 shrink-0">
+  <div class="v3-modal-panel bg-white rounded-2xl shadow-2xl ring-1 ring-indigo-100 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div class="px-5 py-3 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 flex items-center gap-2 shrink-0">
       <span class="text-base">💬</span>
       <div class="flex-1 min-w-0">
         <div class="text-xs text-gray-500" id="v3-reviews-vendor-line"></div>
@@ -138,6 +138,55 @@
   .htmx-request .htmx-indicator { display: flex; }
   .htmx-request.htmx-indicator { display: flex; }
   #v3-drop-zone.is-dragover { border-color: #2563eb; background-color: #eff6ff; }
+
+  /* ---- Competitive-criteria mapping: flashy UX ---- */
+  @keyframes v3-fade-up { from { opacity:0; transform: translateY(12px) scale(.97); } to { opacity:1; transform:none; } }
+  @keyframes v3-modal-in { from { opacity:0; transform: translateY(10px) scale(.96); } to { opacity:1; transform:none; } }
+  @keyframes v3-backdrop-in { from { opacity:0; } to { opacity:1; } }
+  @keyframes v3-shimmer { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+
+  .v3-crit-card { transition: transform .22s cubic-bezier(.22,1,.36,1), box-shadow .22s ease; will-change: transform; }
+  .v3-crit-card:hover { transform: translateY(-4px); box-shadow: 0 18px 36px -16px rgba(99,102,241,.55); }
+  .v3-crit-card.v3-enter { animation: v3-fade-up .5s cubic-bezier(.22,1,.36,1) both; }
+
+  .v3-share-track { background: rgba(99,102,241,.14); border-radius: 999px; height: 6px; overflow: hidden; }
+  .v3-share-fill {
+    height: 100%; border-radius: 999px; width: 0;
+    background: linear-gradient(90deg,#6366f1,#a855f7,#ec4899,#a855f7,#6366f1);
+    background-size: 200% 100%;
+    transition: width .9s cubic-bezier(.22,1,.36,1);
+    animation: v3-shimmer 3.5s linear infinite;
+  }
+  .v3-chip { transition: transform .15s ease, background-color .15s ease; }
+  .v3-chip:hover { transform: translateX(3px); }
+
+  .v3-ai-btn {
+    background-image: linear-gradient(90deg,#4f46e5,#7c3aed,#db2777,#7c3aed,#4f46e5);
+    background-size: 200% 100%;
+    animation: v3-shimmer 5s linear infinite;
+    transition: filter .2s ease, transform .2s ease, box-shadow .2s ease;
+    box-shadow: 0 6px 16px -6px rgba(124,58,237,.6);
+  }
+  .v3-ai-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  .v3-ai-btn:disabled { animation: v3-shimmer 1.1s linear infinite; opacity: .85; cursor: progress; }
+
+  .v3-reviews-btn { transition: filter .2s ease, transform .2s ease, box-shadow .2s ease; }
+  .v3-reviews-btn:hover { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 10px 22px -10px rgba(99,102,241,.7); }
+
+  .v3-modal-backdrop:not(.hidden) { animation: v3-backdrop-in .2s ease; }
+  .v3-modal-panel { animation: v3-modal-in .3s cubic-bezier(.22,1,.36,1); }
+
+  .v3-grad-text {
+    background-image: linear-gradient(90deg,#4338ca,#7c3aed,#be185d);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .v3-crit-card, .v3-crit-card.v3-enter, .v3-modal-panel, .v3-modal-backdrop:not(.hidden),
+    .v3-share-fill, .v3-ai-btn, .v3-reviews-btn, .v3-chip {
+      animation: none !important; transition: none !important;
+    }
+  }
 </style>
 
 <script>
@@ -411,7 +460,7 @@ function v3InitCriteria() {
     totalReviews: data.total_reviews || 0,
     cardId: data.card_id || null,
   };
-  v3RenderCriteria();
+  v3RenderCriteria(true);
 }
 
 function v3FindGroup(name) {
@@ -430,7 +479,23 @@ function v3CleanupGroups() {
   );
 }
 
-function v3RenderCriteria() {
+// Count a number up from 0 → target (eased). No-op-to-final when motion
+// is reduced or animation is off.
+function v3CountUp(el, target, animate) {
+  const fmt = n => Math.round(n).toLocaleString();
+  if (!animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = fmt(target);
+    return;
+  }
+  const dur = 650, t0 = performance.now();
+  (function step(t) {
+    const p = Math.min(1, (t - t0) / dur);
+    el.textContent = fmt(target * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) requestAnimationFrame(step);
+  })(performance.now());
+}
+
+function v3RenderCriteria(animate) {
   const wrap = document.getElementById('v3-criteria-cards');
   const empty = document.getElementById('v3-criteria-empty');
   if (!wrap || !v3CritState) return;
@@ -441,10 +506,19 @@ function v3RenderCriteria() {
     return;
   }
   if (empty) empty.style.display = 'none';
-  wrap.innerHTML = groups.map(g => v3CritCardHtml(g)).join('');
+  wrap.innerHTML = groups.map((g, i) => v3CritCardHtml(g, i, animate)).join('');
+  // After insertion: fill the share bars (CSS-transitioned) + run count-ups.
+  requestAnimationFrame(() => {
+    wrap.querySelectorAll('.v3-share-fill').forEach(el => {
+      el.style.width = (el.dataset.share || '0') + '%';
+    });
+    wrap.querySelectorAll('[data-countup]').forEach(el => {
+      v3CountUp(el, parseFloat(el.dataset.countup) || 0, animate);
+    });
+  });
 }
 
-function v3CritCardHtml(g) {
+function v3CritCardHtml(g, idx, animate) {
   const stats = v3CritState.catStats;
   let reviews = 0;
   const vkeys = new Set();
@@ -470,45 +544,60 @@ function v3CritCardHtml(g) {
       opts += '<option value="__UNASSIGNED__">→ ' + V3_UNASSIGNED + '</option>';
     }
     opts += '<option value="__NEW__">＋ {% if lang == "ko" %}새 기준…{% else %}new criterion…{% endif %}</option>';
-    return '<li class="flex items-center gap-1.5 py-0.5">' +
+    return '<li class="v3-chip flex items-center gap-1.5 py-1 px-1.5 rounded-lg hover:bg-white/70">' +
+      '<span class="w-1.5 h-1.5 rounded-full shrink-0 bg-gradient-to-r ' +
+        (isUnassigned ? 'from-amber-400 to-orange-400' : 'from-indigo-400 to-fuchsia-400') + '"></span>' +
       '<span class="flex-1 min-w-0 text-[13px] text-gray-800 truncate" title="' + escapeHtml(n) + '">' + escapeHtml(n) + '</span>' +
       '<span class="text-[10px] text-gray-400 tabular-nums shrink-0">' + (s.review_count || 0).toLocaleString() + '</span>' +
       '<select data-cat="' + escapeHtml(n) + '" onchange="v3MoveCategory(this)" ' +
-        'class="text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white shrink-0">' + opts + '</select>' +
+        'class="text-[11px] border border-gray-200 rounded-md px-1 py-0.5 bg-white/80 shrink-0 hover:border-indigo-300 focus:ring-1 focus:ring-indigo-300 outline-none">' + opts + '</select>' +
       '</li>';
   }).join('');
 
+  const iconChip = isUnassigned
+    ? '<span class="shrink-0 w-6 h-6 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center text-[13px] shadow-sm">📥</span>'
+    : '<span class="shrink-0 w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-[13px] shadow-sm">🧭</span>';
   const header =
-    '<div class="flex items-center gap-1.5 mb-1.5">' +
-      '<span class="text-base shrink-0">' + (isUnassigned ? '📥' : '🧭') + '</span>' +
-      '<span class="flex-1 min-w-0 text-sm font-semibold text-gray-900 truncate" title="' + nameEsc + '">' + nameEsc + '</span>' +
+    '<div class="flex items-center gap-2 mb-1.5">' +
+      iconChip +
+      '<span class="flex-1 min-w-0 text-sm font-bold truncate ' + (isUnassigned ? 'text-amber-700' : 'v3-grad-text') + '" title="' + nameEsc + '">' + nameEsc + '</span>' +
       (isUnassigned ? '' :
         '<button type="button" data-crit="' + nameEsc + '" onclick="v3RenameCriterion(this)" ' +
-          'class="text-[11px] text-gray-400 hover:text-gray-700 px-1" title="{% if lang == "ko" %}이름 변경{% else %}Rename{% endif %}">✏️</button>' +
+          'class="text-[11px] text-gray-400 hover:text-indigo-600 hover:scale-110 transition px-0.5" title="{% if lang == "ko" %}이름 변경{% else %}Rename{% endif %}">✏️</button>' +
         '<button type="button" data-crit="' + nameEsc + '" onclick="v3DeleteCriterion(this)" ' +
-          'class="text-[11px] text-rose-400 hover:text-rose-700 px-1" title="{% if lang == "ko" %}삭제 (소속은 미분류로){% else %}Delete (members → unassigned){% endif %}">🗑️</button>') +
+          'class="text-[11px] text-rose-400 hover:text-rose-600 hover:scale-110 transition px-0.5" title="{% if lang == "ko" %}삭제 (소속은 미분류로){% else %}Delete (members → unassigned){% endif %}">🗑️</button>') +
     '</div>';
 
   const statline =
-    '<div class="text-[10px] text-gray-500 mb-2 flex flex-wrap gap-x-2 tabular-nums">' +
-      '<span>{% if lang == "ko" %}리뷰{% else %}reviews{% endif %} <b class="text-indigo-700">' + reviews.toLocaleString() + '</b></span>' +
-      '<span>· <b class="text-indigo-700">' + share.toFixed(1) + '%</b></span>' +
-      '<span>· {% if lang == "ko" %}카테고리{% else %}cats{% endif %} ' + g.categories.length + '</span>' +
-      '<span>· {% if lang == "ko" %}업체{% else %}vendors{% endif %} ' + vkeys.size + '</span>' +
+    '<div class="flex items-end justify-between mb-1 tabular-nums">' +
+      '<div class="text-xl font-extrabold ' + (isUnassigned ? 'text-amber-600' : 'v3-grad-text') + '">' +
+        '<span data-countup="' + reviews + '">0</span>' +
+        '<span class="text-[10px] font-medium text-gray-400 ml-1">{% if lang == "ko" %}리뷰{% else %}reviews{% endif %}</span></div>' +
+      '<div class="text-[11px] font-semibold ' + (isUnassigned ? 'text-amber-600' : 'text-indigo-600') + '">' + share.toFixed(1) + '%</div>' +
+    '</div>' +
+    '<div class="v3-share-track mb-2"><div class="v3-share-fill" data-share="' + share.toFixed(2) + '"></div></div>' +
+    '<div class="text-[10px] text-gray-500 mb-2 flex gap-x-2 tabular-nums">' +
+      '<span>{% if lang == "ko" %}카테고리{% else %}cats{% endif %} <b class="text-gray-700">' + g.categories.length + '</b></span>' +
+      '<span>· {% if lang == "ko" %}업체{% else %}vendors{% endif %} <b class="text-gray-700">' + vkeys.size + '</b></span>' +
     '</div>';
 
   const body = g.categories.length
-    ? '<ul class="divide-y divide-gray-100">' + catRows + '</ul>'
+    ? '<ul class="space-y-0.5">' + catRows + '</ul>'
     : '<div class="text-[11px] text-gray-400 italic py-1">{% if lang == "ko" %}비어 있음 — 다른 카드에서 카테고리를 이동하세요{% else %}empty — move categories here{% endif %}</div>';
 
   const reviewsBtn = g.categories.length
     ? '<button type="button" data-crit="' + nameEsc + '" onclick="v3CriterionReviews(this)" ' +
-        'class="mt-2 w-full text-[11px] font-medium text-indigo-700 border border-indigo-200 hover:bg-indigo-100/60 rounded px-2 py-1.5">' +
+        'class="v3-reviews-btn mt-2.5 w-full text-[11px] font-semibold text-white rounded-lg px-2 py-1.5 shadow-sm bg-gradient-to-r ' +
+        (isUnassigned ? 'from-amber-500 to-orange-500' : 'from-indigo-600 to-purple-600') + '">' +
         '👁 {% if lang == "ko" %}이 기준의 업체별 리뷰 보기{% else %}View reviews by vendor{% endif %}</button>'
     : '';
 
-  return '<div class="border rounded-lg p-3 ' +
-    (isUnassigned ? 'border-amber-200 bg-amber-50/40' : 'border-indigo-200 bg-indigo-50/30') + '">' +
+  const delay = animate ? (' style="animation-delay:' + (idx * 70) + 'ms"') : '';
+  const enter = animate ? ' v3-enter' : '';
+  const surface = isUnassigned
+    ? 'border-amber-200/70 bg-gradient-to-br from-white/85 to-amber-50/70'
+    : 'border-indigo-200/70 bg-gradient-to-br from-white/85 to-indigo-50/70';
+  return '<div class="v3-crit-card' + enter + ' rounded-xl p-3 border backdrop-blur-sm shadow-sm ' + surface + '"' + delay + '>' +
     header + statline + body + reviewsBtn + '</div>';
 }
 
@@ -623,7 +712,7 @@ async function v3SuggestCriteria(btn) {
     const leftovers = Object.keys(v3CritState.catStats).filter(n => !seen.has(n));
     if (leftovers.length) groups.push({ name: V3_UNASSIGNED, categories: leftovers });
     v3CritState.groups = groups;
-    v3RenderCriteria();
+    v3RenderCriteria(true);
   } catch (e) {
     alert(String(e));
   } finally {
