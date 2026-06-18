@@ -91,7 +91,7 @@
       }) %}
     {% endfor %}
     <script type="application/json" id="v3-criteria-data">
-      {{ {"categories": crit_cats, "total_reviews": result.totals.reviews, "criteria": result._criteria, "card_id": result._card_id}|tojson|safe }}
+      {{ {"categories": crit_cats, "total_reviews": result.totals.reviews, "criteria": result._criteria, "card_id": result._card_id, "matrix": result.matrix}|tojson|safe }}
     </script>
 
     {# ====== Competitive criteria mapping ====== #}
@@ -127,6 +127,22 @@
           {% else %}
             No criteria yet. Click <b>🤖 AI auto-group</b> to bucket the categories above into criteria.
           {% endif %}
+        </div>
+
+        {# ---- Visualization panel (Chart.js + HTML heatmap) ---- #}
+        <div id="v3-viz" class="mt-4 border-t border-indigo-100 pt-3" style="display:none">
+          <div class="flex items-center gap-1.5 flex-wrap mb-3">
+            <span class="text-xs font-bold v3-grad-text mr-1">📊 {% if lang == 'ko' %}시각화{% else %}Visualize{% endif %}</span>
+            <button type="button" class="v3-viz-tab" data-viz="radar"   onclick="v3VizSwitch(this)">🕸️ {% if lang == 'ko' %}레이더{% else %}Radar{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="heatmap" onclick="v3VizSwitch(this)">🔥 {% if lang == 'ko' %}기준×벤더{% else %}Heatmap{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="doughnut" onclick="v3VizSwitch(this)">🍩 {% if lang == 'ko' %}기준 비중{% else %}Doughnut{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="stacked" onclick="v3VizSwitch(this)">📚 {% if lang == 'ko' %}구성{% else %}Stacked{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="treemap" onclick="v3VizSwitch(this)">🗂️ {% if lang == 'ko' %}트리맵{% else %}Treemap{% endif %}</button>
+          </div>
+          <div id="v3-viz-body" class="relative" style="min-height:300px"></div>
+          <div class="text-[10px] text-gray-400 mt-1">
+            {% if lang == 'ko' %}숫자는 리뷰 수(벤더×카테고리 매트릭스 합계) 기준입니다.{% else %}Numbers are review counts (vendor×category matrix totals).{% endif %}
+          </div>
         </div>
       </div>
     </div>
