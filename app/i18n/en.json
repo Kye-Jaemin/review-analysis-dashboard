@@ -7,10 +7,10 @@
     "dashboard": "Dashboard",
     "sources": "Review collection",
     "categories": "Manual categories",
-    "analyze": "Classification & sentiment",
+    "analyze": "Review analysis trigger",
     "reviews": "All reviews",
     "vendors": "Vendor strengths/weaknesses",
-    "competitive_v3": "Competitive analysis",
+    "competitive_v3": "Advanced competitive analysis",
     "howto": "How to use"
   },
   "common": {

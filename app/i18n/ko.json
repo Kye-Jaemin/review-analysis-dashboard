@@ -7,10 +7,10 @@
     "dashboard": "대시보드",
     "sources": "리뷰 수집",
     "categories": "수동 카테고리",
-    "analyze": "리뷰 분류 및 긍부정 평가",
+    "analyze": "리뷰 분석 Trigger",
     "reviews": "전체 리뷰 보기",
     "vendors": "업체 강/약점 분석",
-    "competitive_v3": "경쟁력 분석",
+    "competitive_v3": "경쟁력 심화 분석",
     "howto": "사용법"
   },
   "common": {

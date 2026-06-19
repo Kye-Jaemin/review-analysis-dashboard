@@ -77,92 +77,6 @@
       <span>{% if lang == 'ko' %}카테고리{% else %}categories{% endif %} <b class="text-blue-700">{{ result.totals.categories }}</b></span>
     </div>
 
-    {# Data for the competitive-criteria mapping UI. Emitted for BOTH
-       fresh uploads and loaded saved cards (unlike v3-payload, which is
-       fresh-upload only) so the section hydrates in either case. JS in
-       competitive_v3.html reads this on htmx:afterSwap. #}
-    {% set crit_cats = [] %}
-    {% for c in result.categories %}
-      {% set _ = crit_cats.append({
-        "name": c.name,
-        "review_count": c.review_count,
-        "vendor_count": c.vendors|length,
-        "vendor_keys": c.vendors|map(attribute='key')|list,
-      }) %}
-    {% endfor %}
-    <script type="application/json" id="v3-criteria-data">
-      {{ {"categories": crit_cats, "total_reviews": result.totals.reviews, "criteria": result._criteria, "card_id": result._card_id, "matrix": result.matrix}|tojson|safe }}
-    </script>
-
-    {# ====== Competitive criteria mapping (collapsed by default) ====== #}
-    <div class="border border-indigo-200/70 rounded-xl shadow-sm overflow-hidden bg-white">
-      <div class="px-4 py-3 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 flex items-center gap-2 flex-wrap">
-        <button type="button" onclick="v3CritToggle()" class="flex items-center gap-2 min-w-0 text-left group">
-          <span id="v3-crit-chevron" class="text-indigo-400 transition-transform duration-300 shrink-0">▸</span>
-          <span class="text-sm font-bold v3-grad-text shrink-0">
-            🧭 {% if lang == 'ko' %}경쟁력 기준 매핑{% else %}Competitive criteria mapping{% endif %}
-          </span>
-          <span class="text-[10px] text-gray-500 truncate hidden sm:inline">
-            {% if lang == 'ko' %}펼쳐서 AI 그룹화 · 조정 · 시각화{% else %}expand for AI group · adjust · visualize{% endif %}
-          </span>
-        </button>
-        <div class="ml-auto flex items-center gap-2">
-          <button type="button" onclick="v3SuggestCriteria(this)"
-                  class="v3-ai-btn px-3 py-1.5 text-white text-xs font-semibold rounded-lg">
-            🤖 {% if lang == 'ko' %}AI 자동 그룹화{% else %}AI auto-group{% endif %}
-          </button>
-          <button type="button" onclick="v3AddCriterion()"
-                  class="px-2.5 py-1.5 border border-gray-300 hover:bg-gray-50 hover:border-indigo-300 text-gray-700 text-xs font-medium rounded-lg transition">
-            ＋ {% if lang == 'ko' %}기준 추가{% else %}Add criterion{% endif %}
-          </button>
-          <button type="button" onclick="v3SaveCriteria(this)"
-                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg shadow-sm transition hover:-translate-y-0.5">
-            💾 {% if lang == 'ko' %}저장{% else %}Save{% endif %}
-          </button>
-        </div>
-      </div>
-      <div id="v3-crit-collapse" class="v3-collapse">
-       <div class="p-4">
-        <div id="v3-criteria-cards"
-             class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
-        <div id="v3-criteria-empty" class="text-sm text-gray-500 italic">
-          {% if lang == 'ko' %}
-            아직 경쟁력 기준이 없습니다. <b>🤖 AI 자동 그룹화</b>를 누르면 위 카테고리들을 상위 기준으로 묶어줍니다.
-          {% else %}
-            No criteria yet. Click <b>🤖 AI auto-group</b> to bucket the categories above into criteria.
-          {% endif %}
-        </div>
-
-        {# ---- Visualization panel (Chart.js + HTML heatmap) ---- #}
-        <div id="v3-viz" class="mt-4 border-t border-indigo-100 pt-3" style="display:none">
-          <div class="flex items-center gap-1.5 flex-wrap mb-3">
-            <span class="text-xs font-bold v3-grad-text mr-1">📊 {% if lang == 'ko' %}시각화{% else %}Visualize{% endif %}</span>
-            <button type="button" class="v3-viz-tab" data-viz="radar"   onclick="v3VizSwitch(this)">🕸️ {% if lang == 'ko' %}레이더{% else %}Radar{% endif %}</button>
-            <button type="button" class="v3-viz-tab" data-viz="heatmap" onclick="v3VizSwitch(this)">🔥 {% if lang == 'ko' %}기준×벤더{% else %}Heatmap{% endif %}</button>
-            <button type="button" class="v3-viz-tab" data-viz="doughnut" onclick="v3VizSwitch(this)">🍩 {% if lang == 'ko' %}기준 비중{% else %}Doughnut{% endif %}</button>
-            <button type="button" class="v3-viz-tab" data-viz="stacked" onclick="v3VizSwitch(this)">📚 {% if lang == 'ko' %}구성{% else %}Stacked{% endif %}</button>
-            <button type="button" class="v3-viz-tab" data-viz="treemap" onclick="v3VizSwitch(this)">🗂️ {% if lang == 'ko' %}트리맵{% else %}Treemap{% endif %}</button>
-            <span id="v3-viz-topn-wrap" class="ml-auto inline-flex items-center gap-1 text-[11px] text-gray-500" style="display:none">
-              {% if lang == 'ko' %}상위{% else %}Top{% endif %}
-              <select id="v3-viz-topn" onchange="v3VizTopNChange(this)"
-                      class="border border-gray-200 rounded-md px-1 py-0.5 bg-white text-[11px] hover:border-indigo-300 focus:ring-1 focus:ring-indigo-300 outline-none">
-                <option value="6">6</option>
-                <option value="8" selected>8</option>
-                <option value="12">12</option>
-                <option value="all">{% if lang == 'ko' %}전체{% else %}All{% endif %}</option>
-              </select>
-              {% if lang == 'ko' %}개 업체{% else %}vendors{% endif %}
-            </span>
-          </div>
-          <div id="v3-viz-body" class="relative" style="min-height:300px"></div>
-          <div id="v3-viz-caption" class="text-[10px] text-gray-400 mt-1">
-            {% if lang == 'ko' %}숫자는 리뷰 수(벤더×카테고리 매트릭스 합계) 기준입니다.{% else %}Numbers are review counts (vendor×category matrix totals).{% endif %}
-          </div>
-        </div>
-       </div>
-      </div>
-    </div>
-
     {# ====== 1. Category distribution table ====== #}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
       <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50">
@@ -354,6 +268,92 @@
         Clicking a reason fetches actual reviews from the saved reason card.
         If the card is missing or text doesn't match, a hint appears — re-analyze on /vendors.
       {% endif %}
+    </div>
+
+    {# Data for the competitive-criteria mapping UI. Emitted for BOTH
+       fresh uploads and loaded saved cards (unlike v3-payload, which is
+       fresh-upload only) so the section hydrates in either case. JS in
+       competitive_v3.html reads this on htmx:afterSwap. #}
+    {% set crit_cats = [] %}
+    {% for c in result.categories %}
+      {% set _ = crit_cats.append({
+        "name": c.name,
+        "review_count": c.review_count,
+        "vendor_count": c.vendors|length,
+        "vendor_keys": c.vendors|map(attribute='key')|list,
+      }) %}
+    {% endfor %}
+    <script type="application/json" id="v3-criteria-data">
+      {{ {"categories": crit_cats, "total_reviews": result.totals.reviews, "criteria": result._criteria, "card_id": result._card_id, "matrix": result.matrix}|tojson|safe }}
+    </script>
+
+    {# ====== Competitive criteria mapping (collapsed by default; bottom of page) ====== #}
+    <div class="border border-indigo-200/70 rounded-xl shadow-sm overflow-hidden bg-white">
+      <div class="px-4 py-3 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 flex items-center gap-2 flex-wrap">
+        <button type="button" onclick="v3CritToggle()" class="flex items-center gap-2 min-w-0 text-left group">
+          <span id="v3-crit-chevron" class="text-indigo-400 transition-transform duration-300 shrink-0">▸</span>
+          <span class="text-sm font-bold v3-grad-text shrink-0">
+            🧭 {% if lang == 'ko' %}경쟁력 기준 매핑{% else %}Competitive criteria mapping{% endif %}
+          </span>
+          <span class="text-[10px] text-gray-500 truncate hidden sm:inline">
+            {% if lang == 'ko' %}펼쳐서 AI 그룹화 · 조정 · 시각화{% else %}expand for AI group · adjust · visualize{% endif %}
+          </span>
+        </button>
+        <div class="ml-auto flex items-center gap-2">
+          <button type="button" onclick="v3SuggestCriteria(this)"
+                  class="v3-ai-btn px-3 py-1.5 text-white text-xs font-semibold rounded-lg">
+            🤖 {% if lang == 'ko' %}AI 자동 그룹화{% else %}AI auto-group{% endif %}
+          </button>
+          <button type="button" onclick="v3AddCriterion()"
+                  class="px-2.5 py-1.5 border border-gray-300 hover:bg-gray-50 hover:border-indigo-300 text-gray-700 text-xs font-medium rounded-lg transition">
+            ＋ {% if lang == 'ko' %}기준 추가{% else %}Add criterion{% endif %}
+          </button>
+          <button type="button" onclick="v3SaveCriteria(this)"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg shadow-sm transition hover:-translate-y-0.5">
+            💾 {% if lang == 'ko' %}저장{% else %}Save{% endif %}
+          </button>
+        </div>
+      </div>
+      <div id="v3-crit-collapse" class="v3-collapse">
+       <div class="p-4">
+        <div id="v3-criteria-cards"
+             class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+        <div id="v3-criteria-empty" class="text-sm text-gray-500 italic">
+          {% if lang == 'ko' %}
+            아직 경쟁력 기준이 없습니다. <b>🤖 AI 자동 그룹화</b>를 누르면 위 카테고리들을 상위 기준으로 묶어줍니다.
+          {% else %}
+            No criteria yet. Click <b>🤖 AI auto-group</b> to bucket the categories above into criteria.
+          {% endif %}
+        </div>
+
+        {# ---- Visualization panel (Chart.js + HTML heatmap) ---- #}
+        <div id="v3-viz" class="mt-4 border-t border-indigo-100 pt-3" style="display:none">
+          <div class="flex items-center gap-1.5 flex-wrap mb-3">
+            <span class="text-xs font-bold v3-grad-text mr-1">📊 {% if lang == 'ko' %}시각화{% else %}Visualize{% endif %}</span>
+            <button type="button" class="v3-viz-tab" data-viz="radar"   onclick="v3VizSwitch(this)">🕸️ {% if lang == 'ko' %}레이더{% else %}Radar{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="heatmap" onclick="v3VizSwitch(this)">🔥 {% if lang == 'ko' %}기준×벤더{% else %}Heatmap{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="doughnut" onclick="v3VizSwitch(this)">🍩 {% if lang == 'ko' %}기준 비중{% else %}Doughnut{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="stacked" onclick="v3VizSwitch(this)">📚 {% if lang == 'ko' %}구성{% else %}Stacked{% endif %}</button>
+            <button type="button" class="v3-viz-tab" data-viz="treemap" onclick="v3VizSwitch(this)">🗂️ {% if lang == 'ko' %}트리맵{% else %}Treemap{% endif %}</button>
+            <span id="v3-viz-topn-wrap" class="ml-auto inline-flex items-center gap-1 text-[11px] text-gray-500" style="display:none">
+              {% if lang == 'ko' %}상위{% else %}Top{% endif %}
+              <select id="v3-viz-topn" onchange="v3VizTopNChange(this)"
+                      class="border border-gray-200 rounded-md px-1 py-0.5 bg-white text-[11px] hover:border-indigo-300 focus:ring-1 focus:ring-indigo-300 outline-none">
+                <option value="6">6</option>
+                <option value="8" selected>8</option>
+                <option value="12">12</option>
+                <option value="all">{% if lang == 'ko' %}전체{% else %}All{% endif %}</option>
+              </select>
+              {% if lang == 'ko' %}개 업체{% else %}vendors{% endif %}
+            </span>
+          </div>
+          <div id="v3-viz-body" class="relative" style="min-height:300px"></div>
+          <div id="v3-viz-caption" class="text-[10px] text-gray-400 mt-1">
+            {% if lang == 'ko' %}숫자는 리뷰 수(벤더×카테고리 매트릭스 합계) 기준입니다.{% else %}Numbers are review counts (vendor×category matrix totals).{% endif %}
+          </div>
+        </div>
+       </div>
+      </div>
     </div>
   </div>
 
