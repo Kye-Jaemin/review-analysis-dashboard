@@ -931,7 +931,9 @@ function v3RenderCriterionReviews(data) {
 // ============================================================
 const V3_PALETTE = ['#6366f1','#ec4899','#10b981','#f59e0b','#06b6d4','#a855f7','#ef4444','#84cc16','#3b82f6','#f43f5e','#14b8a6','#eab308'];
 function v3Color(i) { return V3_PALETTE[i % V3_PALETTE.length]; }
-const v3VizState = { tab: 'radar', chart: null };
+const v3VizState = { tab: 'radar', chart: null, topN: 8 };
+function v3TopN() { return v3VizState.topN === 'all' ? Infinity : (parseInt(v3VizState.topN, 10) || 8); }
+function v3VizTopNChange(sel) { v3VizState.topN = sel.value === 'all' ? 'all' : parseInt(sel.value, 10); v3VizRefresh(); }
 
 // ---- Collapsible criteria section (collapsed by default) ----
 function v3CritIsOpen() {
@@ -1025,6 +1027,11 @@ function v3VizDestroy() {
 }
 function v3VizActivate(tab) {
   document.querySelectorAll('.v3-viz-tab').forEach(b => b.classList.toggle('active', b.dataset.viz === tab));
+  // The Top-N selector only affects the per-vendor charts.
+  const wrap = document.getElementById('v3-viz-topn-wrap');
+  if (wrap) wrap.style.display = (tab === 'radar' || tab === 'stacked') ? '' : 'none';
+  const sel = document.getElementById('v3-viz-topn');
+  if (sel) sel.value = String(v3VizState.topN);
 }
 
 function v3VizDoughnut(agg) {
@@ -1040,8 +1047,8 @@ function v3VizDoughnut(agg) {
 }
 function v3VizRadar(agg) {
   const c = v3VizCanvas();
-  const N = 8;
-  const topV = agg.vendors.slice(0, N);
+  const N = v3TopN();
+  const topV = isFinite(N) ? agg.vendors.slice(0, N) : agg.vendors.slice();
   const icons = v3VendorIconMap();
   v3VizState.chart = new Chart(c, {
     type: 'radar',
@@ -1059,8 +1066,8 @@ function v3VizRadar(agg) {
 }
 function v3VizStacked(agg) {
   const c = v3VizCanvas();
-  const N = 10;
-  const topV = agg.vendors.slice(0, N);
+  const N = v3TopN();
+  const topV = isFinite(N) ? agg.vendors.slice(0, N) : agg.vendors.slice();
   const icons = v3VendorIconMap();
   const topKeys = new Set(topV.map(v => v.key));
   const datasets = topV.map((v, i) => ({ label: v.display, data: agg.criteria.map(cr => cr.vendorCounts[v.key] || 0), backgroundColor: v3Color(i) }));

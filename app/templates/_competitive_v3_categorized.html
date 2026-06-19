@@ -142,6 +142,17 @@
             <button type="button" class="v3-viz-tab" data-viz="doughnut" onclick="v3VizSwitch(this)">🍩 {% if lang == 'ko' %}기준 비중{% else %}Doughnut{% endif %}</button>
             <button type="button" class="v3-viz-tab" data-viz="stacked" onclick="v3VizSwitch(this)">📚 {% if lang == 'ko' %}구성{% else %}Stacked{% endif %}</button>
             <button type="button" class="v3-viz-tab" data-viz="treemap" onclick="v3VizSwitch(this)">🗂️ {% if lang == 'ko' %}트리맵{% else %}Treemap{% endif %}</button>
+            <span id="v3-viz-topn-wrap" class="ml-auto inline-flex items-center gap-1 text-[11px] text-gray-500" style="display:none">
+              {% if lang == 'ko' %}상위{% else %}Top{% endif %}
+              <select id="v3-viz-topn" onchange="v3VizTopNChange(this)"
+                      class="border border-gray-200 rounded-md px-1 py-0.5 bg-white text-[11px] hover:border-indigo-300 focus:ring-1 focus:ring-indigo-300 outline-none">
+                <option value="6">6</option>
+                <option value="8" selected>8</option>
+                <option value="12">12</option>
+                <option value="all">{% if lang == 'ko' %}전체{% else %}All{% endif %}</option>
+              </select>
+              {% if lang == 'ko' %}개 업체{% else %}vendors{% endif %}
+            </span>
           </div>
           <div id="v3-viz-body" class="relative" style="min-height:300px"></div>
           <div id="v3-viz-caption" class="text-[10px] text-gray-400 mt-1">
