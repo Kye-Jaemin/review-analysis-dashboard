@@ -79,9 +79,13 @@
 
     {# ====== 1. Category distribution table (collapsed by default) ====== #}
     <details class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm group">
-      <summary class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50 cursor-pointer hover:bg-gray-100 flex items-center gap-2 list-none">
-        <svg class="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      <summary class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50 cursor-pointer hover:bg-gray-100 flex items-center gap-2 list-none select-none">
+        <svg class="w-4 h-4 text-indigo-500 transition-transform group-open:rotate-90 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
         📊 {% if lang == 'ko' %}카테고리 분포 (리뷰 수 기준){% else %}Category distribution (by review count){% endif %}
+        <span class="ml-auto text-[11px] font-medium text-indigo-600">
+          <span class="group-open:hidden">{% if lang == 'ko' %}펼치기 ▾{% else %}expand ▾{% endif %}</span>
+          <span class="hidden group-open:inline">{% if lang == 'ko' %}접기 ▴{% else %}collapse ▴{% endif %}</span>
+        </span>
       </summary>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
