@@ -3,8 +3,25 @@
 {% block title %}{{ t('nav.vendors') }} — {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+<style>
+  /* --- Vendor strengths/weaknesses page: flashy UX --- */
+  #vendors-title {
+    background-image: linear-gradient(90deg,#1d4ed8,#7c3aed,#db2777);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  [data-vendor-row] { border: 1px solid transparent; transition: box-shadow .22s ease, border-color .22s ease; }
+  [data-vendor-row]:hover { box-shadow: 0 16px 34px -18px rgba(79,70,229,.5); border-color: rgba(99,102,241,.3); }
+  [data-reasons-trigger] { transition: transform .15s ease, box-shadow .15s ease; }
+  [data-reasons-trigger]:hover { transform: translateX(3px); }
+  .v-avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(99,102,241,.3); }
+  @keyframes vMedal { 0%,100% { transform: scale(1); } 50% { transform: scale(1.16); } }
+  .v-medal { display: inline-block; transform-origin: center; animation: vMedal 2.6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    [data-vendor-row], [data-reasons-trigger], .v-medal { transition: none !important; animation: none !important; }
+  }
+</style>
 <div class="flex items-baseline justify-between mb-4 gap-3">
-  <h1 class="text-2xl font-semibold">{{ t('nav.vendors') }}</h1>
+  <h1 id="vendors-title" class="text-2xl font-semibold">🏆 {{ t('nav.vendors') }}</h1>
   <div class="flex items-baseline gap-3">
     <div class="flex gap-2 shrink-0">
       {% if vendors %}
@@ -62,7 +79,7 @@
   'very_positive': t('sentiment.very_positive'),
 } %}
 
-<div class="space-y-4">
+<div class="space-y-4 stagger">
   {% for v in vendors %}
     {% set analyzed = v.analyzed_count or 0 %}
     <div class="bg-white rounded shadow-sm p-4 panel-in" data-vendor-row data-vendor-key="{{ v.key }}">
@@ -70,9 +87,9 @@
       <div class="flex items-start justify-between gap-4 mb-3 flex-wrap">
         <div class="flex items-center gap-3 min-w-0">
           {% if v.icon_url %}
-            <img src="{{ v.icon_url }}" class="w-12 h-12 rounded shrink-0" alt="">
+            <img src="{{ v.icon_url }}" class="v-avatar w-12 h-12 rounded shrink-0" alt="">
           {% else %}
-            <div class="w-12 h-12 rounded bg-gray-200 flex items-center justify-center text-xs text-gray-500 shrink-0">
+            <div class="v-avatar w-12 h-12 rounded bg-gray-200 flex items-center justify-center text-xs text-gray-500 shrink-0">
               {{ (v.display or v.key)[:2].upper() }}
             </div>
           {% endif %}
@@ -190,7 +207,7 @@
                     data-saved-id="{{ saved_card_id or '' }}"
                     title="{% if saved_card_id %}{% if lang == 'ko' %}저장된 원인 분석 보기 (LLM 호출 없음){% else %}View saved reasons (no LLM call){% endif %}{% else %}{% if lang == 'ko' %}클릭하면 이 강점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this strength{% endif %}{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
-                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% if dim %} opacity-60{% endif %}{% else %}text-gray-600 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
+                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 and not dim %}v-medal {% endif %}{% if loop.index <= 3 %}text-lg{% if dim %} opacity-60{% endif %}{% else %}text-gray-600 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
                     {# Category name (truncate-safe — the 📌 indicator lives in its own pill outside this span) #}
                     <span class="flex-1 min-w-0 font-semibold text-sm {% if dim %}text-gray-700{% else %}text-gray-900{% endif %} truncate" title="{{ c.name }}">{{ c.name }}</span>
                     {# Saved-card chip: outside the truncate so it always shows. Click target is the same li. #}
@@ -207,7 +224,7 @@
                   <!-- Positive ratio bar -->
                   <div class="h-1.5 {% if dim %}bg-gray-300{% else %}bg-green-100{% endif %} rounded-full overflow-hidden">
                     <div class="h-full bg-gradient-to-r {% if dim %}from-gray-500 to-gray-600{% else %}from-green-400 to-emerald-500{% endif %} rounded-full transition-all"
-                         style="width: {{ pct }}%"></div>
+                         data-grow="{{ pct }}" style="width: 0%"></div>
                   </div>
                   <div class="flex items-center justify-between gap-2 mt-1.5">
                     {% if c.description %}
@@ -263,7 +280,7 @@
                     data-saved-id="{{ saved_card_id or '' }}"
                     title="{% if saved_card_id %}{% if lang == 'ko' %}저장된 원인 분석 보기 (LLM 호출 없음){% else %}View saved reasons (no LLM call){% endif %}{% else %}{% if lang == 'ko' %}클릭하면 이 약점의 세부 원인을 분석합니다{% else %}Click to analyze the specific reasons behind this weakness{% endif %}{% endif %}">
                   <div class="flex items-center gap-2 mb-1.5">
-                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 %}text-lg{% if dim %} opacity-60{% endif %}{% else %}text-gray-600 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
+                    <span class="shrink-0 text-base font-bold {% if loop.index <= 3 and not dim %}v-medal {% endif %}{% if loop.index <= 3 %}text-lg{% if dim %} opacity-60{% endif %}{% else %}text-gray-600 text-xs w-5 text-center{% endif %}">{{ rank_icon }}</span>
                     <span class="flex-1 min-w-0 font-semibold text-sm {% if dim %}text-gray-700{% else %}text-gray-900{% endif %} truncate" title="{{ c.name }}">{{ c.name }}</span>
                     {% if saved_card_id %}
                       <span class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
@@ -278,7 +295,7 @@
                   <!-- Negative ratio bar -->
                   <div class="h-1.5 {% if dim %}bg-gray-300{% else %}bg-red-100{% endif %} rounded-full overflow-hidden">
                     <div class="h-full bg-gradient-to-r {% if dim %}from-gray-500 to-gray-600{% else %}from-red-400 to-rose-500{% endif %} rounded-full transition-all"
-                         style="width: {{ pct }}%"></div>
+                         data-grow="{{ pct }}" style="width: 0%"></div>
                   </div>
                   <div class="flex items-center justify-between gap-2 mt-1.5">
                     {% if c.description %}
@@ -544,6 +561,12 @@ function _setVendorRow(row, open) {
   if (!grid) return;
   if (open) {
     grid.classList.remove('hidden');
+    // Soft entrance + grow the ratio bars from 0 → their value.
+    grid.classList.remove('fade-soft'); void grid.offsetWidth; grid.classList.add('fade-soft');
+    grid.querySelectorAll('[data-grow]').forEach(el => {
+      el.style.width = '0%';
+      requestAnimationFrame(() => { el.style.width = (el.dataset.grow || '0') + '%'; });
+    });
     if (icon) icon.textContent = '▲';
     if (label) label.textContent = {% if lang == 'ko' %}'강점·약점 Top 5 접기'{% else %}'Hide top 5 strengths & weaknesses'{% endif %};
   } else {
