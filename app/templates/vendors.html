@@ -16,8 +16,9 @@
   .v-avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(99,102,241,.3); }
   @keyframes vMedal { 0%,100% { transform: scale(1); } 50% { transform: scale(1.16); } }
   .v-medal { display: inline-block; transform-origin: center; animation: vMedal 2.6s ease-in-out infinite; }
+  .vsent-seg { transition: width .85s cubic-bezier(.22,1,.36,1); }
   @media (prefers-reduced-motion: reduce) {
-    [data-vendor-row], [data-reasons-trigger], .v-medal { transition: none !important; animation: none !important; }
+    [data-vendor-row], [data-reasons-trigger], .v-medal, .vsent-seg { transition: none !important; animation: none !important; }
   }
 </style>
 <div class="flex items-baseline justify-between mb-4 gap-3">
@@ -125,11 +126,12 @@
       <!-- Sentiment distribution bar (full width) -->
       {% if analyzed > 0 %}
       <div class="mb-3">
-        <div class="flex h-2 rounded overflow-hidden bg-gray-100">
+        <div class="vsent-bar flex h-2 rounded overflow-hidden bg-gray-100">
           {% for band in ['very_positive', 'positive', 'neutral', 'negative', 'very_negative'] %}
             {% set c = v.sentiments[band] %}
             {% if c > 0 %}
-              <div style="width: {{ (c / analyzed * 100)|round(2) }}%; background: {{ sentiment_colors[band] }}"
+              <div class="vsent-seg" data-grow="{{ (c / analyzed * 100)|round(2) }}"
+                   style="width: 0%; background: {{ sentiment_colors[band] }}"
                    title="{{ sentiment_labels[band] }}: {{ '{:,}'.format(c) }}"></div>
             {% endif %}
           {% endfor %}
@@ -610,6 +612,21 @@ function collapseAllVendors() {
   document.querySelectorAll('[data-vendor-row]').forEach(row => {
     if (keys.has(row.dataset.vendorKey)) _setVendorRow(row, true);
   });
+})();
+
+// Grow each vendor's sentiment distribution bar from 0 → its values,
+// one-shot, when the bar scrolls into view.
+(function growSentimentBars() {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const fill = (bar) => bar.querySelectorAll('.vsent-seg[data-grow]').forEach(seg => {
+    requestAnimationFrame(() => { seg.style.width = (seg.dataset.grow || '0') + '%'; });
+  });
+  const bars = document.querySelectorAll('.vsent-bar');
+  if (reduce || !('IntersectionObserver' in window)) { bars.forEach(fill); return; }
+  const io = new IntersectionObserver((entries, obs) => {
+    entries.forEach(e => { if (e.isIntersecting) { fill(e.target); obs.unobserve(e.target); } });
+  }, { threshold: 0.25 });
+  bars.forEach(b => io.observe(b));
 })();
 </script>
 
