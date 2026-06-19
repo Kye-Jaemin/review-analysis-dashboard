@@ -606,12 +606,13 @@ function collapseAllVendors() {
   _saveExpandedKeys(new Set());
 }
 
-// Restore state on load.
-(function restoreVendorExpansion() {
-  const keys = _loadExpandedKeys();
-  document.querySelectorAll('[data-vendor-row]').forEach(row => {
-    if (keys.has(row.dataset.vendorKey)) _setVendorRow(row, true);
-  });
+// Default: every vendor starts COLLAPSED on load (the markup default).
+// We intentionally do NOT auto-restore previous expansion, so the page
+// always opens fully collapsed. Per-row toggle + expand/collapse-all
+// still work within the session.
+(function collapseAllVendorsOnLoad() {
+  document.querySelectorAll('[data-vendor-row]').forEach(row => _setVendorRow(row, false));
+  _saveExpandedKeys(new Set());
 })();
 
 // Grow each vendor's sentiment distribution bar from 0 → its values,
@@ -842,6 +843,12 @@ function closeReasonsModal() {
 function _showOnly(which) {
   for (const id of ['reasons-loading','reasons-error','reasons-empty','reasons-result']) {
     document.getElementById(id).classList.toggle('hidden', id !== which);
+  }
+  // The body height just changed (loading → result/error/empty). Re-anchor
+  // the modal near the clicked item + re-clamp to the viewport so it never
+  // ends up shifted away from where the user clicked once content loads.
+  if (typeof _reasonsState !== 'undefined' && _reasonsState && _reasonsState.trigger) {
+    _positionModalNear(_reasonsState.trigger);
   }
 }
 
