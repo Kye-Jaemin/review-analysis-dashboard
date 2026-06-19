@@ -77,11 +77,12 @@
       <span>{% if lang == 'ko' %}카테고리{% else %}categories{% endif %} <b class="text-blue-700">{{ result.totals.categories }}</b></span>
     </div>
 
-    {# ====== 1. Category distribution table ====== #}
-    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-      <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50">
+    {# ====== 1. Category distribution table (collapsed by default) ====== #}
+    <details class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm group">
+      <summary class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50 cursor-pointer hover:bg-gray-100 flex items-center gap-2 list-none">
+        <svg class="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         📊 {% if lang == 'ko' %}카테고리 분포 (리뷰 수 기준){% else %}Category distribution (by review count){% endif %}
-      </div>
+      </summary>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-gray-50 text-xs text-gray-600">
@@ -122,12 +123,15 @@
           </tbody>
         </table>
       </div>
-    </div>
+    </details>
 
     {# ====== 2. Vendor × Category heatmap ====== #}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-      <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50">
+      <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50 flex items-center gap-2 flex-wrap">
         🔥 {% if lang == 'ko' %}벤더 × 카테고리 (리뷰 수 합계){% else %}Vendor × Category (review totals){% endif %}
+        <span class="text-[10px] font-normal text-gray-500">
+          {% if lang == 'ko' %}행 클릭 → 해당 카테고리 상세 펼침{% else %}click a row → expand that category's detail{% endif %}
+        </span>
       </div>
       <div class="overflow-x-auto">
         <table class="text-xs tabular-nums">
@@ -151,8 +155,11 @@
             {% set max_cell = result.matrix.max_cell %}
             {% for cat in result.matrix.categories %}
               {% set ri = loop.index0 %}
-              <tr>
-                <td class="px-2 py-1.5 sticky left-0 bg-white font-medium text-gray-800 truncate max-w-[200px]" title="{{ cat }}">
+              <tr class="cursor-pointer hover:bg-blue-50/60 transition-colors"
+                  data-cat-name="{{ cat }}"
+                  onclick="v3OpenCatDetail(this.dataset.catName)"
+                  title="{% if lang == 'ko' %}클릭하면 아래 카테고리 상세가 펼쳐집니다{% else %}click to expand this category's detail below{% endif %}">
+                <td class="px-2 py-1.5 sticky left-0 bg-white font-medium text-gray-800 truncate max-w-[200px] hover:text-blue-700">
                   {{ cat }}
                 </td>
                 {% for n in result.matrix.cells[ri] %}
@@ -186,7 +193,7 @@
         </span>
       </div>
       {% for c in result.categories %}
-        <details id="cat-{{ loop.index }}" class="bg-white border border-gray-200 rounded-lg shadow-sm group" {% if loop.index <= 3 %}open{% endif %}>
+        <details id="cat-{{ loop.index }}" data-cat-name="{{ c.name }}" class="bg-white border border-gray-200 rounded-lg shadow-sm group scroll-mt-4">
           <summary class="px-4 py-3 cursor-pointer hover:bg-gray-50 flex items-center gap-3 list-none">
             <span class="text-xl shrink-0">🏷️</span>
             <div class="flex-1 min-w-0">

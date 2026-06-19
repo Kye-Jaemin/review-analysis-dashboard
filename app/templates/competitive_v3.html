@@ -170,8 +170,15 @@
   }
   .v3-collapse.open { max-height: 6000px; opacity: 1; }
 
+  /* Flash highlight when a category detail is opened from the heatmap */
+  @keyframes v3-flash-kf {
+    0%   { box-shadow: 0 0 0 0 rgba(59,130,246,.55); border-color: #3b82f6; }
+    100% { box-shadow: 0 0 0 10px rgba(59,130,246,0); }
+  }
+  .v3-flash { animation: v3-flash-kf 1.3s ease-out; }
+
   @media (prefers-reduced-motion: reduce) {
-    .v3-viz-tab, .v3-heat-cell, .v3-minibar-fill, .v3-collapse { transition: none !important; }
+    .v3-viz-tab, .v3-heat-cell, .v3-minibar-fill, .v3-collapse, .v3-flash { animation: none !important; transition: none !important; }
   }
 
   /* ---- Competitive-criteria mapping: flashy UX ---- */
@@ -1172,6 +1179,23 @@ function v3VizRefresh() {
 function v3VizSwitch(btn) {
   v3VizState.tab = btn.dataset.viz;
   v3VizRefresh();
+}
+
+// Open (and scroll to) a per-category detail <details> by its name —
+// triggered by clicking a row in the vendor×category heatmap.
+function v3OpenCatDetail(name) {
+  if (!name) return;
+  let target = null;
+  document.querySelectorAll('details[data-cat-name]').forEach(d => {
+    if (d.getAttribute('data-cat-name') === name) target = d;
+  });
+  if (!target) return;
+  target.open = true;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.remove('v3-flash');
+  void target.offsetWidth;   // restart the animation if re-clicked
+  target.classList.add('v3-flash');
+  setTimeout(() => target.classList.remove('v3-flash'), 1300);
 }
 
 // Re-init the criteria UI whenever the results pane is (re)rendered —
