@@ -131,14 +131,21 @@
 
     {# ====== 2. Vendor × Category heatmap ====== #}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-      <div class="px-4 py-2.5 border-b text-sm font-semibold text-gray-900 bg-gray-50 flex items-center gap-2 flex-wrap">
-        🔥 {% if lang == 'ko' %}벤더 × 카테고리 (리뷰 수 합계){% else %}Vendor × Category (review totals){% endif %}
+      <div class="px-4 py-2.5 border-b bg-gradient-to-r from-rose-50 via-orange-50 to-amber-50 flex items-center gap-2 flex-wrap">
+        <span class="text-sm font-bold bg-gradient-to-r from-rose-600 to-orange-600 bg-clip-text text-transparent">
+          🔥 {% if lang == 'ko' %}벤더 × 카테고리 (리뷰 수 합계){% else %}Vendor × Category (review totals){% endif %}
+        </span>
         <span class="text-[10px] font-normal text-gray-500">
-          {% if lang == 'ko' %}행 클릭 → 해당 카테고리 상세 펼침{% else %}click a row → expand that category's detail{% endif %}
+          {% if lang == 'ko' %}행 클릭 → 상세 펼침 · 셀 호버 → 십자 강조{% else %}click a row → expand detail · hover a cell → crosshair{% endif %}
+        </span>
+        <span class="ml-auto inline-flex items-center gap-1 text-[10px] text-gray-500">
+          {% if lang == 'ko' %}적음{% else %}low{% endif %}
+          <span class="v3-heat-legend"></span>
+          {% if lang == 'ko' %}많음{% else %}high{% endif %}
         </span>
       </div>
       <div class="overflow-x-auto">
-        <table class="text-xs tabular-nums">
+        <table class="v3-heatmap text-xs tabular-nums">
           <thead class="bg-gray-50">
             <tr>
               <th class="text-left px-2 py-1.5 sticky left-0 bg-gray-50 z-10 font-medium text-gray-700 min-w-[200px]">
@@ -168,8 +175,10 @@
                 </td>
                 {% for n in result.matrix.cells[ri] %}
                   {% set intensity = (n / max_cell) %}
-                  <td class="px-2 py-1.5 text-center"
-                      {% if n > 0 %}style="background-color: rgba(59,130,246,{{ '%.2f'|format(intensity * 0.7) }})"{% endif %}>
+                  {% set vcol = result.matrix.vendors[loop.index0] %}
+                  <td class="v3-hcell px-2 py-1.5 text-center"
+                      data-heat="{{ '%.4f'|format(intensity) }}" data-r="{{ ri }}" data-c="{{ loop.index0 }}"
+                      {% if n > 0 %}title="{{ vcol.display }} · {{ cat }} · {{ '{:,}'.format(n) }}"{% endif %}>
                     {% if n > 0 %}{{ '{:,}'.format(n) }}{% else %}<span class="text-gray-300">·</span>{% endif %}
                   </td>
                 {% endfor %}

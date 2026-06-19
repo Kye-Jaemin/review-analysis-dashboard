@@ -177,8 +177,23 @@
   }
   .v3-flash { animation: v3-flash-kf 1.3s ease-out; }
 
+  /* Vendor × Category heatmap (SSR table) — flashy cells */
+  .v3-heat-legend {
+    display: inline-block; width: 56px; height: 8px; border-radius: 999px;
+    background: linear-gradient(90deg,#e0f2fe,#38bdf8,#6366f1,#a855f7,#ec4899);
+  }
+  table.v3-heatmap { border-collapse: separate; border-spacing: 2px; }
+  .v3-hcell {
+    border-radius: 5px;
+    transition: transform .3s cubic-bezier(.22,1,.36,1), opacity .3s ease, box-shadow .15s ease;
+    will-change: transform;
+  }
+  .v3-hcell.v3-htop { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(236,72,153,.6); }
+  .v3-hcell.v3-hl { outline: 2px solid rgba(244,63,94,.75); outline-offset: -2px; }
+  .v3-hcell:hover { transform: scale(1.18); box-shadow: 0 6px 16px -4px rgba(0,0,0,.3); position: relative; z-index: 2; }
+
   @media (prefers-reduced-motion: reduce) {
-    .v3-viz-tab, .v3-heat-cell, .v3-minibar-fill, .v3-collapse, .v3-flash { animation: none !important; transition: none !important; }
+    .v3-viz-tab, .v3-heat-cell, .v3-minibar-fill, .v3-collapse, .v3-flash, .v3-hcell { animation: none !important; transition: none !important; }
   }
 
   /* ---- Competitive-criteria mapping: flashy UX ---- */
@@ -1232,11 +1247,61 @@ function v3OpenCatDetail(name) {
   setTimeout(() => target.classList.remove('v3-flash'), 1300);
 }
 
+// ---- Vendor × Category heatmap: gradient paint + crosshair + leader glow ----
+function v3HeatColor(t) {
+  const stops = [[0,[224,242,254]],[0.30,[56,189,248]],[0.55,[99,102,241]],[0.78,[168,85,247]],[1,[236,72,153]]];
+  t = Math.max(0, Math.min(1, t));
+  let a = stops[0], b = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i][0] && t <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; break; }
+  }
+  const span = (b[0] - a[0]) || 1, k = (t - a[0]) / span;
+  const c = a[1].map((v, i) => Math.round(v + (b[1][i] - v) * k));
+  return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+}
+function v3PaintHeatmap(root) {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  (root || document).querySelectorAll('table.v3-heatmap').forEach(tbl => {
+    const cells = tbl.querySelectorAll('.v3-hcell[data-heat]');
+    // per-row max → leader glow
+    const rowMax = {};
+    cells.forEach(td => { const r = td.dataset.r, h = parseFloat(td.dataset.heat) || 0; if (!(r in rowMax) || h > rowMax[r]) rowMax[r] = h; });
+    cells.forEach(td => {
+      const h = parseFloat(td.dataset.heat) || 0;
+      if (h > 0) {
+        td.style.backgroundColor = v3HeatColor(h);
+        td.style.color = h >= 0.42 ? '#fff' : '#1f2937';
+        td.style.fontWeight = h >= 0.7 ? '700' : '500';
+        if (h === rowMax[td.dataset.r]) td.classList.add('v3-htop');
+        if (!reduce) {
+          td.style.opacity = '0'; td.style.transform = 'scale(.4)';
+          const delay = Math.min(600, (parseInt(td.dataset.r) + parseInt(td.dataset.c)) * 18);
+          setTimeout(() => { td.style.opacity = '1'; td.style.transform = ''; }, delay);
+        }
+      }
+    });
+    // Crosshair: highlight the hovered cell's row + column.
+    if (!tbl.__v3cross) {
+      tbl.__v3cross = true;
+      tbl.addEventListener('mouseover', e => {
+        const td = e.target.closest('.v3-hcell'); if (!td) return;
+        const r = td.dataset.r, c = td.dataset.c;
+        tbl.querySelectorAll('.v3-hcell').forEach(x => { if (x.dataset.r === r || x.dataset.c === c) x.classList.add('v3-hl'); });
+      });
+      tbl.addEventListener('mouseout', e => {
+        if (!e.target.closest('.v3-hcell')) return;
+        tbl.querySelectorAll('.v3-hcell.v3-hl').forEach(x => x.classList.remove('v3-hl'));
+      });
+    }
+  });
+}
+
 // Re-init the criteria UI whenever the results pane is (re)rendered —
 // covers both fresh-upload parse and saved-card load.
 document.body.addEventListener('htmx:afterSwap', (e) => {
   if (e.target && e.target.id === 'competitive-v3-results') {
     v3InitCriteria();
+    v3PaintHeatmap(e.target);
   }
 });
 
