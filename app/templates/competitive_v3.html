@@ -162,8 +162,16 @@
     background: linear-gradient(90deg,#6366f1,#a855f7);
     transition: width .8s cubic-bezier(.22,1,.36,1);
   }
+
+  /* Collapsible criteria section */
+  .v3-collapse {
+    max-height: 0; opacity: 0; overflow: hidden;
+    transition: max-height .5s cubic-bezier(.22,1,.36,1), opacity .4s ease;
+  }
+  .v3-collapse.open { max-height: 6000px; opacity: 1; }
+
   @media (prefers-reduced-motion: reduce) {
-    .v3-viz-tab, .v3-heat-cell, .v3-minibar-fill { transition: none !important; }
+    .v3-viz-tab, .v3-heat-cell, .v3-minibar-fill, .v3-collapse { transition: none !important; }
   }
 
   /* ---- Competitive-criteria mapping: flashy UX ---- */
@@ -663,6 +671,7 @@ function v3AddCriterion() {
     alert({% if lang == 'ko' %}'먼저 파일을 분석하거나 카드를 불러오세요.'{% else %}'Analyze a file or load a card first.'{% endif %});
     return;
   }
+  v3CritExpand();
   const name = (prompt({% if lang == 'ko' %}'새 경쟁력 기준 이름:'{% else %}'New criterion name:'{% endif %}, '') || '').trim();
   if (!name) return;
   if (v3FindGroup(name)) { alert({% if lang == 'ko' %}'같은 이름의 기준이 이미 있습니다.'{% else %}'A criterion with that name already exists.'{% endif %}); return; }
@@ -715,6 +724,7 @@ async function v3SuggestCriteria(btn) {
     alert({% if lang == 'ko' %}'먼저 파일을 분석하거나 카드를 불러오세요.'{% else %}'Analyze a file or load a card first.'{% endif %});
     return;
   }
+  v3CritExpand();
   const hasExisting = v3CritState.groups.some(g => g.name !== V3_UNASSIGNED && g.categories.length);
   if (hasExisting && !confirm({% if lang == 'ko' %}'현재 매핑을 AI 제안으로 덮어쓸까요?'{% else %}'Overwrite the current mapping with AI suggestions?'{% endif %})) return;
   const cats = Object.keys(v3CritState.catStats).map(n => ({
@@ -839,6 +849,8 @@ async function v3CriterionReviews(btn) {
 
 function v3RenderCriterionReviews(data) {
   const cats = data.categories || [];
+  const vIcons = v3VendorIconMap();
+  const vColors = v3VendorColorMap(v3BuildCriteriaAgg() || { vendors: [] });
   const missingNote = data.missing_cards
     ? '<div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">' +
       'ℹ {% if lang == "ko" %}일부 강·약점은 저장된 원인 카드가 없어 요약·숫자만 표시됩니다 (' + data.missing_cards + '건). 원문 리뷰까지 보려면 /vendors에서 분석·저장 후 다시 시도하세요.{% else %}Some strengths show summary + counts only (no saved reason card): ' + data.missing_cards + '. Analyze + save on /vendors to view raw reviews.{% endif %}</div>'
@@ -887,8 +899,9 @@ function v3RenderCriterionReviews(data) {
       const barPct = Math.round((v.feedback_total || 0) / catMax * 100);
       return '<details class="border-t border-gray-100 first:border-0">' +
         '<summary class="px-3 py-1.5 cursor-pointer hover:bg-gray-50 list-none text-[13px]">' +
-          '<div class="flex items-center gap-2">' +
-            '<span class="font-medium text-gray-900 truncate">' + escapeHtml(v.display) + '</span>' +
+          '<div class="flex items-center gap-1.5">' +
+            ((vIcons[v.key] && vIcons[v.key].icon) ? '<img src="' + escapeHtml(vIcons[v.key].icon) + '" class="w-4 h-4 rounded shrink-0" onerror="this.style.display=\'none\'">' : '') +
+            '<span class="font-semibold truncate" style="color:' + (vColors[v.key] || '#111827') + '">' + escapeHtml(v.display) + '</span>' +
             '<span class="text-gray-500 tabular-nums whitespace-nowrap">: ' + metric + '</span>' +
             '<span class="ml-auto text-[11px] text-indigo-600 whitespace-nowrap">👁 {% if lang == "ko" %}보기{% else %}view{% endif %}</span>' +
           '</div>' +
@@ -919,6 +932,53 @@ function v3RenderCriterionReviews(data) {
 const V3_PALETTE = ['#6366f1','#ec4899','#10b981','#f59e0b','#06b6d4','#a855f7','#ef4444','#84cc16','#3b82f6','#f43f5e','#14b8a6','#eab308'];
 function v3Color(i) { return V3_PALETTE[i % V3_PALETTE.length]; }
 const v3VizState = { tab: 'radar', chart: null };
+
+// ---- Collapsible criteria section (collapsed by default) ----
+function v3CritIsOpen() {
+  const sec = document.getElementById('v3-crit-collapse');
+  return !!(sec && sec.classList.contains('open'));
+}
+function v3CritToggle(force) {
+  const sec = document.getElementById('v3-crit-collapse');
+  const chev = document.getElementById('v3-crit-chevron');
+  if (!sec) return;
+  const open = (force === true) ? true : (force === false ? false : !sec.classList.contains('open'));
+  sec.classList.toggle('open', open);
+  if (chev) chev.style.transform = open ? 'rotate(90deg)' : '';
+  if (open) {
+    // Replay the card entrance animation + (re)size the charts now that
+    // the panel actually has dimensions.
+    if (v3CritState) v3RenderCriteria(true);
+  } else {
+    v3VizDestroy();
+  }
+}
+function v3CritExpand() { if (!v3CritIsOpen()) v3CritToggle(true); }
+
+// ---- Vendor icon + stable colour (shared across charts + modal) ----
+function v3VendorIconMap() {
+  const out = {};
+  const m = v3CritState && v3CritState.matrix;
+  (m && m.vendors || []).forEach(v => { out[v.key] = { display: v.display, icon: v.icon_url || '' }; });
+  return out;
+}
+function v3VendorColorMap(agg) {
+  const out = {};
+  (agg && agg.vendors || []).forEach((v, i) => { out[v.key] = v3Color(i); });
+  return out;
+}
+// Custom HTML legend: icon (or colour dot) + vendor name tinted by colour.
+function v3LegendHtml(items) {
+  return '<div class="flex flex-wrap gap-x-3 gap-y-1 justify-center mt-2 text-[11px]">' +
+    items.map(it =>
+      '<span class="inline-flex items-center gap-1">' +
+        (it.icon
+          ? '<img src="' + escapeHtml(it.icon) + '" class="w-4 h-4 rounded" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'w-2.5 h-2.5 rounded-full inline-block\',style:\'background:' + it.color + '\'}))">'
+          : '<span class="w-2.5 h-2.5 rounded-full inline-block" style="background:' + it.color + '"></span>') +
+        '<span class="font-medium" style="color:' + it.color + '">' + escapeHtml(it.label) + '</span>' +
+      '</span>').join('') +
+    '</div>';
+}
 
 // Aggregate the vendor×category matrix up to criteria (excludes the
 // 미분류 holding bucket). Returns {criteria:[{name,total,vendorCounts,cats}], vendors:[{key,display,total}]}.
@@ -955,6 +1015,11 @@ function v3VizCanvas() {
   body.innerHTML = '<div style="height:320px"><canvas id="v3-viz-canvas"></canvas></div>';
   return document.getElementById('v3-viz-canvas');
 }
+function v3VizCaption(text) {
+  const el = document.getElementById('v3-viz-caption');
+  if (el) el.textContent = text;
+}
+const V3_VENDORS_LABEL = '{% if lang == "ko" %}개 업체{% else %} vendors{% endif %}';
 function v3VizDestroy() {
   if (v3VizState.chart) { try { v3VizState.chart.destroy(); } catch (e) {} v3VizState.chart = null; }
 }
@@ -971,33 +1036,47 @@ function v3VizDoughnut(agg) {
     options: { responsive: true, maintainAspectRatio: false, cutout: '58%',
       plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } } }
   });
+  v3VizCaption('{% if lang == "ko" %}경쟁력 기준 ' + agg.criteria.length + '개 · 리뷰 비중{% else %}' + agg.criteria.length + ' criteria · review share{% endif %}');
 }
 function v3VizRadar(agg) {
   const c = v3VizCanvas();
-  const topV = agg.vendors.slice(0, 6);
+  const N = 8;
+  const topV = agg.vendors.slice(0, N);
+  const icons = v3VendorIconMap();
   v3VizState.chart = new Chart(c, {
     type: 'radar',
     data: { labels: agg.criteria.map(x => x.name),
       datasets: topV.map((v, i) => ({ label: v.display, data: agg.criteria.map(cr => cr.vendorCounts[v.key] || 0),
-        borderColor: v3Color(i), backgroundColor: v3Color(i) + '33', borderWidth: 2, pointRadius: 2 })) },
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+        borderColor: v3Color(i), backgroundColor: v3Color(i) + '2e', borderWidth: 2, pointRadius: 2 })) },
+    options: { responsive: true, maintainAspectRatio: false, animation: { duration: 600 },
+      plugins: { legend: { display: false } },
       scales: { r: { ticks: { display: false }, pointLabels: { font: { size: 10 } } } } }
   });
+  // Custom legend: vendor icon + colour-tinted name.
+  document.getElementById('v3-viz-body').insertAdjacentHTML('beforeend',
+    v3LegendHtml(topV.map((v, i) => ({ color: v3Color(i), icon: (icons[v.key] || {}).icon, label: v.display }))));
+  v3VizCaption('{% if lang == "ko" %}상위 ' + topV.length + '개 업체 (전체 ' + agg.vendors.length + '개) · 리뷰 수 기준{% else %}top ' + topV.length + ' of ' + agg.vendors.length + ' vendors · by review count{% endif %}');
 }
 function v3VizStacked(agg) {
   const c = v3VizCanvas();
-  const topV = agg.vendors.slice(0, 8);
+  const N = 10;
+  const topV = agg.vendors.slice(0, N);
+  const icons = v3VendorIconMap();
   const topKeys = new Set(topV.map(v => v.key));
   const datasets = topV.map((v, i) => ({ label: v.display, data: agg.criteria.map(cr => cr.vendorCounts[v.key] || 0), backgroundColor: v3Color(i) }));
   const other = agg.criteria.map(cr => { let s = 0; for (const k in cr.vendorCounts) if (!topKeys.has(k)) s += cr.vendorCounts[k]; return s; });
-  if (other.some(x => x > 0)) datasets.push({ label: '{% if lang == "ko" %}기타{% else %}Other{% endif %}', data: other, backgroundColor: '#cbd5e1' });
+  const hasOther = other.some(x => x > 0);
+  if (hasOther) datasets.push({ label: '{% if lang == "ko" %}기타{% else %}Other{% endif %}', data: other, backgroundColor: '#cbd5e1' });
   v3VizState.chart = new Chart(c, {
     type: 'bar', data: { labels: agg.criteria.map(x => x.name), datasets },
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } } },
+    options: { responsive: true, maintainAspectRatio: false, animation: { duration: 600 },
+      plugins: { legend: { display: false } },
       scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true } } }
   });
+  const legendItems = topV.map((v, i) => ({ color: v3Color(i), icon: (icons[v.key] || {}).icon, label: v.display }));
+  if (hasOther) legendItems.push({ color: '#cbd5e1', icon: '', label: '{% if lang == "ko" %}기타{% else %}Other{% endif %}' });
+  document.getElementById('v3-viz-body').insertAdjacentHTML('beforeend', v3LegendHtml(legendItems));
+  v3VizCaption('{% if lang == "ko" %}상위 ' + topV.length + '개 업체' + (hasOther ? ' + 기타' : '') + ' (전체 ' + agg.vendors.length + '개){% else %}top ' + topV.length + ' vendors' + (hasOther ? ' + Other' : '') + ' of ' + agg.vendors.length + '{% endif %}');
 }
 function v3VizTreemap(agg) {
   const body = document.getElementById('v3-viz-body');
@@ -1021,20 +1100,28 @@ function v3VizTreemap(agg) {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
       tooltip: { callbacks: { title: (it) => it[0].raw._data.name, label: (it) => it.raw._data.criterion + ': ' + it.raw.v } } } }
   });
+  v3VizCaption('{% if lang == "ko" %}기준 → 카테고리 · 면적 = 리뷰 수{% else %}criterion → category · area = review count{% endif %}');
 }
 function v3VizHeatmap(agg) {
   const body = document.getElementById('v3-viz-body');
-  const topV = agg.vendors.slice(0, 10);
+  const vlist = agg.vendors;            // ALL vendors (table scrolls horizontally)
+  const icons = v3VendorIconMap();
   let max = 0;
-  agg.criteria.forEach(cr => topV.forEach(v => { const x = cr.vendorCounts[v.key] || 0; if (x > max) max = x; }));
+  agg.criteria.forEach(cr => vlist.forEach(v => { const x = cr.vendorCounts[v.key] || 0; if (x > max) max = x; }));
   if (!max) max = 1;
   let html = '<div class="overflow-x-auto"><table class="text-[11px] tabular-nums border-separate" style="border-spacing:2px"><thead><tr>' +
-    '<th class="text-left px-2 py-1 sticky left-0 bg-white">{% if lang == "ko" %}기준 \\ 벤더{% else %}Criterion \\ Vendor{% endif %}</th>';
-  topV.forEach(v => { html += '<th class="px-1 py-1 text-center font-medium text-gray-600"><div class="truncate max-w-[70px] mx-auto" title="' + escapeHtml(v.display) + '">' + escapeHtml(v.display.slice(0, 10)) + '</div></th>'; });
+    '<th class="text-left px-2 py-1 sticky left-0 bg-white z-10">{% if lang == "ko" %}기준 \\ 벤더{% else %}Criterion \\ Vendor{% endif %}</th>';
+  vlist.forEach((v, i) => {
+    const ic = (icons[v.key] || {}).icon;
+    const col = v3Color(i);
+    html += '<th class="px-1 py-1 text-center align-bottom min-w-[44px]">' +
+      (ic ? '<img src="' + escapeHtml(ic) + '" class="w-5 h-5 rounded mx-auto mb-0.5" title="' + escapeHtml(v.display) + '" onerror="this.style.display=\'none\'">' : '') +
+      '<div class="truncate max-w-[64px] mx-auto font-semibold" style="color:' + col + '" title="' + escapeHtml(v.display) + '">' + escapeHtml(v.display.slice(0, 9)) + '</div></th>';
+  });
   html += '</tr></thead><tbody>';
   agg.criteria.forEach(cr => {
-    html += '<tr><td class="px-2 py-1 sticky left-0 bg-white font-medium text-gray-800 truncate max-w-[170px]" title="' + escapeHtml(cr.name) + '">' + escapeHtml(cr.name) + '</td>';
-    topV.forEach(v => {
+    html += '<tr><td class="px-2 py-1 sticky left-0 bg-white z-10 font-medium text-gray-800 truncate max-w-[170px]" title="' + escapeHtml(cr.name) + '">' + escapeHtml(cr.name) + '</td>';
+    vlist.forEach(v => {
       const n = cr.vendorCounts[v.key] || 0;
       const a = n / max;
       const style = n ? ('background-color:rgba(99,102,241,' + (0.12 + a * 0.78).toFixed(2) + ');' + (a > 0.55 ? 'color:#fff;' : '')) : '';
@@ -1044,6 +1131,7 @@ function v3VizHeatmap(agg) {
   });
   html += '</tbody></table></div>';
   body.innerHTML = html;
+  v3VizCaption('{% if lang == "ko" %}전체 ' + vlist.length + '개 업체 · 색이 진할수록 리뷰 수 많음 (좌우 스크롤){% else %}all ' + vlist.length + ' vendors · darker = more reviews (scroll →){% endif %}');
 }
 
 function v3VizRender() {
@@ -1068,7 +1156,9 @@ function v3VizRender() {
 }
 function v3VizRefresh() {
   const viz = document.getElementById('v3-viz');
-  if (!viz || viz.style.display === 'none') { v3VizDestroy(); return; }
+  // Don't render charts while the section is collapsed — a 0-size canvas
+  // would render blank; we re-render on expand instead.
+  if (!viz || viz.style.display === 'none' || !v3CritIsOpen()) { v3VizDestroy(); return; }
   v3VizActivate(v3VizState.tab);
   v3VizRender();
 }
