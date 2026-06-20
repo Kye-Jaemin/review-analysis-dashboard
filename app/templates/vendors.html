@@ -633,21 +633,22 @@ function collapseAllVendors() {
 
 {# ========== Reasons modal (single instance, populated on click) ==========
 
-   Positioning model: the overlay covers the full viewport for the click-
-   to-dismiss backdrop and z-stacking, but the inner content is absolute-
-   positioned within it and openReasonsModalFor() sets `top` near the
-   clicked item's vertical position (clamped to viewport). So clicking a
-   strength near the bottom of a tall vendor row opens the modal near
-   that click — not at viewport center, which used to feel disconnected.
-
-   Horizontal: stays centered via `left: 50%; transform: translateX(-50%)`.
+   Positioning model: the overlay covers the full viewport (fixed inset-0)
+   and centers its content via flexbox — the same robust model the v3
+   review modal uses. We deliberately DON'T compute a per-click top
+   anymore: that approach broke whenever the modal ended up inside a
+   transformed/animated ancestor (CSS `transform` on an ancestor makes
+   `position: fixed` resolve against that ancestor instead of the
+   viewport, so the box landed near the document top — i.e. up by the
+   first vendor — rather than near the click). openReasonsModalFor()
+   also portals this node to <body> on open so no ancestor styling can
+   ever capture its fixed positioning.
 #}
 <div id="reasons-modal"
-     class="fixed inset-0 z-50 hidden bg-black/50"
+     class="fixed inset-0 z-50 hidden bg-black/50 flex items-center justify-center p-4"
      onclick="if (event.target === this) closeReasonsModal()">
   <div id="reasons-modal-content"
-       class="absolute bg-white rounded-lg shadow-2xl w-[calc(100%-2rem)] max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-       style="left: 50%; top: 4rem; transform: translateX(-50%);">
+       class="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
     <!-- Header -->
     <div class="px-5 py-3 border-b flex items-center gap-2 shrink-0" id="reasons-modal-header">
       <span id="reasons-modal-icon" class="text-xl">💡</span>
@@ -784,10 +785,15 @@ function openReasonsModalFor(el) {
   document.getElementById('reasons-modal-icon').textContent =
     band === 'positive' ? '💡' : '⚠️';
 
-  // Show modal + position content near the clicked item.
+  // Show modal. Portal it to <body> first so no transformed/animated
+  // ancestor can capture its `position: fixed` and shove the centered
+  // box off near the document top. Centering is handled purely by the
+  // overlay's flexbox — no per-click coordinate math.
   const overlay = document.getElementById('reasons-modal');
+  if (overlay.parentElement !== document.body) {
+    document.body.appendChild(overlay);
+  }
   overlay.classList.remove('hidden');
-  _positionModalNear(el);
 
   if (_reasonsState.savedCardId) {
     loadSavedReasons(_reasonsState.savedCardId);
@@ -796,44 +802,12 @@ function openReasonsModalFor(el) {
   }
 }
 
-// Position the modal content near `el` (the clicked <li>) so the user's
-// eye doesn't have to travel to viewport center. The modal stays within
-// the viewport (16px padding from edges) and re-clamps on window resize.
-function _positionModalNear(el) {
-  const content = document.getElementById('reasons-modal-content');
-  if (!content) return;
-  // Wait one frame so the modal's current body has reflowed (height
-  // measurement reflects whatever state — empty / loading / loaded —
-  // we're being called from). We previously reset top to 0px before
-  // measuring, but getBoundingClientRect on the TRIGGER doesn't care
-  // what the modal's top is, and the reset caused a one-frame jump
-  // to viewport top that read as "popup in a strange place" right
-  // before rAF re-positioned it.
-  requestAnimationFrame(() => {
-    const vpH = window.innerHeight;
-    const cH = content.offsetHeight || Math.min(480, vpH * 0.6);
-    const margin = 16;
-    let top;
-    if (el) {
-      const rect = el.getBoundingClientRect();
-      // Sanity check: detached/hidden triggers produce 0×0 rects.
-      // Fall back to viewport center so the modal is at least visible.
-      if (rect.width > 0 && rect.height > 0) {
-        // Anchor slightly above the clicked item so it stays visible
-        // at the modal's top edge.
-        top = rect.top - 24;
-      } else {
-        top = (vpH - cH) / 2;
-      }
-    } else {
-      top = (vpH - cH) / 2;
-    }
-    // Clamp so the whole modal stays in the viewport.
-    if (top + cH > vpH - margin) top = vpH - cH - margin;
-    if (top < margin) top = margin;
-    content.style.top = top + 'px';
-  });
-}
+// No-op kept for backward compatibility with existing call sites.
+// The modal now centers itself in the viewport via the overlay's
+// flexbox (see the markup), so there is nothing to compute per click.
+// Anchoring near the click was removed because it broke whenever a
+// transformed ancestor captured the modal's fixed positioning.
+function _positionModalNear(_el) { /* intentionally empty */ }
 
 function closeReasonsModal() {
   document.getElementById('reasons-modal').classList.add('hidden');
