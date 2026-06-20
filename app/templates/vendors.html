@@ -38,7 +38,7 @@
       <button type="button" onclick="openExportModal()"
               class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium whitespace-nowrap"
               {% if not vendors %}disabled style="opacity:0.5;cursor:not-allowed"{% endif %}>
-        📥 {% if lang == 'ko' %}CSV 내보내기{% else %}Export CSV{% endif %}
+        📥 {% if lang == 'ko' %}Excel 내보내기{% else %}Export Excel{% endif %}
       </button>
     </div>
     <div class="text-xs text-gray-500">
@@ -326,7 +326,7 @@
   {% endfor %}
 </div>
 
-{# ========== CSV export modal ==========
+{# ========== Excel export modal ==========
    Picker for which vendors + which sides (strengths / weaknesses / both)
    should land in the download. Defaults: all vendors + both. Optional
    "include saved reasons" appends a `reasons` column with each row's
@@ -339,7 +339,7 @@
     <div class="px-5 py-3 border-b flex items-center gap-2">
       <span class="text-xl">📥</span>
       <span class="font-semibold text-gray-900">
-        {% if lang == 'ko' %}CSV 내보내기{% else %}Export to CSV{% endif %}
+        {% if lang == 'ko' %}Excel 내보내기{% else %}Export to Excel{% endif %}
       </span>
       <button type="button" onclick="closeExportModal()"
               class="ml-auto text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
@@ -398,27 +398,14 @@
         </div>
       </section>
 
-      {# Format picker #}
+      {# Format: Excel-only. CSV was dropped because its semicolon-joined
+         reasons cell + BOM caused unreliable round-tripping into the
+         경쟁력 심화 분석 uploader. #}
       <section>
-        <h3 class="text-sm font-semibold text-gray-800 mb-2">
-          {% if lang == 'ko' %}파일 형식{% else %}Format{% endif %}
-        </h3>
-        <div class="flex flex-wrap gap-3 text-sm">
-          <label class="flex items-center gap-1.5 cursor-pointer">
-            <input type="radio" name="export-format" value="csv" checked>
-            <span>📄 CSV <span class="text-[10px] text-gray-500">(.csv)</span></span>
-          </label>
-          <label class="flex items-center gap-1.5 cursor-pointer">
-            <input type="radio" name="export-format" value="xlsx">
-            <span>📊 Excel <span class="text-[10px] text-gray-500">(.xlsx)</span></span>
-          </label>
-        </div>
-        <div class="text-[11px] text-gray-500 mt-1">
-          {% if lang == 'ko' %}
-            Excel은 헤더 고정 + 자동 필터 + 컬럼 폭 자동 조정. CSV는 다른 도구 import에 적합.
-          {% else %}
-            Excel: frozen header + autofilter + tuned column widths. CSV: best for piping into other tools.
-          {% endif %}
+        <div class="flex items-center gap-2 text-sm px-3 py-2 rounded bg-emerald-50 border border-emerald-200">
+          <span>📊</span>
+          <span class="font-medium text-emerald-800">{% if lang == 'ko' %}Excel(.xlsx)로 내보냅니다{% else %}Exports as Excel (.xlsx){% endif %}</span>
+          <span class="text-[11px] text-emerald-700/80 ml-auto">{% if lang == 'ko' %}헤더 고정 · 자동 필터 · 컬럼 폭 자동{% else %}frozen header · autofilter · tuned widths{% endif %}</span>
         </div>
       </section>
 
@@ -432,7 +419,7 @@
             </span>
             <span class="block text-[11px] text-gray-500 mt-0.5">
               {% if lang == 'ko' %}
-                긍정/부정 비율이 30% 미만인 항목 (페이지에서 회색으로 처리된 행)을 CSV에서 제외합니다.
+                긍정/부정 비율이 30% 미만인 항목 (페이지에서 회색으로 처리된 행)을 내보내기에서 제외합니다.
                 실질적 강점·약점만 받고 싶을 때 켜두세요. 끄면 Top 5 전체가 포함됩니다.
               {% else %}
                 Skip rows whose polarity ratio is below 30 % (the same entries grayed out on the page).
@@ -466,9 +453,9 @@
 
       <div class="text-[11px] text-gray-500 italic border-t pt-3">
         {% if lang == 'ko' %}
-          CSV는 UTF-8 + BOM으로 저장됩니다 — Excel에서 한글이 깨지지 않습니다.
+          내보낸 .xlsx는 <a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 심화 분석</a>에 바로 업로드할 수 있습니다.
         {% else %}
-          CSV is encoded as UTF-8 with BOM so Korean text renders correctly in Excel.
+          The exported .xlsx can be uploaded directly into <a href="/competitive-v3" class="text-blue-600 hover:underline">Advanced competitive analysis</a>.
         {% endif %}
       </div>
     </div>
@@ -513,16 +500,15 @@ function exportRunCsv() {
   const include = document.querySelector('input[name=export-include]:checked').value;
   const includeReasons = document.getElementById('export-include-reasons').checked ? 1 : 0;
   const excludeWeak = document.getElementById('export-exclude-weak').checked ? 1 : 0;
-  const format = (document.querySelector('input[name=export-format]:checked') || {}).value || 'csv';
   const params = new URLSearchParams({
     vendor_keys: keys.join(','),
     include: include,
     include_reasons: String(includeReasons),
     exclude_weak: String(excludeWeak),
   });
-  const endpoint = format === 'xlsx' ? '/vendors/export.xlsx' : '/vendors/export.csv';
-  // Trigger download via direct nav. The route sets Content-Disposition.
-  window.location.href = endpoint + '?' + params.toString();
+  // Excel-only export. Trigger download via direct nav; the route sets
+  // Content-Disposition.
+  window.location.href = '/vendors/export.xlsx?' + params.toString();
   closeExportModal();
 }
 // Escape closes

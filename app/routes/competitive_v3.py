@@ -88,6 +88,21 @@ async def competitive_v3_parse(
     categories; build the categorized view; remember the rows + result
     in the short-lived upload cache so Save / Export buttons in the
     returned partial can recover them without re-uploading."""
+    # Excel-only: CSV parsing of the /vendors export proved unreliable
+    # (BOM + semicolon-joined reasons cell), so this page now accepts
+    # .xlsx exclusively. Reject anything else with a clear message
+    # rather than silently mis-parsing it.
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        return render(
+            request,
+            "_competitive_v3_categorized.html",
+            error=(
+                "Excel(.xlsx) 파일만 업로드할 수 있습니다. "
+                "업체 강/약점 분석 페이지에서 📥 Excel 내보내기로 받은 파일을 올려주세요."
+            ),
+            result=None,
+            csv_name=file.filename or "",
+        )
     try:
         raw = await file.read()
         if not raw:

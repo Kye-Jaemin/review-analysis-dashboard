@@ -12,12 +12,12 @@
     </h1>
     <p class="text-sm text-gray-600 mt-1 max-w-3xl">
       {% if lang == 'ko' %}
-        <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 내보낸 CSV 또는 Excel을 업로드하면,
+        <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 내보낸 Excel(.xlsx)을 업로드하면,
         모든 reason을 LLM(Claude)로 분석해 <b>약 10개의 범용 카테고리</b>로 자동 분류합니다.
         결과: 카테고리 분포 표 + 벤더 × 카테고리 히트맵 + 카테고리별 상세 펼침.
         각 reason 클릭 시 실제 리뷰 본문 팝업 (저장된 원인 분석 카드 필요).
       {% else %}
-        Upload a CSV or Excel from <a href="/vendors" class="text-blue-600 hover:underline">vendor strengths/weaknesses</a>;
+        Upload an Excel (.xlsx) from <a href="/vendors" class="text-blue-600 hover:underline">vendor strengths/weaknesses</a>;
         Claude clusters every reason into ~10 cross-vendor top-level categories.
         Output: category distribution table + vendor × category heatmap + per-category drill-down.
         Click any reason for the actual reviews (requires a saved reason card).
@@ -35,7 +35,7 @@
           hx-indicator="#competitive-v3-loading">
 
       <label class="block text-sm font-semibold text-gray-800 mb-2">
-        {% if lang == 'ko' %}CSV 또는 Excel 업로드{% else %}Upload CSV or Excel{% endif %}
+        {% if lang == 'ko' %}Excel 업로드{% else %}Upload Excel{% endif %}
       </label>
       <div id="v3-drop-zone"
            class="border-2 border-dashed border-gray-300 rounded-md p-4 text-center hover:border-blue-400 transition-colors cursor-pointer"
@@ -44,10 +44,10 @@
           <div class="text-2xl mb-1">📄</div>
           {% if lang == 'ko' %}
             파일을 끌어다 놓거나 클릭해서 선택<br>
-            <span class="text-[10px]">.csv 또는 .xlsx (벤더 강/약점 분석 페이지 내보내기 결과)</span>
+            <span class="text-[10px]">.xlsx (벤더 강/약점 분석 페이지에서 Excel 내보내기 결과)</span>
           {% else %}
             Drop file or click to choose<br>
-            <span class="text-[10px]">.csv or .xlsx exported from vendor strengths page</span>
+            <span class="text-[10px]">.xlsx exported from the vendor strengths page</span>
           {% endif %}
         </div>
         <div id="v3-loaded-state" class="hidden text-left text-xs">
@@ -59,7 +59,7 @@
           </button>
         </div>
       </div>
-      <input id="v3-file-input" type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      <input id="v3-file-input" type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
              class="hidden" onchange="v3OnSelected(this)" required>
 
       <div class="flex items-center justify-end mt-3">
@@ -331,7 +331,7 @@ async function v3OpenReviewsFor(btn) {
     if (data.error === 'no_saved_card_for_this_strength') {
       body.innerHTML = '<div class="border border-amber-200 bg-amber-50 rounded p-4 text-sm text-amber-800">' +
         '<b>{% if lang == "ko" %}저장된 원인 분석 카드가 없습니다.{% else %}No saved reason card.{% endif %}</b><br>' +
-        '<span class="text-xs">{% if lang == "ko" %}/vendors 페이지에서 이 강점을 클릭해 원인을 분석하고 💾 카드로 저장한 뒤, CSV/Excel을 다시 내보내주세요.{% else %}Open this strength on /vendors, analyze + save its reasons, then re-export.{% endif %}</span>' +
+        '<span class="text-xs">{% if lang == "ko" %}/vendors 페이지에서 이 강점을 클릭해 원인을 분석하고 💾 카드로 저장한 뒤, Excel을 다시 내보내주세요.{% else %}Open this strength on /vendors, analyze + save its reasons, then re-export.{% endif %}</span>' +
         '</div>';
       return;
     }

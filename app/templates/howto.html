@@ -316,11 +316,10 @@
   <li><strong>기존 저장 카드</strong>: 저장 시점의 옛 reason이 그대로 남음. 부재 표현이 보이면 해당 강점 펼치고 🔄 <strong>재분석</strong> 클릭 → 새 파이프라인으로 갱신</li>
 </ul>
 
-<h3>8.3 CSV / Excel 내보내기</h3>
-<p>업체 강/약점 표 상단의 <strong>📥 내보내기</strong>:</p>
+<h3>8.3 Excel 내보내기</h3>
+<p>업체 강/약점 표 상단의 <strong>📥 Excel 내보내기</strong> (Excel 전용 — CSV는 reasons 셀의 세미콜론 조인 + BOM 때문에 경쟁력 심화 분석 업로드 호환이 불안정해 제거됨):</p>
 <ul>
   <li><strong>옵션</strong>: 업체 선택 (개별/전체) · 강점/약점/둘다 · 저장된 원인 분석 포함 (✅ 권장) · 약한 신호 제외 (긍정/부정율 30% 미만 row 컷)</li>
-  <li><strong>CSV</strong>: 단일 <code>reasons</code> 컬럼에 "reason1(N); reason2(M); …" 세미콜론 조인 (구버전 호환)</li>
   <li><strong>XLSX</strong>: <strong>reason당 1행</strong>으로 펼쳐짐 → fixed 셀(vendor / category / pct / count / ...)이 매 행 반복, 마지막 두 컬럼은 <code>reason</code>(text(N) 형식) + <code>review_count</code>(숫자형)
     <pre class="bg-gray-50 border border-gray-200 rounded p-2 text-[11px] mt-1">vendor   | type     | category    | pct  | ... | reason                  | review_count
 WW       | strength | 체중 감량   | 83.1 | ... | 포인트 추적 시스템(12)  | 12
@@ -332,7 +331,7 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
 </ul>
 
 <h2 id="competitive_v3">9. 경쟁력 심화 분석 페이지 <span class="text-sm text-gray-500">(사이드바: <b>경쟁력 심화 분석</b>, 구 "경쟁력 분류")</span></h2>
-<p><a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 심화 분석</a> — /vendors에서 내보낸 CSV 또는 Excel을 업로드하면 <strong>LLM(Claude)이 모든 reason을 약 10개의 cross-vendor 카테고리로 자동 분류</strong>해 표시합니다. 분포 표·히트맵·드릴다운에 더해, 카테고리를 상위 <strong>경쟁력 기준</strong>으로 묶고 <strong>5종 데이터 시각화</strong>(레이더/히트맵/도넛/스택/트리맵)로 포지셔닝을 비교할 수 있습니다. 결과는 카드로 영구 저장 가능하고 두 시트 Excel로 재내보내기 가능.</p>
+<p><a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 심화 분석</a> — /vendors에서 내보낸 Excel(.xlsx)을 업로드하면 <strong>LLM(Claude)이 모든 reason을 약 10개의 cross-vendor 카테고리로 자동 분류</strong>해 표시합니다. 분포 표·히트맵·드릴다운에 더해, 카테고리를 상위 <strong>경쟁력 기준</strong>으로 묶고 <strong>5종 데이터 시각화</strong>(레이더/히트맵/도넛/스택/트리맵)로 포지셔닝을 비교할 수 있습니다. 결과는 카드로 영구 저장 가능하고 두 시트 Excel로 재내보내기 가능.</p>
 
 <div class="callout warn">
   <strong>메뉴 이름 변경:</strong> "경쟁력 분류(베타)" → <b>경쟁력 심화 분석</b>. URL(<code>/competitive-v3</code>)은 그대로라 기존 북마크·저장 카드는 모두 유효합니다. 이전 v1 / v2 메뉴는 이 페이지로 통합·제거됨.
@@ -341,7 +340,7 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
 <div class="callout info">
   <strong>전체 흐름:</strong>
   <ol class="mt-1">
-    <li><a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 📥 <strong>CSV/Excel 내보내기</strong> (<em>저장된 원인 분석 포함</em> 체크 필수)</li>
+    <li><a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 📥 <strong>Excel 내보내기</strong> (<em>저장된 원인 분석 포함</em> 체크 필수)</li>
     <li>경쟁력 심화 분석 페이지에서 파일 업로드 (드래그앤드롭 / 클릭)</li>
     <li>액세스 코드 입력 후 <strong>[불러오기]</strong> → LLM 카테고리 분류 (30초~1분 소요)</li>
     <li>결과: 카테고리 분포 표 + 벤더 × 카테고리 히트맵 + 카테고리별 드릴다운</li>
@@ -351,7 +350,7 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
 
 <h3>9.1 LLM 카테고리 분류 동작</h3>
 <ul>
-  <li><strong>입력</strong>: CSV의 모든 reason (vendor / category / count / reason 텍스트 포함). 보통 200~300개</li>
+  <li><strong>입력</strong>: Excel(.xlsx)의 모든 reason (vendor / category / count / reason 텍스트 포함). 보통 200~300개</li>
   <li><strong>LLM 1회 호출</strong>: Claude Haiku, temperature=0 → 동일 파일 = 동일 결과</li>
   <li><strong>카테고리 명명 규칙</strong>: 8~12개, cross-vendor (최소 2개 벤더에서 reason 나옴), value-neutral (가치 단어 금지), 중간점 "·"로 연관 개념 결합 (예: "칼로리·매크로·영양소 추적")</li>
   <li><strong>Seed 예시 제공</strong>: 사용자의 첨부 파일에서 추출한 12개 표준 카테고리 (칼로리·매크로·영양소 추적 / 사진·바코드·음성 음식 입력 / 동기부여·책임감·습관 형성 / 운동·수면·건강 데이터 추적 / UI/UX·사용 편의성 / 음식 DB·검색·레시피 / 교육·레슨·강사 콘텐츠 / 게임화·캐릭터·보상 / 무료·가격 가치 / 개인화 코칭·인사이트 / 커뮤니티·소셜 / 기기·앱 연동) → LLM이 적합 시 재사용, 새 reason은 새 명명. 결과적으로 동일 도메인 데이터는 비슷한 카테고리 셋으로 수렴</li>
@@ -414,7 +413,7 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
 
 <div class="callout info">
   <strong>예시 시나리오:</strong>
-  /vendors에서 11개 다이어트/피트니스 앱의 강점 CSV (238 reason, 1754 리뷰) 내보내기 → v3 업로드 → 30초 후 12개 카테고리로 자동 분류 → "칼로리·매크로·영양소 추적 294건 (16.8%)", "사진·바코드·음성 음식 입력 246건 (14.0%)" ... 식으로 분포 표시 → 히트맵에서 카테고리별 강자 벤더 한 눈에 식별 → 🧭 AI 자동 그룹화로 12개 카테고리를 5개 경쟁력 기준으로 묶고 드롭다운으로 미세 조정 → 💾 "2026Q2 다이어트앱 강점 분석"으로 저장 → 동료에게 📥 XLSX 공유.
+  /vendors에서 11개 다이어트/피트니스 앱의 강점 Excel (238 reason, 1754 리뷰) 내보내기 → v3 업로드 → 30초 후 12개 카테고리로 자동 분류 → "칼로리·매크로·영양소 추적 294건 (16.8%)", "사진·바코드·음성 음식 입력 246건 (14.0%)" ... 식으로 분포 표시 → 히트맵에서 카테고리별 강자 벤더 한 눈에 식별 → 🧭 AI 자동 그룹화로 12개 카테고리를 5개 경쟁력 기준으로 묶고 드롭다운으로 미세 조정 → 💾 "2026Q2 다이어트앱 강점 분석"으로 저장 → 동료에게 📥 XLSX 공유.
 </div>
 
 <h2 id="mindmap">10. 감성 원인 마인드맵</h2>
@@ -753,16 +752,15 @@ want your own taxonomy:</p>
   <li><strong>Sample count integrity</strong>: <code>causal + simple = sample size</code> always holds. The LLM occasionally drops reviews into neither bucket; leftover IDs auto-fall into simple_responses.</li>
 </ul>
 
-<h3>8.2 CSV / Excel export</h3>
+<h3>8.2 Excel export</h3>
 <ul>
-  <li>📥 <strong>Export</strong>: pick vendors (any subset), strengths / weaknesses / both, include saved reasons (recommended), exclude weak signals (&lt;30%).</li>
-  <li><strong>CSV</strong>: single <code>reasons</code> column, semicolon-joined.</li>
+  <li>📥 <strong>Export Excel</strong> (Excel-only; CSV was dropped — its semicolon-joined reasons cell + BOM made the round-trip into Advanced competitive analysis unreliable): pick vendors (any subset), strengths / weaknesses / both, include saved reasons (recommended), exclude weak signals (&lt;30%).</li>
   <li><strong>XLSX</strong>: <strong>one row per reason</strong> — fixed cells repeat, trailing columns are <code>reason</code> (text(N)) + <code>review_count</code> (numeric). freeze pane + autofilter set. Excel can sort / pivot / chart per reason directly.</li>
-  <li><strong>Timestamped filename</strong>: <code>vendor_analysis_YYYYMMDD_HHMMSS.{csv,xlsx}</code> — repeated downloads don't overwrite.</li>
+  <li><strong>Timestamped filename</strong>: <code>vendor_analysis_YYYYMMDD_HHMMSS.xlsx</code> — repeated downloads don't overwrite.</li>
 </ul>
 
 <h2 id="competitive_v3">9. Advanced competitive analysis <span class="text-sm text-gray-500">(sidebar: <b>Advanced competitive analysis</b>, formerly "Competitive factor")</span></h2>
-<p><a href="/competitive-v3" class="text-blue-600 hover:underline">Advanced competitive analysis</a> — upload a CSV / Excel from /vendors and <strong>Claude clusters every reason into ~10 cross-vendor top-level categories</strong>. Result: distribution table + vendor × category heatmap + per-category drill-down, plus a competitive-criteria mapping with <strong>5 data visualizations</strong> (radar / heatmap / doughnut / stacked / treemap). Saveable + re-exportable as a two-sheet xlsx.</p>
+<p><a href="/competitive-v3" class="text-blue-600 hover:underline">Advanced competitive analysis</a> — upload an Excel (.xlsx) from /vendors and <strong>Claude clusters every reason into ~10 cross-vendor top-level categories</strong>. Result: distribution table + vendor × category heatmap + per-category drill-down, plus a competitive-criteria mapping with <strong>5 data visualizations</strong> (radar / heatmap / doughnut / stacked / treemap). Saveable + re-exportable as a two-sheet xlsx.</p>
 <div class="callout warn"><strong>Renamed:</strong> "Competitive factor (beta)" → <b>Advanced competitive analysis</b>. The URL (<code>/competitive-v3</code>) is unchanged, so existing bookmarks and saved cards stay valid.</div>
 
 <ul>
