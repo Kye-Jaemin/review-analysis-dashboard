@@ -44,11 +44,11 @@
     <li><a href="#quickstart">빠른 시작 (5단계)</a></li>
     <li><a href="#sources">리뷰 수집 — 4가지 채널 (구 "소스")</a></li>
     <li><a href="#categories">카테고리 트리 만들기 (수동)</a></li>
-    <li><a href="#analyze">리뷰 분류 및 긍부정 평가 — 자동 vs 수동 (구 "분석")</a></li>
+    <li><a href="#analyze">리뷰 분석 Trigger — 자동 vs 수동 (구 "리뷰 분류 및 긍부정 평가" / "분석")</a></li>
     <li><a href="#cards">조사 카드 관리 (정렬·숨김·그룹·내보내기)</a></li>
     <li><a href="#dashboard">대시보드 패널</a></li>
     <li><a href="#vendors">업체 강/약점 분석 페이지 (구 "업체 분석")</a></li>
-    <li><a href="#competitive_v3">경쟁력 분류 페이지 (베타, LLM 자동 카테고리화 + 경쟁력 기준 매핑 + 카드 저장 + Excel 내보내기)</a></li>
+    <li><a href="#competitive_v3">경쟁력 심화 분석 페이지 (구 "경쟁력 분류", LLM 자동 카테고리화 + 경쟁력 기준 매핑 + 데이터 시각화 + 카드 저장 + Excel 내보내기)</a></li>
     <li><a href="#mindmap">감성 원인 마인드맵</a></li>
     <li><a href="#reviews">전체 리뷰 보기 + 내보내기 + 번역 (구 "리뷰")</a></li>
     <li><a href="#workspace">워크스페이스 저장·불러오기</a></li>
@@ -76,7 +76,7 @@
   <li><strong>소스 추가</strong> — <a href="/sources" class="text-blue-600 hover:underline">리뷰 수집</a>에서 분석할 앱·서브레딧·URL 등록</li>
   <li><strong>수집 실행</strong> — 소스 페이지에서 각 소스의 <em>수집 시작</em> 클릭 <span class="text-amber-700">(액세스 코드 필요)</span></li>
   <li><strong>(선택) 수동 카테고리 정의</strong> — 자동 분류로 시작해도 무방. 직접 정의한 분류 체계가 필요하면 <a href="/categories" class="text-blue-600 hover:underline">수동 카테고리</a>에서 트리 생성</li>
-  <li><strong>분류 + 긍부정 평가 실행</strong> — <a href="/analyze" class="text-blue-600 hover:underline">리뷰 분류 및 긍부정 평가</a>에서 소스 선택, 분류 모드 (자동 / 수동) 선택, 이름 입력 후 실행 <span class="text-amber-700">(액세스 코드 필요)</span></li>
+  <li><strong>분류 + 긍부정 평가 실행</strong> — <a href="/analyze" class="text-blue-600 hover:underline">리뷰 분석 Trigger</a>에서 소스 선택, 분류 모드 (자동 / 수동) 선택, 이름 입력 후 실행 <span class="text-amber-700">(액세스 코드 필요)</span></li>
   <li><strong>결과 확인</strong> — <a href="/" class="text-blue-600 hover:underline">대시보드</a> 진입 후 카드 클릭으로 즉시 그 카드 범위 보기. <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a> 페이지에서 업체별 강점/약점도 자동 집계</li>
 </ol>
 
@@ -139,7 +139,7 @@
   LLM 분류 정확도가 크게 올라갑니다. 빈 설명은 분류 품질 저하의 가장 큰 원인.
 </div>
 
-<h2 id="analyze">5. 리뷰 분류 및 긍부정 평가 — 자동 vs 수동 <span class="text-sm text-gray-500">(사이드바: <b>리뷰 분류 및 긍부정 평가</b>, 구 "분석")</span></h2>
+<h2 id="analyze">5. 리뷰 분석 Trigger — 자동 vs 수동 <span class="text-sm text-gray-500">(사이드바: <b>리뷰 분석 Trigger</b>, 구 "리뷰 분류 및 긍부정 평가" / "분석")</span></h2>
 <p>분석 페이지의 가장 큰 선택지는 <strong>분류 방식</strong>입니다:</p>
 
 <h3>5.1 자동 모드 (기본 추천)</h3>
@@ -263,16 +263,22 @@
 
 <ul>
   <li><strong>신규 LLM 호출 0건</strong> — 기존 분석 결과 가공만</li>
-  <li>각 업체 카드:
+  <li>각 업체 카드 (<strong>진입 시 전부 접힌 상태</strong> — 헤더 클릭 또는 모두 펼치기/접기로 여닫음):
       <ul>
         <li>업체 이름 + 플랫폼 칩 (어느 스토어/Reddit 에서 데이터 수집했는지)</li>
         <li>총 리뷰 / 평균 감성 / 평균 별점</li>
-        <li><strong>5밴드 sentiment 분포 바</strong></li>
-        <li><strong>💪 강점 Top 5</strong> (긍정 비율 높은 자동 카테고리 순)</li>
+        <li><strong>5밴드 sentiment 분포 바</strong> (스크롤로 들어올 때 0→비율로 성장 애니메이션)</li>
+        <li><strong>💪 강점 Top 5</strong> (긍정 비율 높은 자동 카테고리 순, 상위 3개 메달)</li>
         <li><strong>⚠️ 약점 Top 5</strong> (부정 비율 높은 자동 카테고리 순)</li>
       </ul>
   </li>
 </ul>
+
+<div class="callout info">
+  <strong>UX 메모:</strong> 그라데이션 헤더 🏆 + 호버 lift + 펼침 시 비율 바 0→값 성장 등 시각 효과가 적용됩니다.
+  강/약점 클릭 시 원인 분석 팝업은 <strong>로딩 → 결과로 본문 높이가 바뀔 때마다 클릭 위치 근처로 재정렬</strong>되어, 비동기 콘텐츠가 커진 뒤 팝업이 엉뚱한 곳에 뜨던 문제가 해결됐습니다.
+  모든 모션은 <code>prefers-reduced-motion</code> 설정 시 비활성화됩니다.
+</div>
 
 <div class="callout info">
   <strong>업체 alias 자동 병합:</strong> 같은 회사가 스토어마다 다른 이름으로 등록된 경우 자동으로 한 row 로 합쳐집니다:
@@ -325,18 +331,18 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
   <li><strong>파일명 자동 타임스탬프</strong>: <code>vendor_analysis_20260605_143025.xlsx</code> 형식 → 반복 다운로드 시 덮어쓰지 않고 누적</li>
 </ul>
 
-<h2 id="competitive_v3">9. 경쟁력 분류 페이지 <span class="text-sm text-gray-500">(사이드바: <b>경쟁력 분류(베타)</b>)</span></h2>
-<p><a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 분류(베타)</a> — /vendors에서 내보낸 CSV 또는 Excel을 업로드하면 <strong>LLM(Claude)이 모든 reason을 약 10개의 cross-vendor 카테고리로 자동 분류</strong>해 표시합니다. 결과는 카드로 영구 저장 가능하고 두 시트 Excel로 재내보내기 가능.</p>
+<h2 id="competitive_v3">9. 경쟁력 심화 분석 페이지 <span class="text-sm text-gray-500">(사이드바: <b>경쟁력 심화 분석</b>, 구 "경쟁력 분류")</span></h2>
+<p><a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 심화 분석</a> — /vendors에서 내보낸 CSV 또는 Excel을 업로드하면 <strong>LLM(Claude)이 모든 reason을 약 10개의 cross-vendor 카테고리로 자동 분류</strong>해 표시합니다. 분포 표·히트맵·드릴다운에 더해, 카테고리를 상위 <strong>경쟁력 기준</strong>으로 묶고 <strong>5종 데이터 시각화</strong>(레이더/히트맵/도넛/스택/트리맵)로 포지셔닝을 비교할 수 있습니다. 결과는 카드로 영구 저장 가능하고 두 시트 Excel로 재내보내기 가능.</p>
 
 <div class="callout warn">
-  <strong>이전 v1 / v2 메뉴는 통합되어 제거됨</strong> (사용자 요청). 기존 저장 카드는 라우트가 유지되어 깨지지 않지만 사이드바에서는 보이지 않음.
+  <strong>메뉴 이름 변경:</strong> "경쟁력 분류(베타)" → <b>경쟁력 심화 분석</b>. URL(<code>/competitive-v3</code>)은 그대로라 기존 북마크·저장 카드는 모두 유효합니다. 이전 v1 / v2 메뉴는 이 페이지로 통합·제거됨.
 </div>
 
 <div class="callout info">
   <strong>전체 흐름:</strong>
   <ol class="mt-1">
     <li><a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 📥 <strong>CSV/Excel 내보내기</strong> (<em>저장된 원인 분석 포함</em> 체크 필수)</li>
-    <li>경쟁력 분류 페이지에서 파일 업로드 (드래그앤드롭 / 클릭)</li>
+    <li>경쟁력 심화 분석 페이지에서 파일 업로드 (드래그앤드롭 / 클릭)</li>
     <li>액세스 코드 입력 후 <strong>[불러오기]</strong> → LLM 카테고리 분류 (30초~1분 소요)</li>
     <li>결과: 카테고리 분포 표 + 벤더 × 카테고리 히트맵 + 카테고리별 드릴다운</li>
     <li>💾 <strong>카드로 저장</strong> 또는 📥 <strong>엑셀 내보내기</strong></li>
@@ -355,9 +361,9 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
 
 <h3>9.2 결과 화면 — 3개 섹션</h3>
 <ol>
-  <li><strong>카테고리 분포 표</strong>: 카테고리명 / 리뷰 수 합 / 비중 (진척바) / reason 항목수 / 업체 수. 리뷰 수 내림차순 정렬</li>
-  <li><strong>벤더 × 카테고리 히트맵</strong>: sticky 첫 열 + 가로 스크롤. 셀 농도 = 해당 (카테고리, 벤더) 리뷰 수 / max. 행/열 합계 + 총합 표시</li>
-  <li><strong>카테고리별 드릴다운</strong>: details/summary로 펼침. 상위 3개 자동 열림. 카테고리 안 → 기여 벤더별 그룹 → 각 벤더의 reason 리스트. <strong>각 reason 클릭 → 실제 리뷰 팝업</strong> (별점·감정·날짜)</li>
+  <li><strong>카테고리 분포 표</strong>: 카테고리명 / 리뷰 수 합 / 비중 (진척바) / reason 항목수 / 업체 수. 리뷰 수 내림차순 정렬. <span class="text-gray-600">기본 접힘 — 헤더의 <b>펼치기 ▾ / 접기 ▴</b> 토글로 여닫음</span></li>
+  <li><strong>벤더 × 카테고리 히트맵</strong>: sticky 첫 열 + 가로 스크롤. 셀 농도 = 해당 (카테고리, 벤더) 리뷰 수 / max (sky→indigo→violet→pink 그라데이션 열지도). 행/열 합계 + 총합 표시. <strong>행(카테고리) 클릭 → 해당 카테고리 상세로 스크롤 + 하이라이트</strong>. 호버 시 행/열 십자선 강조 + "벤더 · 카테고리 · N" 툴팁</li>
+  <li><strong>카테고리별 드릴다운</strong>: details/summary로 펼침 (<strong>전부 기본 접힘</strong>). 카테고리 안 → 기여 벤더별 그룹 → 각 벤더의 reason 리스트. <strong>각 reason 클릭 → 실제 리뷰 팝업</strong> (별점·감정·날짜)</li>
 </ol>
 
 <h3>9.3 카드로 저장</h3>
@@ -378,20 +384,32 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
   <li>이 XLSX를 다시 v3에 업로드하면 <strong>카테고리 컬럼 인식 → LLM 건너뜀</strong> → 즉시 결과 표시</li>
 </ul>
 
-<h3>9.5 경쟁력 기준 매핑 (NEW — 🧭 상위 그룹화)</h3>
-<p>약 10개의 AI 카테고리를 다시 <strong>약 5개의 상위 "경쟁력 기준"으로 묶는</strong> 단계. 결과 화면 상단의 🧭 <strong>경쟁력 기준 매핑</strong> 패널에서 진행합니다.</p>
+<h3>9.5 경쟁력 기준 매핑 (🧭 상위 그룹화)</h3>
+<p>약 10개의 AI 카테고리를 다시 <strong>약 5개의 상위 "경쟁력 기준"으로 묶는</strong> 단계. <strong>페이지 하단</strong>의 🧭 <strong>경쟁력 기준 매핑</strong> 패널에서 진행합니다 (기본 접힘 — AI 자동 그룹화/추가 시 자동으로 펼쳐짐).</p>
 <ul>
-  <li><strong>🤖 AI 자동 그룹화</strong>: Claude가 카테고리들을 의미 기준으로 ~5개 기준으로 묶어 제안 (temperature=0, 캐시). 예: "음식 입력 편의성", "건강 데이터 통합", "동기부여·리텐션" 등</li>
+  <li><strong>🤖 AI 자동 그룹화</strong>: Claude가 카테고리들을 의미 기준으로 ~5개 기준으로 묶어 제안 (temperature=0, 캐시). 예: "음식 입력 편의성", "건강 데이터 통합", "동기부여·리텐션" 등. 성공 시 🎉 confetti</li>
   <li><strong>드롭다운으로 조정</strong>: 각 카테고리를 다른 기준으로 옮기거나, <strong>＋ 기준 추가</strong>로 새 기준 생성 → AI 제안을 그대로 쓰지 않고 분석가 관점으로 재배치 가능</li>
   <li><strong>💾 저장</strong>: 매핑을 현재 카드에 영구 저장 (별도 <code>criteria_mapping</code> 컬럼 → 카드 self-heal 재빌드에도 보존). 저장된 카드를 다시 불러오면 매핑도 그대로 복원</li>
   <li><strong>기준별 리뷰 보기</strong>: 한 경쟁력 기준을 클릭하면 그 기준에 묶인 <strong>모든 카테고리의 reason을 합산</strong>해 보여줌:
     <ul>
       <li>카테고리 → 벤더 순으로 그룹핑, 각 그룹은 <strong>feedback 수(reason count 합) 내림차순</strong> 정렬</li>
-      <li>핵심 feedback 요약(원인 + 건수)이 먼저, 실제 리뷰 본문은 <strong>접기(collapse) 뒤</strong>에 표시</li>
+      <li>핵심 feedback 요약(원인 + 건수)이 먼저, 실제 리뷰 본문은 <strong>접기(collapse) 뒤</strong>에 표시. 벤더별 미니 랭킹 막대(애니메이션)도 함께</li>
       <li>저장된 원인 카드가 없으면 → 업로드 파일의 카운트로 폴백, review_ids가 없어도 <strong>feedback 요약은 유지</strong></li>
     </ul>
   </li>
-  <li>LLM은 <strong>🤖 자동 그룹화 1회만</strong> 사용 (액세스 코드 필요). 조정·저장·기준별 리뷰 보기는 LLM 호출 0회</li>
+  <li>LLM은 <strong>🤖 자동 그룹화 1회만</strong> 사용 (액세스 코드 필요). 조정·저장·기준별 리뷰 보기·시각화는 LLM 호출 0회</li>
+</ul>
+
+<h3>9.6 데이터 시각화 (📊 5종 차트)</h3>
+<p>기준 매핑 패널 안의 📊 시각화 탭. 임베드된 <strong>벤더 × 카테고리 매트릭스를 경쟁력 기준 단위로 집계</strong>해 그립니다 (런타임 의존성 추가 없이 전역 Chart.js 사용, 트리맵만 lazy 플러그인). 벤더는 <strong>아이콘 + 색상 틴트 이름</strong>으로 식별 (리뷰 수 순위별 고정 팔레트).</p>
+<ul>
+  <li><strong>🕸️ 벤더 레이더</strong>: 경쟁력 기준축에 각 벤더의 강도를 겹쳐 그려 <strong>포지셔닝</strong> 비교. <strong>범례에서 벤더 클릭 → 단일 벤더 격리</strong> (다시 클릭 → 전체 복원)</li>
+  <li><strong>🔥 기준 × 벤더 히트맵</strong>: 모든 벤더 표시 (스크롤). 셀 농도로 강약 한눈에</li>
+  <li><strong>🍩 기준 도넛</strong>: 경쟁력 기준별 리뷰 비중</li>
+  <li><strong>📚 스택 막대</strong>: 기준별 벤더 구성 비교 (상위 N + Other)</li>
+  <li><strong>🗂️ 트리맵</strong>: 기준·벤더 면적 비교 (CDN 차단 시 안내 메시지로 graceful degrade)</li>
+  <li><strong>Top-N 셀렉터</strong> (6 / 8 / 12 / All): 레이더·스택에 표시할 벤더 수 조절 (기본 8). 캡션에 "top N of M" 표기. 도넛·트리맵·히트맵에서는 의미 없어 숨김</li>
+  <li><code>prefers-reduced-motion</code> 시 모든 애니메이션 비활성화. 차트는 패널을 펼친 뒤에만 렌더(0-size canvas 빈 화면 방지)</li>
 </ul>
 
 <div class="callout info">
@@ -500,11 +518,11 @@ reviews list, the vendor strengths/weaknesses page — scopes to it.</p>
     <li><a href="#quickstart">Quick start (5 steps)</a></li>
     <li><a href="#sources">Add a source — 4 channels</a></li>
     <li><a href="#categories">Build a manual category tree</a></li>
-    <li><a href="#analyze">Run analysis — auto vs manual</a></li>
+    <li><a href="#analyze">Review analysis trigger — auto vs manual</a></li>
     <li><a href="#cards">Investigation card management</a></li>
     <li><a href="#dashboard">Dashboard panels</a></li>
     <li><a href="#vendors">Vendor analysis page (strengths/weaknesses + XLSX export)</a></li>
-    <li><a href="#competitive_v3">Competitive factor page (beta, LLM categorization + criteria mapping + save card + Excel export)</a></li>
+    <li><a href="#competitive_v3">Advanced competitive analysis (formerly "Competitive factor", LLM categorization + criteria mapping + data viz + save card + Excel export)</a></li>
     <li><a href="#mindmap">Sentiment reasons mind map</a></li>
     <li><a href="#reviews">Reviews explorer + export + translate (show-hidden toggle)</a></li>
     <li><a href="#workspace">Workspace save / load</a></li>
@@ -590,7 +608,7 @@ want your own taxonomy:</p>
   <li>Use each node's <em>Add child</em> to grow the tree</li>
 </ol>
 
-<h2 id="analyze">5. Run analysis — auto vs manual</h2>
+<h2 id="analyze">5. Review analysis trigger — auto vs manual <span class="text-sm text-gray-500">(sidebar: <b>Review analysis trigger</b>, formerly "Run analysis")</span></h2>
 <p>The biggest choice on the analyze page is the <strong>classification mode</strong>:</p>
 
 <h3>5.1 Auto mode (default, recommended)</h3>
@@ -704,16 +722,18 @@ want your own taxonomy:</p>
 
 <ul>
   <li><strong>Zero new LLM calls</strong> — pure aggregation over existing analyses</li>
-  <li>Per-vendor card:
+  <li>Per-vendor card (<strong>all collapsed on load</strong> — click a header, or use expand/collapse-all):
       <ul>
         <li>Vendor name + platform chips</li>
         <li>Total reviews / avg sentiment / avg rating</li>
-        <li><strong>5-band sentiment distribution bar</strong></li>
-        <li><strong>💪 Top 5 strengths</strong> (auto categories with the highest positive ratio)</li>
+        <li><strong>5-band sentiment distribution bar</strong> (segments grow 0→share as the bar scrolls into view)</li>
+        <li><strong>💪 Top 5 strengths</strong> (auto categories with the highest positive ratio; top-3 medals)</li>
         <li><strong>⚠️ Top 5 weaknesses</strong> (highest negative ratio)</li>
       </ul>
   </li>
 </ul>
+
+<div class="callout info"><strong>UX:</strong> gradient header 🏆, hover lift, ratio bars grow on expand. The strength/weakness reason popup <strong>re-anchors near the click whenever its body height changes</strong> (loading → result), fixing the old "popup drifts away after async content grows" bug. All motion is disabled under <code>prefers-reduced-motion</code>.</div>
 
 <div class="callout info">
   <strong>Vendor alias merge:</strong> known multi-listing brands are merged into one row:
@@ -741,14 +761,15 @@ want your own taxonomy:</p>
   <li><strong>Timestamped filename</strong>: <code>vendor_analysis_YYYYMMDD_HHMMSS.{csv,xlsx}</code> — repeated downloads don't overwrite.</li>
 </ul>
 
-<h2 id="competitive_v3">9. Competitive factor page (beta)</h2>
-<p><a href="/competitive-v3" class="text-blue-600 hover:underline">Competitive factor (beta)</a> — upload a CSV / Excel from /vendors and <strong>Claude clusters every reason into ~10 cross-vendor top-level categories</strong>. Result: distribution table + vendor × category heatmap + per-category drill-down. Saveable + re-exportable as a two-sheet xlsx.</p>
+<h2 id="competitive_v3">9. Advanced competitive analysis <span class="text-sm text-gray-500">(sidebar: <b>Advanced competitive analysis</b>, formerly "Competitive factor")</span></h2>
+<p><a href="/competitive-v3" class="text-blue-600 hover:underline">Advanced competitive analysis</a> — upload a CSV / Excel from /vendors and <strong>Claude clusters every reason into ~10 cross-vendor top-level categories</strong>. Result: distribution table + vendor × category heatmap + per-category drill-down, plus a competitive-criteria mapping with <strong>5 data visualizations</strong> (radar / heatmap / doughnut / stacked / treemap). Saveable + re-exportable as a two-sheet xlsx.</p>
+<div class="callout warn"><strong>Renamed:</strong> "Competitive factor (beta)" → <b>Advanced competitive analysis</b>. The URL (<code>/competitive-v3</code>) is unchanged, so existing bookmarks and saved cards stay valid.</div>
 
 <ul>
   <li><strong>Flow</strong>: /vendors export → upload → access code → LLM clusters (30–60 s) → results panel.</li>
   <li><strong>Categories</strong>: 8–12 cross-vendor (≥2 vendors per category), value-neutral, "·"-joined. Seed exemplars from the user's reference file keep names consistent run-to-run.</li>
   <li><strong>SHA256 cache</strong> (30 min TTL): re-uploading the same file skips the LLM call entirely.</li>
-  <li><strong>3 result sections</strong>: (1) distribution table (review count + % + reason count + vendor count per category) (2) vendor × category heatmap (sticky first column, opacity scaled to cell / max) (3) collapsible per-category drill-down (top 3 auto-expanded; reasons are clickable for the actual-review popup, same as the /vendors reason cards).</li>
+  <li><strong>3 result sections</strong> (distribution table + per-category drill-down both <em>collapsed by default</em>): (1) distribution table (review count + % + reason count + vendor count per category) with an explicit expand/collapse toggle (2) vendor × category heatmap — gradient heat scale (sky→indigo→violet→pink), hover crosshair + tooltips, and <strong>clicking a row scrolls to + highlights that category's detail</strong> (3) per-category drill-down; reasons are clickable for the actual-review popup, same as the /vendors reason cards.</li>
   <li><strong>💾 Save as card</strong>: persists input rows (with 카테고리 column) + view payload; reloading a card costs zero LLM calls. Cards panel shows label, filename, totals, timestamps; actions: 📂 Load, 📥 XLSX, ✏️ Rename, 🗑️ Delete.</li>
   <li><strong>📥 Excel export</strong> (two sheets):
     <ul>
@@ -760,14 +781,26 @@ want your own taxonomy:</p>
   <li><strong>Previous v1 / v2 menus</strong> were consolidated into v3 and removed from the sidebar. Their routes remain registered (existing bookmarks still resolve) but they're no longer reachable from the nav.</li>
 </ul>
 
-<h3>9.5 Competitive criteria mapping (NEW — 🧭 higher-level grouping)</h3>
-<p>A step that buckets the ~10 AI categories into ~5 higher-level <strong>competitive criteria</strong>, in the 🧭 <strong>Competitive criteria mapping</strong> panel at the top of the results.</p>
+<h3>9.5 Competitive criteria mapping (🧭 higher-level grouping)</h3>
+<p>A step that buckets the ~10 AI categories into ~5 higher-level <strong>competitive criteria</strong>, in the 🧭 <strong>Competitive criteria mapping</strong> panel at the <strong>bottom of the page</strong> (collapsed by default; auto-expands on AI-group / add).</p>
 <ul>
   <li><strong>🤖 AI auto-group</strong>: Claude groups the categories into ~5 criteria by meaning (temperature=0, cached). e.g. "Food-logging convenience", "Health-data integration", "Motivation & retention".</li>
   <li><strong>Adjust via dropdown</strong>: move any category to a different criterion, or <strong>＋ Add criterion</strong> for a new bucket — override the AI's suggestion with an analyst's framing.</li>
   <li><strong>💾 Save</strong>: persists the mapping onto the current card (a dedicated <code>criteria_mapping</code> column that survives the card's self-heal rebuild). Reloading the card restores the mapping too.</li>
   <li><strong>View reviews by criterion</strong>: clicking a criterion aggregates <strong>every member category's reasons</strong>: grouped by category then vendor, each group sorted by feedback count (Σ reason counts) desc; the key-feedback summary shows first, full review bodies sit behind a collapse. Falls back to file counts when there's no saved reason card, and keeps the feedback summary even when no review_ids exist.</li>
-  <li>The LLM is used <strong>only for 🤖 auto-group</strong> (access code required). Adjust / save / view-by-criterion make zero LLM calls.</li>
+  <li>The LLM is used <strong>only for 🤖 auto-group</strong> (access code required). Adjust / save / view-by-criterion / visualizations make zero LLM calls.</li>
+</ul>
+
+<h3>9.6 Data visualizations (📊 5 charts)</h3>
+<p>A 📊 viz tab set inside the criteria-mapping panel, built by aggregating the embedded <strong>vendor × category matrix up to the competitive criteria</strong> (no new runtime deps — global Chart.js; treemap via a lazy plugin). Vendors are identified by <strong>icon + colour-tinted name</strong> (stable palette by review-count rank).</p>
+<ul>
+  <li><strong>🕸️ Vendor radar</strong> — overlay each vendor's strength across the criteria axes for <strong>positioning</strong>; <strong>click a vendor in the legend to isolate it</strong> (click again to restore).</li>
+  <li><strong>🔥 Criteria × vendor heatmap</strong> — all vendors (scrolls).</li>
+  <li><strong>🍩 Criteria doughnut</strong> — review share per criterion.</li>
+  <li><strong>📚 Stacked bar</strong> — vendor composition per criterion (top-N + Other).</li>
+  <li><strong>🗂️ Treemap</strong> — area comparison (graceful message if its CDN is blocked).</li>
+  <li><strong>Top-N selector</strong> (6 / 8 / 12 / All) controls how many vendors radar/stacked plot (default 8; caption shows "top N of M"); hidden for doughnut/treemap/heatmap.</li>
+  <li><code>prefers-reduced-motion</code> disables all animation; charts render only once the panel is expanded (a 0-size canvas would draw blank).</li>
 </ul>
 
 <h2 id="mindmap">10. Sentiment reasons mind map</h2>
