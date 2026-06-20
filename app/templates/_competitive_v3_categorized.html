@@ -303,8 +303,10 @@
         "vendor_keys": c.vendors|map(attribute='key')|list,
       }) %}
     {% endfor %}
+    {# default(none, true) so a route that forgets to set these keys
+       yields JSON null instead of an Undefined that 500s |tojson. #}
     <script type="application/json" id="v3-criteria-data">
-      {{ {"categories": crit_cats, "total_reviews": result.totals.reviews, "criteria": result._criteria, "card_id": result._card_id, "matrix": result.matrix}|tojson|safe }}
+      {{ {"categories": crit_cats, "total_reviews": result.totals.reviews, "criteria": result._criteria|default(none, true), "card_id": result._card_id|default(none, true), "matrix": result.matrix|default(none, true)}|tojson|safe }}
     </script>
 
     {# ====== Competitive criteria mapping (collapsed by default; bottom of page) ====== #}

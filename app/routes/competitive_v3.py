@@ -117,6 +117,16 @@ async def competitive_v3_parse(
     result["_file_name"] = file.filename or "vendor_analysis"
     result["_input_hash"] = hash_rows(rows)
     result["_model_used"] = settings.ANTHROPIC_MODEL
+    # A fresh upload has no saved card and no criteria mapping yet. The
+    # categorized partial embeds result._card_id / result._criteria into
+    # the v3-criteria-data <script>; if these keys are absent Jinja's
+    # |tojson hits an Undefined and 500s the whole parse (which htmx
+    # then doesn't swap, so the page looks frozen on the previous data).
+    # Set them explicitly so the fresh-upload path renders like the
+    # card-load path.
+    result["_card_id"] = None
+    result["_card_label"] = None
+    result["_criteria"] = None
     # Best-effort in-memory cache for back-compat callers that still
     # pass input_hash; the canonical Save / Export path is now embedded
     # JSON in the partial (see raw_rows below) so it survives worker
