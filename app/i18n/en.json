@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Review Dashboard",
+    "name": "Consumer Review Analysis Agent",
     "tagline": "Collect, classify, and analyze reviews across channels."
   },
   "nav": {
