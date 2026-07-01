@@ -24,6 +24,17 @@
 <div class="flex items-baseline justify-between mb-4 gap-3">
   <h1 id="vendors-title" class="text-2xl font-semibold">🏆 {{ t('nav.vendors') }}</h1>
   <div class="flex items-baseline gap-3">
+    {% if vendors and allowed_models %}
+      <label class="flex items-center gap-1 text-xs text-gray-600 shrink-0"
+             title="{% if lang == 'ko' %}강점/약점을 클릭해 원인을 분석할 때 사용할 AI 모델. 어려운 인과 추출은 Sonnet이 더 정확합니다.{% else %}Model used when you click a strength/weakness to extract reasons. Sonnet is more accurate for hard causal reasoning.{% endif %}">
+        🧠 <span class="hidden sm:inline">{% if lang == 'ko' %}원인 분석 모델{% else %}Reason model{% endif %}</span>
+        <select id="vendors-model" class="border border-gray-300 rounded px-1.5 py-1 text-xs bg-white">
+          {% for m in allowed_models %}
+            <option value="{{ m }}" {% if m == default_model %}selected{% endif %}>{% if 'haiku' in m %}Haiku · {% if lang == 'ko' %}빠름·저가{% else %}fast/cheap{% endif %}{% elif 'sonnet' in m %}Sonnet · {% if lang == 'ko' %}정확{% else %}accurate{% endif %}{% elif 'opus' in m %}Opus · {% if lang == 'ko' %}최고{% else %}best{% endif %}{% else %}{{ m }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+    {% endif %}
     <div class="flex gap-2 shrink-0">
       {% if vendors %}
         <button type="button" onclick="expandAllVendors()"
@@ -825,6 +836,13 @@ function _updateFooter(saved, hasResult) {
   document.getElementById('reasons-delete-btn').classList.toggle('hidden', !saved);
 }
 
+// Read the currently-selected reason-analysis model from the page
+// header (defaults to the server default if the selector is absent).
+function _vendorsModel() {
+  const el = document.getElementById('vendors-model');
+  return el && el.value ? el.value : '';
+}
+
 async function fetchFreshReasons(force) {
   _showOnly('reasons-loading');
   _updateFooter(false, false);
@@ -834,6 +852,8 @@ async function fetchFreshReasons(force) {
     band: _reasonsState.band,
     summary_lang: '{{ lang }}',
   });
+  const model = _vendorsModel();
+  if (model) params.append('model', model);
   if (force) params.append('force', 'true');
   try {
     const res = await fetch('/api/vendor-reasons?' + params.toString());
@@ -1098,7 +1118,9 @@ async function reasonsReanalyze() {
   _showOnly('reasons-loading');
   _updateFooter(true, false);
   try {
-    const res = await fetch('/api/vendor-reason-cards/' + _reasonsState.savedCardId + '/reanalyze?summary_lang={{ lang }}', { method: 'POST' });
+    const _m = _vendorsModel();
+    const _rq = '/api/vendor-reason-cards/' + _reasonsState.savedCardId + '/reanalyze?summary_lang={{ lang }}' + (_m ? '&model=' + encodeURIComponent(_m) : '');
+    const res = await fetch(_rq, { method: 'POST' });
     if (!res.ok) { _showError('HTTP ' + res.status); return; }
     const data = await res.json();
     _reasonsState.result = {

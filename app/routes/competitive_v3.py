@@ -74,6 +74,8 @@ async def competitive_v3_page(
         request, "competitive_v3.html",
         saved_cards=cards,
         cards_error=cards_error,
+        allowed_models=settings.allowed_models,
+        default_model=settings.ANTHROPIC_MODEL,
     )
 
 
@@ -81,6 +83,7 @@ async def competitive_v3_page(
 async def competitive_v3_parse(
     request: Request,
     file: UploadFile = File(...),
+    model: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
     """Read the uploaded CSV/Excel; if the file lacks a 카테고리 column,
@@ -117,9 +120,18 @@ async def competitive_v3_parse(
             csv_name=file.filename or "",
         )
     lang = getattr(request.state, "lang", "ko")
+    # Resolve the requested model (user picks Haiku/Sonnet/Opus in the
+    # upload form). Fall back to the server default when unset/invalid;
+    # categorize_reasons_with_llm re-validates too, but resolving here
+    # lets us report the actual model back to the UI.
+    chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
+    if chosen_model not in settings.allowed_models:
+        chosen_model = settings.ANTHROPIC_MODEL
     try:
         if not has_top_category(rows):
-            rows = await categorize_reasons_with_llm(rows, lang=lang)
+            rows = await categorize_reasons_with_llm(
+                rows, lang=lang, model=chosen_model
+            )
         result = await build_categorized_view(session, rows)
     except Exception as e:  # noqa: BLE001
         return render(
@@ -131,7 +143,7 @@ async def competitive_v3_parse(
         )
     result["_file_name"] = file.filename or "vendor_analysis"
     result["_input_hash"] = hash_rows(rows)
-    result["_model_used"] = settings.ANTHROPIC_MODEL
+    result["_model_used"] = chosen_model
     # A fresh upload has no saved card and no criteria mapping yet. The
     # categorized partial embeds result._card_id / result._criteria into
     # the v3-criteria-data <script>; if these keys are absent Jinja's
@@ -192,12 +204,15 @@ async def competitive_v3_save(
             raise HTTPException(422, f"invalid criteria payload: {e}")
         if isinstance(parsed_criteria, dict) and parsed_criteria.get("groups"):
             criteria_mapping = parsed_criteria
+    # Preserve the model the analysis actually ran on (embedded in the
+    # result payload by parse) rather than always recording the default.
+    model_used = result.get("_model_used") or settings.ANTHROPIC_MODEL
     card = await save_v3_card(
         session,
         label=label,
         rows=rows,
         result=result,
-        model_used=settings.ANTHROPIC_MODEL,
+        model_used=model_used,
         input_filename=(filename or "").strip() or None,
         criteria_mapping=criteria_mapping,
     )
@@ -399,12 +414,14 @@ async def competitive_v3_reason_reviews(
 async def competitive_v3_criteria_suggest(
     request: Request,
     categories_json: str = Form(...),
+    model: str = Form(""),
 ):
     """Group the current analysis's AI categories into ~5 competitive
     criteria via Claude. Stateless (no DB write) — the browser holds the
     grouping and persists it later via Save / card-criteria update.
 
     categories_json: JSON list of {name, review_count, vendor_count}.
+    model: optional Claude model override (Haiku/Sonnet/Opus).
     Returns {"groups": [{name, categories: [...]}], "_model_used": str}.
     """
     try:
@@ -414,8 +431,13 @@ async def competitive_v3_criteria_suggest(
     if not isinstance(categories, list):
         raise HTTPException(422, "categories must be a list")
     lang = getattr(request.state, "lang", "ko")
+    chosen_model = (model or settings.ANTHROPIC_MODEL).strip()
+    if chosen_model not in settings.allowed_models:
+        chosen_model = settings.ANTHROPIC_MODEL
     try:
-        return await suggest_criteria_with_llm(categories, lang=lang)
+        return await suggest_criteria_with_llm(
+            categories, lang=lang, model=chosen_model
+        )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, str(e))
 

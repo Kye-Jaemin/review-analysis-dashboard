@@ -62,7 +62,18 @@
       <input id="v3-file-input" type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
              class="hidden" onchange="v3OnSelected(this)" required>
 
-      <div class="flex items-center justify-end mt-3">
+      <div class="flex items-center justify-between gap-3 mt-3 flex-wrap">
+        {% if allowed_models %}
+          <label class="flex items-center gap-1.5 text-xs text-gray-600"
+                 title="{% if lang == 'ko' %}reason을 카테고리로 묶는 LLM 모델. 어려운 군집화는 Sonnet이 더 정확합니다.{% else %}Model that clusters reasons into categories. Sonnet is more accurate for hard clustering.{% endif %}">
+            🧠 {% if lang == 'ko' %}분류 모델{% else %}Model{% endif %}
+            <select id="v3-model" name="model" class="border border-gray-300 rounded px-1.5 py-1 text-xs bg-white">
+              {% for m in allowed_models %}
+                <option value="{{ m }}" {% if m == default_model %}selected{% endif %}>{% if 'haiku' in m %}Haiku · {% if lang == 'ko' %}빠름·저가{% else %}fast/cheap{% endif %}{% elif 'sonnet' in m %}Sonnet · {% if lang == 'ko' %}정확{% else %}accurate{% endif %}{% elif 'opus' in m %}Opus · {% if lang == 'ko' %}최고{% else %}best{% endif %}{% else %}{{ m }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </label>
+        {% else %}<span></span>{% endif %}
         <button type="submit"
                 class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium whitespace-nowrap">
           🗂️ {% if lang == 'ko' %}불러오기{% else %}Load{% endif %}
@@ -760,6 +771,8 @@ async function v3SuggestCriteria(btn) {
   try {
     const fd = new FormData();
     fd.append('categories_json', JSON.stringify(cats));
+    const _mSel = document.getElementById('v3-model');
+    if (_mSel && _mSel.value) fd.append('model', _mSel.value);
     const res = await fetch('/competitive-v3/criteria/suggest', { method: 'POST', body: fd });
     if (!res.ok) {
       const body = (await res.text()).slice(0, 300);

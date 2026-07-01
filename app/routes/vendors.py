@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import get_session
 from app.services.vendor_reasons import (
     delete_card,
@@ -45,6 +46,8 @@ async def vendors_page(request: Request, session: AsyncSession = Depends(get_ses
         "vendors.html",
         vendors=vendors,
         saved_lookup=saved_lookup,
+        allowed_models=settings.allowed_models,
+        default_model=settings.ANTHROPIC_MODEL,
     )
 
 

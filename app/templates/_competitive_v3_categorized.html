@@ -29,6 +29,12 @@
         <span class="text-[11px] text-blue-700 font-medium">📌 {{ result._card_label }}</span>
       {% endif %}
       {% if result._file_name %}<span class="text-[11px] text-gray-500">📎 {{ result._file_name }}</span>{% endif %}
+      {% if result._model_used %}
+        {% set _mu = result._model_used %}
+        <span class="text-[10px] px-1.5 py-0.5 rounded {% if 'sonnet' in _mu or 'opus' in _mu %}bg-violet-100 text-violet-800 ring-1 ring-violet-200{% else %}bg-gray-100 text-gray-600{% endif %}" title="{{ _mu }}">
+          🧠 {% if 'haiku' in _mu %}Haiku{% elif 'sonnet' in _mu %}Sonnet{% elif 'opus' in _mu %}Opus{% else %}{{ _mu }}{% endif %}
+        </span>
+      {% endif %}
       <div class="ml-auto flex items-center gap-2">
         {% if raw_rows is defined and raw_rows %}
           <button type="button"
