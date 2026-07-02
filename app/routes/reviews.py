@@ -12,6 +12,10 @@ from app.models import Analysis, Category, Investigation, Review, Sentiment, Sou
 from app.services.stats import _descendants_of
 from app.services.stats import summary as stats_summary
 from app.services.stats import trend as stats_trend
+from app.services.vendor_categories import (
+    list_vendor_categories,
+    resolve_vendor_category_source_ids,
+)
 from app.templating import render
 
 router = APIRouter()
@@ -53,7 +57,12 @@ def _build_filter_query(
     stmt = select(Review).join(Source, Source.id == Review.source_id)
     if source_id:
         stmt = stmt.where(Review.source_id == source_id)
-    if inv_source_ids:
+    # `is not None` (not truthy) so an explicit empty set — a vendor
+    # category with zero member investigations — correctly filters down
+    # to zero reviews instead of being treated as "no filter". Safe for
+    # the investigation_id path too: _resolve_investigation() already
+    # normalizes an empty source_ids list to None before it gets here.
+    if inv_source_ids is not None:
         stmt = stmt.where(Review.source_id.in_(inv_source_ids))
     if sentiment or category_id is not None or inv_category_ids:
         stmt = stmt.outerjoin(Analysis, Analysis.review_id == Review.id)
@@ -112,6 +121,7 @@ async def list_reviews(
     to_date: Optional[str] = None,
     q: Optional[str] = None,
     investigation_id: Optional[str] = None,
+    vendor_category_id: Optional[str] = None,
     include_hidden: int = Query(
         0,
         description=(
@@ -123,11 +133,23 @@ async def list_reviews(
 ):
     source_id_i = _parse_int(source_id)
     category_id_i = _parse_int(category_id)
-    inv_id = _parse_int(investigation_id)
     # Drop empty multi-checkbox values that some browsers append.
     sentiment = [s for s in sentiment if s]
 
-    inv_src, inv_cat, active_inv = await _resolve_investigation(session, inv_id)
+    # A vendor category scopes by the union of its member investigations'
+    # source_ids (same resolver /vendors uses) and takes priority over a
+    # single investigation_id — they're mutually exclusive scoping modes,
+    # matching how /vendors' category filter is a separate control from
+    # picking one card on the dashboard.
+    cat_src_ids, active_vc = await resolve_vendor_category_source_ids(
+        session, _parse_int(vendor_category_id)
+    )
+    if active_vc is not None:
+        inv_id = None
+        inv_src, inv_cat = cat_src_ids, None
+    else:
+        inv_id = _parse_int(investigation_id)
+        inv_src, inv_cat, _active_inv = await _resolve_investigation(session, inv_id)
 
     base_stmt = _build_filter_query(
         source_id=source_id_i, category_id=category_id_i, sentiment=sentiment,
@@ -158,20 +180,25 @@ async def list_reviews(
 
     # Investigation cards for the top row. Honour the same "show hidden"
     # toggle the dashboard uses — by default hidden cards are filtered
-    # out, and a small chip on the page offers to bring them back.
+    # out, and a small chip on the page offers to bring them back. When a
+    # vendor category is active, the strip narrows to just its members —
+    # same "everything below narrows to this scope" behaviour as /vendors.
     inv_stmt = select(Investigation).order_by(Investigation.updated_at.desc())
     if not include_hidden:
         inv_stmt = inv_stmt.where(Investigation.hidden.is_(False))
+    if active_vc is not None:
+        inv_stmt = inv_stmt.where(Investigation.id.in_(active_vc.investigation_ids))
     inv_rows = (await session.execute(inv_stmt)).scalars().all()
     # Count hidden cards separately so the toggle chip can display the
     # number ("🙈 숨긴 카드 N개 보기"). Cheap COUNT query — runs once.
-    hidden_count = (
-        await session.execute(
-            select(func.count(Investigation.id)).where(
-                Investigation.hidden.is_(True)
-            )
+    hidden_count_stmt = select(func.count(Investigation.id)).where(
+        Investigation.hidden.is_(True)
+    )
+    if active_vc is not None:
+        hidden_count_stmt = hidden_count_stmt.where(
+            Investigation.id.in_(active_vc.investigation_ids)
         )
-    ).scalar() or 0
+    hidden_count = (await session.execute(hidden_count_stmt)).scalar() or 0
     source_map = {s.id: s for s in sources}
     cat_map = {c.id: c for c in categories}
     # Per-source review counts so each card can show its grand total too.
@@ -214,6 +241,8 @@ async def list_reviews(
         "from_date": from_date, "to_date": to_date, "q": q,
     }
 
+    vendor_categories = await list_vendor_categories(session)
+
     qs_pairs = []
     if source_id_i is not None: qs_pairs.append(("source_id", source_id_i))
     if category_id_i is not None: qs_pairs.append(("category_id", category_id_i))
@@ -223,6 +252,7 @@ async def list_reviews(
     if to_date: qs_pairs.append(("to_date", to_date))
     if q: qs_pairs.append(("q", q))
     if inv_id is not None: qs_pairs.append(("investigation_id", inv_id))
+    if active_vc is not None: qs_pairs.append(("vendor_category_id", active_vc.id))
     qs = urlencode(qs_pairs)
 
     def pagination_qs(p: int) -> str:
@@ -243,6 +273,9 @@ async def list_reviews(
         pagination_qs=pagination_qs,
         include_hidden=bool(include_hidden),
         hidden_count=int(hidden_count),
+        vendor_categories=vendor_categories,
+        active_vendor_category_id=active_vc.id if active_vc else None,
+        active_vendor_category_label=active_vc.label if active_vc else None,
     )
 
 

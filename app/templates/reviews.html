@@ -13,13 +13,31 @@
   </div>
 </div>
 
-{# Strip is shown when there's at least one card to display OR the user
-   needs the "show hidden" toggle to see hidden ones. #}
-{% if investigations or hidden_count %}
+{# Strip is shown when there's at least one card to display, the user
+   needs the "show hidden" toggle to see hidden ones, or there's at
+   least one category to filter by (even if it currently resolves to
+   zero cards — otherwise the selector itself would vanish and trap the
+   user in an empty, unswitchable view). #}
+{% if investigations or hidden_count or vendor_categories %}
 <div class="bg-white rounded shadow-sm px-4 py-3 mb-5">
   <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
     <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
     <div class="flex items-center gap-3">
+      {% if vendor_categories %}
+        <label class="flex items-center gap-1 text-xs text-gray-600 shrink-0"
+               title="{% if lang == 'ko' %}대시보드에서 만든 카테고리로 조사 카드와 아래 리뷰 목록을 좁힙니다.{% else %}Narrow investigation cards and the review list below to a category you created on the dashboard.{% endif %}">
+          📁 <span class="hidden sm:inline">{% if lang == 'ko' %}카테고리{% else %}Category{% endif %}</span>
+          <select class="border border-gray-300 rounded px-1.5 py-1 text-xs bg-white"
+                  onchange="if(this.value){location.href='/reviews?vendor_category_id='+this.value}else{location.href='/reviews'}">
+            <option value="">{% if lang == 'ko' %}전체{% else %}All{% endif %}</option>
+            {% for vc in vendor_categories %}
+              <option value="{{ vc.id }}" {% if vc.id == active_vendor_category_id %}selected{% endif %}>
+                {{ vc.label }} ({{ vc.investigation_count }})
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+      {% endif %}
       <form id="inv-import-form-reviews" enctype="multipart/form-data" class="inline-flex">
         <label class="text-xs text-blue-600 hover:underline cursor-pointer">
           📥 {{ t('dashboard.investigations_import') }}
@@ -27,7 +45,7 @@
                  onchange="importInvReviews(this)">
         </label>
       </form>
-      {% if active_investigation_id %}
+      {% if active_investigation_id or active_vendor_category_id %}
         <a href="/reviews{% if include_hidden %}?include_hidden=1{% endif %}" class="text-xs text-blue-600 hover:underline">✕ {{ t('dashboard.investigations_clear') }}</a>
       {% endif %}
       {# Hidden-cards toggle. Mirrors the dashboard's chip; preserves any
@@ -35,6 +53,7 @@
       {% if hidden_count or include_hidden %}
         {% set toggle_qs = [] %}
         {% if active_investigation_id %}{% set _ = toggle_qs.append('investigation_id=' ~ active_investigation_id) %}{% endif %}
+        {% if active_vendor_category_id %}{% set _ = toggle_qs.append('vendor_category_id=' ~ active_vendor_category_id) %}{% endif %}
         {% if not include_hidden %}{% set _ = toggle_qs.append('include_hidden=1') %}{% endif %}
         <a href="/reviews{% if toggle_qs %}?{{ toggle_qs|join('&') }}{% endif %}"
            class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border shadow-sm whitespace-nowrap
@@ -50,6 +69,23 @@
       <div class="text-xs text-gray-500">{{ t('dashboard.investigations_hint') }}</div>
     </div>
   </div>
+  {% if active_vendor_category_id %}
+    <div class="mb-2 text-xs">
+      <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200">
+        📁 {% if lang == 'ko' %}{{ active_vendor_category_label }}로 필터링됨{% else %}Filtered to {{ active_vendor_category_label }}{% endif %}
+        <a href="/reviews{% if include_hidden %}?include_hidden=1{% endif %}" class="ml-1 text-indigo-600 hover:underline">✕ {% if lang == 'ko' %}전체 보기{% else %}Clear{% endif %}</a>
+      </span>
+    </div>
+  {% endif %}
+  {% if not investigations and active_vendor_category_id %}
+    <div class="text-sm text-gray-400 py-4 text-center">
+      {% if lang == 'ko' %}
+        "{{ active_vendor_category_label }}" 카테고리에 속한 조사 카드가 없습니다.
+      {% else %}
+        No investigation cards in the "{{ active_vendor_category_label }}" category.
+      {% endif %}
+    </div>
+  {% endif %}
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
     {% set source_type_labels = {
       'google_play': t('source_type.google_play'),

@@ -471,9 +471,10 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
 <h2 id="reviews">11. 전체 리뷰 보기 + 내보내기 + 번역 <span class="text-sm text-gray-500">(사이드바: <b>전체 리뷰 보기</b>, 구 "리뷰")</span></h2>
 <ul>
   <li>리뷰 페이지 상단에도 <strong>조사 카드 그리드</strong>가 표시됨 — 클릭하면 그 카드 범위의 리뷰만 표시</li>
-  <li><strong>숨김 카드 토글 (NEW)</strong>: 대시보드와 동일하게 <em>🙈 숨긴 카드 N개 보기</em> 칩이 상단에 표시됨. 클릭 시 숨김 카드도 함께 노출 (호박색 테두리 + 🙈 아이콘으로 시각 구분). 다시 누르면 원래대로. 활성 카드 선택은 유지됨</li>
-  <li>좌측 사이드바 필터(감성/기간/키워드)로 카드 범위 안에서 추가 필터링 가능</li>
-  <li>우상단 <strong>CSV / JSON / Excel 내보내기</strong> — 활성 카드 + 사이드바 필터가 그대로 반영된 결과만 다운로드</li>
+  <li><strong>📁 카테고리 필터 (NEW)</strong>: 조사 카드 그리드 헤더의 카테고리 셀렉터로 대시보드에서 만든 카테고리를 선택하면, 그리드가 그 카테고리 소속 카드로 좁혀지고 아래 리뷰 목록도 그 카드들의 소스를 합친 범위로 필터링됨. 개별 카드를 클릭하면 카테고리 필터는 해제되고 그 카드 하나로 전환됨</li>
+  <li><strong>숨김 카드 토글 (NEW)</strong>: 대시보드와 동일하게 <em>🙈 숨긴 카드 N개 보기</em> 칩이 상단에 표시됨. 클릭 시 숨김 카드도 함께 노출 (호박색 테두리 + 🙈 아이콘으로 시각 구분). 다시 누르면 원래대로. 활성 카드 선택 및 카테고리 필터는 유지됨</li>
+  <li>좌측 사이드바 필터(감성/기간/키워드)로 카드/카테고리 범위 안에서 추가 필터링 가능</li>
+  <li>우상단 <strong>CSV / JSON / Excel 내보내기</strong> — 활성 카드(또는 카테고리) + 사이드바 필터가 그대로 반영된 결과만 다운로드</li>
   <li>자동 카테고리 모달의 각 리뷰에 <strong>🌐 번역</strong> 토글 — UI 언어로 LLM 번역 후 DOM 캐시 (다시 누르면 원문 복귀)</li>
 </ul>
 
@@ -873,9 +874,10 @@ want your own taxonomy:</p>
 <h2 id="reviews">11. Reviews explorer + export + translate</h2>
 <ul>
   <li>The Reviews page shows the <strong>Investigation cards grid</strong> on top — click one to scope the table.</li>
-  <li><strong>Show-hidden toggle (NEW)</strong>: the amber 🙈 chip in the header brings hidden Investigation cards back into the grid (matches the dashboard's behaviour). Hidden cards render with an amber border + 🙈 icon. Click again to re-hide. Active selection is preserved across toggles.</li>
-  <li>Sidebar filters (sentiment / dates / keyword) refine inside the active card.</li>
-  <li>Top-right <strong>CSV / JSON / Excel export</strong>.</li>
+  <li><strong>📁 Category filter (NEW)</strong>: the category selector in the grid header narrows the grid to just that category's cards and scopes the review table below to the union of their sources. Clicking an individual card clears the category filter and switches to that single card.</li>
+  <li><strong>Show-hidden toggle (NEW)</strong>: the amber 🙈 chip in the header brings hidden Investigation cards back into the grid (matches the dashboard's behaviour). Hidden cards render with an amber border + 🙈 icon. Click again to re-hide. Active selection and category filter are preserved across toggles.</li>
+  <li>Sidebar filters (sentiment / dates / keyword) refine inside the active card or category.</li>
+  <li>Top-right <strong>CSV / JSON / Excel export</strong> — respects the active card or category filter.</li>
   <li>In the auto-cat review modal, each row has a <strong>🌐 Translate</strong> toggle — LLM translates to your UI language, DOM-caches the result, click again to flip back.</li>
 </ul>
 

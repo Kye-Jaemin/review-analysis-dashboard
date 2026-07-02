@@ -217,3 +217,100 @@ async def test_registration_guard_fresh_db_accepts_creation(app_client):
     r = await app_client.post("/api/vendor-categories", json={"label": "Smoke"})
     assert r.status_code == 200
     assert r.json()["label"] == "Smoke"
+
+
+@pytest.mark.asyncio
+async def test_reviews_page_filters_by_category(app_client):
+    from datetime import datetime
+
+    from app.db import AsyncSessionLocal
+    from app.models import Investigation, Review, Source, SourceType
+
+    async with AsyncSessionLocal() as s:
+        alpha = Source(type=SourceType.google_play, label="ra", display_name="ReviewsAlpha", config={})
+        beta = Source(type=SourceType.google_play, label="rb", display_name="ReviewsBeta", config={})
+        s.add_all([alpha, beta])
+        await s.flush()
+        s.add(Review(source_id=alpha.id, external_id="ra1", text="AlphaReviewText", posted_at=datetime(2024, 1, 1)))
+        s.add(Review(source_id=beta.id, external_id="rb1", text="BetaReviewText", posted_at=datetime(2024, 1, 1)))
+        await s.flush()
+        inv = Investigation(label="Reviews Alpha only", source_ids=[alpha.id], root_ids=[], display_order=1)
+        s.add(inv)
+        await s.commit()
+        inv_id = inv.id
+
+    r = await app_client.post(
+        "/api/vendor-categories", json={"label": "ReviewsAlphaCat", "investigation_ids": [inv_id]}
+    )
+    vc_id = r.json()["id"]
+
+    r = await app_client.get(f"/reviews?vendor_category_id={vc_id}")
+    assert r.status_code == 200
+    assert "AlphaReviewText" in r.text
+    assert "BetaReviewText" not in r.text
+    # The investigation strip should also narrow to just the category's card.
+    assert "Reviews Alpha only" in r.text
+
+    # Unfiltered view still shows both reviews.
+    r = await app_client.get("/reviews")
+    assert r.status_code == 200
+    assert "AlphaReviewText" in r.text
+    assert "BetaReviewText" in r.text
+
+
+@pytest.mark.asyncio
+async def test_reviews_empty_category_shows_zero_reviews(app_client):
+    from datetime import datetime
+
+    from app.db import AsyncSessionLocal
+    from app.models import Review, Source, SourceType
+
+    async with AsyncSessionLocal() as s:
+        src = Source(type=SourceType.web, label="rc", display_name="ReviewsEmptyCatSrc", config={})
+        s.add(src)
+        await s.flush()
+        s.add(Review(source_id=src.id, external_id="rc1", text="ShouldNotAppear", posted_at=datetime(2024, 1, 1)))
+        await s.commit()
+
+    r = await app_client.post(
+        "/api/vendor-categories", json={"label": "ReviewsEmptyCat", "investigation_ids": []}
+    )
+    vc_id = r.json()["id"]
+
+    r = await app_client.get(f"/reviews?vendor_category_id={vc_id}")
+    assert r.status_code == 200
+    assert "ShouldNotAppear" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_export_scopes_by_category(app_client):
+    import json as jsonlib
+    from datetime import datetime
+
+    from app.db import AsyncSessionLocal
+    from app.models import Investigation, Review, Source, SourceType
+
+    async with AsyncSessionLocal() as s:
+        alpha = Source(type=SourceType.google_play, label="ea", display_name="ExportAlpha", config={})
+        beta = Source(type=SourceType.google_play, label="eb", display_name="ExportBeta", config={})
+        s.add_all([alpha, beta])
+        await s.flush()
+        s.add(Review(source_id=alpha.id, external_id="ea1", text="ExportAlphaText", posted_at=datetime(2024, 1, 1)))
+        s.add(Review(source_id=beta.id, external_id="eb1", text="ExportBetaText", posted_at=datetime(2024, 1, 1)))
+        await s.flush()
+        inv = Investigation(label="Export Alpha only", source_ids=[alpha.id], root_ids=[], display_order=1)
+        s.add(inv)
+        await s.commit()
+        inv_id = inv.id
+
+    r = await app_client.post(
+        "/api/vendor-categories", json={"label": "ExportAlphaCat", "investigation_ids": [inv_id]}
+    )
+    vc_id = r.json()["id"]
+
+    r = await app_client.get(f"/export?format=json&vendor_category_id={vc_id}")
+    assert r.status_code == 200
+    rows = jsonlib.loads(r.content)
+    texts = {row["text"] for row in rows}
+    assert "ExportAlphaText" in texts
+    assert "ExportBetaText" not in texts

@@ -10,6 +10,7 @@ from app.db import get_session
 from app.models import Analysis, Review
 from app.routes.reviews import _build_filter_query, _parse_int, _resolve_investigation
 from app.services import exporter
+from app.services.vendor_categories import resolve_vendor_category_source_ids
 
 router = APIRouter()
 
@@ -24,10 +25,20 @@ async def export_reviews(
     to_date: Optional[str] = None,
     q: Optional[str] = None,
     investigation_id: Optional[str] = None,
+    vendor_category_id: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
     sentiment = [s for s in sentiment if s]
-    inv_src, inv_cat, _inv = await _resolve_investigation(session, _parse_int(investigation_id))
+    # Mirrors /reviews: a vendor category (union of its member cards'
+    # source_ids) takes priority over a single investigation_id so the
+    # exported rows match exactly what the page currently shows.
+    cat_src_ids, active_vc = await resolve_vendor_category_source_ids(
+        session, _parse_int(vendor_category_id)
+    )
+    if active_vc is not None:
+        inv_src, inv_cat = cat_src_ids, None
+    else:
+        inv_src, inv_cat, _inv = await _resolve_investigation(session, _parse_int(investigation_id))
     stmt = _build_filter_query(
         source_id=_parse_int(source_id), category_id=_parse_int(category_id), sentiment=sentiment,
         from_date=from_date, to_date=to_date, q=q,
