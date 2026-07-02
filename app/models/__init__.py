@@ -9,6 +9,7 @@ from app.models.competitive_card import CompetitiveFactorCard
 from app.models.competitive_v2_card import CompetitiveV2Card
 from app.models.competitive_v3_card import CompetitiveV3Card
 from app.models.vendor_reason_card import VendorReasonCard
+from app.models.vendor_category import VendorCategory
 
 __all__ = [
     "Source",
@@ -30,4 +31,5 @@ __all__ = [
     "CompetitiveV2Card",
     "CompetitiveV3Card",
     "VendorReasonCard",
+    "VendorCategory",
 ]

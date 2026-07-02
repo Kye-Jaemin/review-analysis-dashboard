@@ -27,6 +27,10 @@ from app.services.vendor_reasons import (
     toggle_card_hidden,
     update_card_label,
 )
+from app.services.vendor_categories import (
+    list_vendor_categories,
+    resolve_vendor_category_source_ids,
+)
 from app.services.vendors import list_vendors
 from app.templating import render
 
@@ -34,8 +38,21 @@ router = APIRouter()
 
 
 @router.get("/vendors")
-async def vendors_page(request: Request, session: AsyncSession = Depends(get_session)):
-    vendors = await list_vendors(session)
+async def vendors_page(
+    request: Request,
+    vendor_category_id: Optional[int] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    # When a category is active, scope_source_ids narrows list_vendors()
+    # to just that category's member vendors. active_vc is resolved
+    # server-side (not just echoed from the query string) so a stale or
+    # deleted vendor_category_id in the URL never makes the filter
+    # <select> below claim a category is "selected" that doesn't exist.
+    scope_source_ids, active_vc = await resolve_vendor_category_source_ids(
+        session, vendor_category_id
+    )
+    vendors = await list_vendors(session, source_ids=scope_source_ids)
+    vendor_categories = await list_vendor_categories(session)
     # Build a (vendor_key, category_lower, band) → card_id map so the
     # template can render a 📌 marker next to strengths/weaknesses the
     # user already saved. Lookup happens off a composite index so even
@@ -46,6 +63,9 @@ async def vendors_page(request: Request, session: AsyncSession = Depends(get_ses
         "vendors.html",
         vendors=vendors,
         saved_lookup=saved_lookup,
+        vendor_categories=vendor_categories,
+        active_vendor_category_id=active_vc.id if active_vc else None,
+        active_vendor_category_label=active_vc.label if active_vc else None,
         allowed_models=settings.allowed_models,
         default_model=settings.ANTHROPIC_MODEL,
     )

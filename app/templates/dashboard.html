@@ -7,6 +7,81 @@
 
 <div class="bg-white rounded shadow-sm px-4 py-3 mb-4">
   <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
+    <div class="text-sm font-medium">
+      📁 {% if lang == 'ko' %}카테고리{% else %}Categories{% endif %}
+    </div>
+    <div class="flex items-center gap-3">
+      <button type="button" onclick="openVendorCategoryModal(null)"
+              class="text-xs text-blue-600 hover:underline">
+        {% if lang == 'ko' %}+ 새 카테고리{% else %}+ New category{% endif %}
+      </button>
+    </div>
+  </div>
+  <div class="text-xs text-gray-500 mb-2">
+    {% if lang == 'ko' %}
+      여러 조사 카드를 하나의 카테고리(예: 헬스)로 묶으면, 업체 강/약점 분석을 그 카테고리에 속한 업체로만 좁혀 볼 수 있습니다.
+    {% else %}
+      Group multiple investigation cards into a category (e.g. Health) to scope vendor strengths/weaknesses analysis to just those vendors.
+    {% endif %}
+  </div>
+  <div id="vendor-categories-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 stagger">
+    <div class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
+  </div>
+</div>
+
+<!-- Vendor category create/edit modal -->
+<div id="vc-modal" class="modal-in hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+     onclick="if (event.target === this) closeVendorCategoryModal()">
+  <div class="bg-white rounded shadow-lg p-4 w-[32rem] max-w-[92vw] max-h-[85vh] flex flex-col">
+    <div class="flex items-center justify-between mb-3">
+      <div id="vc-modal-title" class="font-medium">
+        {% if lang == 'ko' %}새 카테고리{% else %}New category{% endif %}
+      </div>
+      <button onclick="closeVendorCategoryModal()" class="text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
+    </div>
+    <label class="text-xs text-gray-600 mb-1 block">
+      {% if lang == 'ko' %}카테고리 이름{% else %}Category name{% endif %}
+    </label>
+    <input id="vc-modal-label" type="text" maxlength="200"
+           class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full mb-3"
+           placeholder="{% if lang == 'ko' %}예: 헬스{% else %}e.g. Health{% endif %}">
+
+    <div class="flex items-baseline justify-between mb-1">
+      <label class="text-xs text-gray-600">
+        {% if lang == 'ko' %}조사 카드 선택{% else %}Select investigation cards{% endif %}
+        <span id="vc-modal-count" class="text-gray-400"></span>
+      </label>
+      <div class="text-xs flex gap-2">
+        <button type="button" onclick="_vcModalSelectAll(true)" class="text-blue-600 hover:underline">
+          {% if lang == 'ko' %}모두{% else %}All{% endif %}
+        </button>
+        <span class="text-gray-300">·</span>
+        <button type="button" onclick="_vcModalSelectAll(false)" class="text-blue-600 hover:underline">
+          {% if lang == 'ko' %}없음{% else %}None{% endif %}
+        </button>
+      </div>
+    </div>
+    <div id="vc-modal-options"
+         class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 overflow-y-auto p-2 border border-gray-200 rounded bg-gray-50 flex-1 mb-3"
+         style="max-height: 40vh;"></div>
+
+    <div id="vc-modal-error" class="hidden text-xs text-red-600 mb-2"></div>
+
+    <div class="flex justify-end gap-2">
+      <button type="button" onclick="closeVendorCategoryModal()"
+              class="px-3 py-1.5 text-xs bg-gray-200 hover:bg-gray-300 rounded">
+        {% if lang == 'ko' %}취소{% else %}Cancel{% endif %}
+      </button>
+      <button type="button" onclick="saveVendorCategory()"
+              class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">
+        {% if lang == 'ko' %}저장{% else %}Save{% endif %}
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="bg-white rounded shadow-sm px-4 py-3 mb-4">
+  <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
     <div class="text-sm font-medium">{{ t('dashboard.investigations_title') }}</div>
     <div class="flex items-center gap-3">
       <form id="inv-import-form" enctype="multipart/form-data" class="inline-flex">
@@ -1076,6 +1151,186 @@ async function deleteInvestigation(id) {
   }
 }
 
+// ---- Vendor categories: user-named groups of existing investigation
+//      cards, used to scope /vendors. Kept independent from the vendor-
+//      stack machinery above (_stacksExpanded etc.) — different grouping
+//      concept (user-curated vs. auto-detected duplicate vendor), so it
+//      gets its own expand-state Set and sessionStorage key.
+const _DASH_LANG = '{{ lang }}';
+let _lastVendorCategories = [];
+const _vcExpanded = (() => {
+  try {
+    const raw = sessionStorage.getItem('dashVcExpanded');
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch (_) { return new Set(); }
+})();
+function _persistVcExpanded() {
+  try { sessionStorage.setItem('dashVcExpanded', JSON.stringify([...(_vcExpanded)])); } catch (_) {}
+}
+
+async function loadVendorCategories() {
+  try {
+    const res = await fetch('/api/vendor-categories');
+    const data = await res.json();
+    _lastVendorCategories = data.vendor_categories || [];
+    renderVendorCategories(_lastVendorCategories);
+  } catch (e) {
+    const grid = document.getElementById('vendor-categories-grid');
+    if (grid) grid.innerHTML = '<div class="text-xs text-red-600">' + escapeHtml(String(e)) + '</div>';
+  }
+}
+
+function toggleVendorCategoryExpand(vcId) {
+  if (_vcExpanded.has(vcId)) _vcExpanded.delete(vcId);
+  else _vcExpanded.add(vcId);
+  _persistVcExpanded();
+  renderVendorCategories(_lastVendorCategories);
+}
+
+function renderVendorCategories(categories) {
+  const grid = document.getElementById('vendor-categories-grid');
+  if (!grid) return;
+  if (!categories.length) {
+    grid.innerHTML = `<div class="col-span-full text-sm text-gray-400 py-4 text-center">` +
+      (_DASH_LANG === 'ko'
+        ? '아직 카테고리가 없습니다. "+ 새 카테고리"로 조사 카드를 묶어보세요.'
+        : 'No categories yet. Use "+ New category" to group investigation cards.') +
+      `</div>`;
+    return;
+  }
+  grid.innerHTML = categories.map(vc => {
+    const expanded = _vcExpanded.has(vc.id);
+    const countText = _DASH_LANG === 'ko'
+      ? `조사 카드 ${vc.investigation_count}개 · 리뷰 ${(vc.review_count || 0).toLocaleString()}건`
+      : `${vc.investigation_count} cards · ${(vc.review_count || 0).toLocaleString()} reviews`;
+    const viewLabel = _DASH_LANG === 'ko' ? '🏆 이 카테고리로 업체 분석 보기' : '🏆 View vendor analysis for this category';
+    const editLabel = _DASH_LANG === 'ko' ? '수정' : 'Edit';
+    const deleteLabel = _DASH_LANG === 'ko' ? '삭제' : 'Delete';
+    const expandTitle = expanded
+      ? (_DASH_LANG === 'ko' ? '접기' : 'Collapse')
+      : (_DASH_LANG === 'ko' ? '펼치기' : 'Expand');
+    const memberList = expanded
+      ? `<div class="border-t border-gray-100 pt-2 mt-1 space-y-1">` +
+        (vc.investigations.length
+          ? vc.investigations.map(i =>
+              `<div class="text-[11px] text-gray-600 truncate" title="${escapeHtml(i.label)}">・ ${escapeHtml(i.label)}</div>`
+            ).join('')
+          : `<div class="text-[11px] text-gray-400">${_DASH_LANG === 'ko' ? '소속된 조사 카드가 없습니다.' : 'No investigation cards yet.'}</div>`) +
+        `</div>`
+      : '';
+    return `
+      <div class="border rounded p-3 flex flex-col gap-2 border-gray-200 bg-white">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="font-semibold text-sm truncate" title="${escapeHtml(vc.label)}">${escapeHtml(vc.label)}</div>
+            <div class="text-[11px] text-gray-500 mt-0.5">${countText}</div>
+          </div>
+          <button type="button" onclick="toggleVendorCategoryExpand(${vc.id})"
+                  class="text-gray-400 hover:text-gray-700 text-sm shrink-0" title="${expandTitle}">
+            ${expanded ? '▴' : '▾'}
+          </button>
+        </div>
+        <a href="/vendors?vendor_category_id=${vc.id}"
+           class="text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded px-2 py-1 text-center font-medium">
+          ${viewLabel}
+        </a>
+        ${memberList}
+        <div class="flex justify-end items-center gap-3 mt-auto">
+          <button type="button" onclick="openVendorCategoryModal(${vc.id})" class="text-[11px] text-gray-600 hover:underline">✏️ ${editLabel}</button>
+          <button type="button" onclick="deleteVendorCategory(${vc.id})" class="text-[11px] text-red-600 hover:underline">🗑️ ${deleteLabel}</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+let _vcModalEditingId = null;
+function openVendorCategoryModal(vcId) {
+  const vc = vcId != null ? _lastVendorCategories.find(c => c.id === vcId) : null;
+  _vcModalEditingId = vc ? vc.id : null;
+  document.getElementById('vc-modal-title').textContent = vc
+    ? (_DASH_LANG === 'ko' ? '카테고리 수정' : 'Edit category')
+    : (_DASH_LANG === 'ko' ? '새 카테고리' : 'New category');
+  document.getElementById('vc-modal-label').value = vc ? vc.label : '';
+  document.getElementById('vc-modal-error').classList.add('hidden');
+  renderVcModalOptions(vc ? vc.investigation_ids : []);
+  _portalToBody('vc-modal').classList.remove('hidden');
+}
+function closeVendorCategoryModal() {
+  document.getElementById('vc-modal').classList.add('hidden');
+}
+
+function renderVcModalOptions(selectedIds) {
+  const wrap = document.getElementById('vc-modal-options');
+  const selected = new Set(selectedIds || []);
+  if (!_lastInvestigations.length) {
+    wrap.innerHTML = `<div class="col-span-full text-xs text-gray-400 py-2">` +
+      (_DASH_LANG === 'ko' ? '먼저 조사 카드를 만들어 주세요.' : 'Create an investigation card first.') +
+      `</div>`;
+  } else {
+    wrap.innerHTML = _lastInvestigations.map(inv => `
+      <label class="flex items-center gap-1.5 text-xs hover:bg-white px-1.5 py-1 rounded cursor-pointer">
+        <input type="checkbox" class="vc-modal-inv-checkbox rounded" value="${inv.id}"
+               onchange="_vcModalUpdateCount()" ${selected.has(inv.id) ? 'checked' : ''}>
+        <span class="truncate" title="${escapeHtml(inv.label)}">${escapeHtml(inv.label)}</span>
+      </label>`).join('');
+  }
+  _vcModalUpdateCount();
+}
+
+function _vcModalSelectAll(checked) {
+  document.querySelectorAll('.vc-modal-inv-checkbox').forEach(cb => { cb.checked = checked; });
+  _vcModalUpdateCount();
+}
+
+function _vcModalUpdateCount() {
+  const boxes = [...document.querySelectorAll('.vc-modal-inv-checkbox')];
+  const n = boxes.filter(cb => cb.checked).length;
+  const el = document.getElementById('vc-modal-count');
+  if (el) el.textContent = `(${n}/${boxes.length})`;
+}
+
+async function saveVendorCategory() {
+  const label = document.getElementById('vc-modal-label').value.trim();
+  const errEl = document.getElementById('vc-modal-error');
+  errEl.classList.add('hidden');
+  if (!label) {
+    errEl.textContent = _DASH_LANG === 'ko' ? '카테고리 이름을 입력하세요.' : 'Enter a category name.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  const investigation_ids = [...document.querySelectorAll('.vc-modal-inv-checkbox')]
+    .filter(cb => cb.checked).map(cb => parseInt(cb.value, 10));
+  try {
+    const url = _vcModalEditingId ? `/api/vendor-categories/${_vcModalEditingId}` : '/api/vendor-categories';
+    const method = _vcModalEditingId ? 'PATCH' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, investigation_ids }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      errEl.textContent = (data && data.detail) || 'save failed';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    closeVendorCategoryModal();
+    await loadVendorCategories();
+  } catch (e) {
+    errEl.textContent = String(e);
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function deleteVendorCategory(id) {
+  if (!confirm('{{ t("common.confirm_delete") }}')) return;
+  const res = await fetch(`/api/vendor-categories/${id}`, { method: 'DELETE' });
+  if (!res.ok) { alert('delete failed'); return; }
+  _vcExpanded.delete(id);
+  _persistVcExpanded();
+  await loadVendorCategories();
+}
+
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -2101,6 +2356,10 @@ async function renderTrend(mode, period) {
     },
   });
 }
+
+// Vendor categories load independently of the investigation bootstrap
+// below — they don't gate dashboard visibility, so fire-and-forget.
+loadVendorCategories();
 
 // Bootstrap: fetch cards first, auto-activate the first one if there is any.
 (async () => {

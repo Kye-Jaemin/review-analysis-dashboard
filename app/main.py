@@ -20,6 +20,7 @@ from app.routes import (
     reviews,
     sources,
     themes,
+    vendor_categories,
     vendors,
     workspace,
 )
@@ -75,6 +76,7 @@ app.include_router(analyze.router)
 app.include_router(export.router)
 app.include_router(themes.router)
 app.include_router(investigations.router)
+app.include_router(vendor_categories.router)
 app.include_router(auto_categories.router)
 app.include_router(workspace.router)
 app.include_router(vendors.router)

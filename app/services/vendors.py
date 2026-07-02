@@ -171,10 +171,29 @@ def _vendor_key(display_name: Optional[str], label: Optional[str]) -> str:
     return _VENDOR_ALIASES.get(stem, stem)
 
 
-async def list_vendors(session: AsyncSession) -> list[dict]:
+async def list_vendors(
+    session: AsyncSession, *, source_ids: Optional[set[int]] = None
+) -> list[dict]:
     """Return every vendor in the workspace with a roll-up of sentiment
-    plus the top strengths / weaknesses."""
-    sources = (await session.execute(select(Source))).scalars().all()
+    plus the top strengths / weaknesses.
+
+    source_ids: when given, restricts the underlying Source query to just
+    that set (e.g. the union of a vendor-category's member investigations'
+    source_ids — see app.services.vendor_categories.resolve_vendor_category_source_ids).
+    Keyword-only so every existing call site (competitive.py, competitive_v2.py,
+    competitive_v3.py, vendor_reasons.py, vendors.py's own export routes —
+    all of which call list_vendors(session) positionally) keeps working
+    unchanged. Everything downstream of the Source query (vendor grouping,
+    strengths/weaknesses aggregation) needs no further changes: it only
+    ever iterates the vendor_groups this query produces, so an empty or
+    narrowed `sources` list naturally narrows the whole function's output.
+    An empty set() (e.g. a vendor category with zero member investigations)
+    correctly falls through to the `if not sources: return []` guard below.
+    """
+    stmt = select(Source)
+    if source_ids is not None:
+        stmt = stmt.where(Source.id.in_(source_ids))
+    sources = (await session.execute(stmt)).scalars().all()
     if not sources:
         return []
 

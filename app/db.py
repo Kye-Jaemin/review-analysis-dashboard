@@ -37,6 +37,7 @@ async def init_db() -> None:
         review,
         source,
         theme_snapshot,
+        vendor_category,
         vendor_reason_card,
     )
 

@@ -35,6 +35,7 @@ from app.models import (
     Source,
     SourceType,
     ThemeSnapshot,
+    VendorCategory,
 )
 
 router = APIRouter()
@@ -62,6 +63,10 @@ SNAPSHOT_COLS = [
 ]
 INVESTIGATION_COLS = [
     "id", "label", "description", "source_ids", "root_ids",
+    "display_order", "hidden", "created_at", "updated_at",
+]
+VENDOR_CATEGORY_COLS = [
+    "id", "label", "description", "investigation_ids",
     "display_order", "hidden", "created_at", "updated_at",
 ]
 
@@ -102,6 +107,7 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
     analyses = (await session.execute(select(Analysis))).scalars().all()
     snapshots = (await session.execute(select(ThemeSnapshot))).scalars().all()
     investigations = (await session.execute(select(Investigation))).scalars().all()
+    vendor_categories = (await session.execute(select(VendorCategory))).scalars().all()
     auto_cats = (await session.execute(select(AutoCategory))).scalars().all()
     links = (
         await session.execute(
@@ -130,6 +136,7 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
         "analyses": [_dump(a, ANALYSIS_COLS) for a in analyses],
         "theme_snapshots": [_dump(s, SNAPSHOT_COLS) for s in snapshots],
         "investigations": [_dump(i, INVESTIGATION_COLS) for i in investigations],
+        "vendor_categories": [_dump(v, VENDOR_CATEGORY_COLS) for v in vendor_categories],
         "auto_categories": [_dump(a, AUTO_CATEGORY_COLS) for a in auto_cats],
         "review_auto_categories": [
             {"review_id": rid, "auto_category_id": acid} for rid, acid in links
@@ -155,13 +162,20 @@ async def export_workspace(session: AsyncSession = Depends(get_session)):
 
 async def _wipe(session: AsyncSession) -> None:
     # FK order: analyses → analysis_jobs → reviews → collection_jobs → sources → categories.
-    # ThemeSnapshot and Investigation have no FKs, can be wiped any time.
+    # ThemeSnapshot, Investigation, and VendorCategory have no FKs (VendorCategory's
+    # investigation_ids is a soft JSON reference, not a FK), can be wiped any time.
+    # Wiping VendorCategory alongside Investigation matters for correctness: if we
+    # left it out, a workspace reset would delete every Investigation while leaving
+    # vendor_categories rows pointing at now-dead investigation_ids (list_vendor_categories()
+    # would self-heal them back to empty on next read, but only after silently
+    # orphaning until then — cleaner to wipe both together, same as Investigation).
     # review_auto_categories must go before its two parents.
     await session.execute(delete(ReviewAutoCategoryLink))
     await session.execute(delete(ReviewManualCategoryLink))
     await session.execute(delete(ThemeSnapshot))
     await session.execute(delete(AutoCategory))
     await session.execute(delete(Investigation))
+    await session.execute(delete(VendorCategory))
     await session.execute(delete(Analysis))
     await session.execute(delete(AnalysisJob))
     await session.execute(delete(Review))
@@ -178,7 +192,7 @@ async def _reset_pg_sequences(session: AsyncSession) -> None:
         return
     for table in [
         "analyses", "analysis_jobs", "reviews", "collection_jobs", "sources", "categories",
-        "theme_snapshots", "investigations", "auto_categories",
+        "theme_snapshots", "investigations", "vendor_categories", "auto_categories",
     ]:
         await session.execute(
             text(
@@ -292,6 +306,31 @@ async def import_workspace(
             )
         )
     await session.flush()
+
+    # Vendor categories — old exports won't have this key (feature added
+    # after them); that's fine, `.get(...) or []` just yields none to
+    # insert. Landed right after investigations since investigation_ids
+    # is a soft reference into that table (not a FK, so insert order
+    # doesn't strictly matter, but this keeps the read order intuitive).
+    for row in data.get("vendor_categories") or []:
+        now = datetime.utcnow()
+        existing_vc = await session.get(VendorCategory, row["id"])
+        if existing_vc:
+            continue
+        session.add(
+            VendorCategory(
+                id=row["id"],
+                label=row.get("label") or "(unnamed)",
+                description=row.get("description"),
+                investigation_ids=row.get("investigation_ids") or [],
+                display_order=int(row.get("display_order") or 0),
+                hidden=bool(row.get("hidden") or False),
+                created_at=_parse_dt(row.get("created_at")) or now,
+                updated_at=_parse_dt(row.get("updated_at")) or now,
+            )
+        )
+    await session.flush()
+
     for row in data.get("auto_categories") or []:
         session.add(
             AutoCategory(

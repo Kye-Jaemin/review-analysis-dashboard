@@ -222,6 +222,16 @@
   <li>import 한 카드는 가시 상태로 추가 (숨김 플래그 무시)</li>
 </ul>
 
+<h3>6.5 카테고리로 조사 카드 묶기 (NEW)</h3>
+<p>대시보드 상단 <strong>📁 카테고리</strong> 패널에서 여러 조사 카드를 하나의 카테고리(예: "헬스")로 묶어, <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>을 그 카테고리에 속한 업체로만 좁혀 볼 수 있습니다.</p>
+<ul>
+  <li><strong>+ 새 카테고리</strong> 클릭 → 이름 입력 + 소속시킬 조사 카드 체크박스 다중 선택 (전체선택/전체해제 지원) → 저장</li>
+  <li>카테고리 카드에는 <strong>소속 조사 카드 수 · 합산 리뷰 수</strong>가 표시되고, <strong>▾ 펼치기</strong>로 소속 카드 목록을 미리 볼 수 있음 (대시보드 필터에는 영향 없는 순수 브라우징용)</li>
+  <li><strong>🏆 이 카테고리로 업체 분석 보기</strong> 클릭 → <code>/vendors</code> 페이지가 그 카테고리 업체로만 자동 필터링됨</li>
+  <li>✏️ 수정 / 🗑️ 삭제로 카테고리 자체를 관리 (소속 조사 카드는 삭제되지 않음 — 그룹핑만 제거)</li>
+  <li>같은 조사 카드를 <strong>여러 카테고리에 동시에</strong> 포함시킬 수 있음 (하나의 카드가 "헬스"와 "구독 서비스" 둘 다에 속해도 무방)</li>
+</ul>
+
 <h2 id="dashboard">7. 대시보드 패널</h2>
 <p>활성 카드에 따라 자동/수동 모드 패널이 다르게 표시됩니다:</p>
 
@@ -260,6 +270,10 @@
 
 <h2 id="vendors">8. 업체 강/약점 분석 페이지 <span class="text-sm text-gray-500">(사이드바: <b>업체 강/약점 분석</b>, 구 "업체 분석")</span></h2>
 <p><a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a> 메뉴 — 모든 소스를 <strong>업체 stem</strong> (display_name 의 첫 단어) 기준으로 묶어 강점/약점을 집계합니다.</p>
+
+<div class="callout info">
+  <strong>카테고리로 좁혀보기 (NEW):</strong> 대시보드에서 카테고리를 만들어 두었다면, 페이지 상단의 <strong>📁 카테고리</strong> 셀렉터로 업체 목록을 그 카테고리에 속한 업체만으로 좁힐 수 있습니다 (<code>/vendors?vendor_category_id=&lt;id&gt;</code>). 셀렉터를 <strong>전체 업체</strong>로 되돌리거나 필터 칩의 <strong>✕ 전체 보기</strong>를 클릭하면 해제됩니다.
+</div>
 
 <ul>
   <li><strong>신규 LLM 호출 0건</strong> — 기존 분석 결과 가공만</li>
@@ -329,6 +343,10 @@ WW       | strength | 체중 감량   | 83.1 | ... | 음식 추적 편의성(11)
   </li>
   <li><strong>파일명 자동 타임스탬프</strong>: <code>vendor_analysis_20260605_143025.xlsx</code> 형식 → 반복 다운로드 시 덮어쓰지 않고 누적</li>
 </ul>
+
+<div class="callout info">
+  <strong>카테고리 범위로 경쟁력 분석하려면:</strong> ① <a href="/vendors" class="text-blue-600 hover:underline">업체 강/약점 분석</a>에서 📁 카테고리 필터로 원하는 업체만 좁히기 → ② 📥 <strong>Excel 내보내기</strong> (이미 그 카테고리 업체만 포함됨) → ③ <a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 심화 분석</a>에 업로드. 별도 설정 없이 결과가 자동으로 해당 카테고리 범위로 좁혀집니다.
+</div>
 
 <h2 id="competitive_v3">9. 경쟁력 심화 분석 페이지 <span class="text-sm text-gray-500">(사이드바: <b>경쟁력 심화 분석</b>, 구 "경쟁력 분류")</span></h2>
 <p><a href="/competitive-v3" class="text-blue-600 hover:underline">경쟁력 심화 분석</a> — /vendors에서 내보낸 Excel(.xlsx)을 업로드하면 <strong>LLM(Claude)이 모든 reason을 약 10개의 cross-vendor 카테고리로 자동 분류</strong>해 표시합니다. 분포 표·히트맵·드릴다운에 더해, 카테고리를 상위 <strong>경쟁력 기준</strong>으로 묶고 <strong>5종 데이터 시각화</strong>(레이더/히트맵/도넛/스택/트리맵)로 포지셔닝을 비교할 수 있습니다. 결과는 카드로 영구 저장 가능하고 두 시트 Excel로 재내보내기 가능.</p>
@@ -680,6 +698,16 @@ want your own taxonomy:</p>
   <li>Same-app sources are <strong>deduped</strong> on import; no duplicate BitePal rows.</li>
 </ul>
 
+<h3>6.4 Group investigation cards into categories (NEW)</h3>
+<p>The <strong>📁 Categories</strong> panel at the top of the dashboard lets you group several investigation cards into a named category (e.g. "Health"), then scope <a href="/vendors" class="text-blue-600 hover:underline">Vendor analysis</a> to just the vendors in that category.</p>
+<ul>
+  <li>Click <strong>+ New category</strong> → enter a name + multi-select which investigation cards belong (with select-all / select-none) → save.</li>
+  <li>Each category card shows <strong>card count · total reviews</strong>, and can be expanded (<strong>▾</strong>) to preview its member cards — this is pure browsing and doesn't touch the dashboard's active filter.</li>
+  <li><strong>🏆 View vendor analysis for this category</strong> deep-links to <code>/vendors</code> already filtered to that category's vendors.</li>
+  <li>✏️ Edit / 🗑️ Delete manage the category itself — deleting it does not delete the member investigation cards, only the grouping.</li>
+  <li>An investigation card can belong to <strong>multiple categories</strong> at once (e.g. both "Health" and "Subscriptions").</li>
+</ul>
+
 <h2 id="dashboard">7. Dashboard panels</h2>
 <p>Panels differ by active card mode:</p>
 
@@ -718,6 +746,10 @@ want your own taxonomy:</p>
 
 <h2 id="vendors">8. Vendor analysis page (NEW)</h2>
 <p><a href="/vendors" class="text-blue-600 hover:underline">Vendor analysis</a> menu — groups every source by <strong>vendor stem</strong> (first token of display_name) and rolls up strengths/weaknesses.</p>
+
+<div class="callout info">
+  <strong>Scope to a category (NEW):</strong> if you've created a category on the dashboard, the <strong>📁 Category</strong> selector at the top of this page narrows the vendor list to just that category's vendors (<code>/vendors?vendor_category_id=&lt;id&gt;</code>). Switch the selector back to <strong>All vendors</strong> or click <strong>✕ Clear</strong> on the filter chip to remove it.
+</div>
 
 <ul>
   <li><strong>Zero new LLM calls</strong> — pure aggregation over existing analyses</li>
@@ -758,6 +790,10 @@ want your own taxonomy:</p>
   <li><strong>XLSX</strong>: <strong>one row per reason</strong> — fixed cells repeat, trailing columns are <code>reason</code> (text(N)) + <code>review_count</code> (numeric). freeze pane + autofilter set. Excel can sort / pivot / chart per reason directly.</li>
   <li><strong>Timestamped filename</strong>: <code>vendor_analysis_YYYYMMDD_HHMMSS.xlsx</code> — repeated downloads don't overwrite.</li>
 </ul>
+
+<div class="callout info">
+  <strong>Scoping competitive analysis to a category:</strong> ① on <a href="/vendors" class="text-blue-600 hover:underline">Vendor analysis</a>, narrow with the 📁 category filter → ② 📥 <strong>Export Excel</strong> (already limited to that category's vendors) → ③ upload into <a href="/competitive-v3" class="text-blue-600 hover:underline">Advanced competitive analysis</a>. No extra setup — the results are automatically scoped to that category.
+</div>
 
 <h2 id="competitive_v3">9. Advanced competitive analysis <span class="text-sm text-gray-500">(sidebar: <b>Advanced competitive analysis</b>, formerly "Competitive factor")</span></h2>
 <p><a href="/competitive-v3" class="text-blue-600 hover:underline">Advanced competitive analysis</a> — upload an Excel (.xlsx) from /vendors and <strong>Claude clusters every reason into ~10 cross-vendor top-level categories</strong>. Result: distribution table + vendor × category heatmap + per-category drill-down, plus a competitive-criteria mapping with <strong>5 data visualizations</strong> (radar / heatmap / doughnut / stacked / treemap). Saveable + re-exportable as a two-sheet xlsx.</p>

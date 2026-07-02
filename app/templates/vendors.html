@@ -24,6 +24,21 @@
 <div class="flex items-baseline justify-between mb-4 gap-3">
   <h1 id="vendors-title" class="text-2xl font-semibold">🏆 {{ t('nav.vendors') }}</h1>
   <div class="flex items-baseline gap-3">
+    {% if vendor_categories %}
+      <label class="flex items-center gap-1 text-xs text-gray-600 shrink-0"
+             title="{% if lang == 'ko' %}대시보드에서 만든 카테고리로 업체 목록을 좁힙니다.{% else %}Narrow the vendor list to a category you created on the dashboard.{% endif %}">
+        📁 <span class="hidden sm:inline">{% if lang == 'ko' %}카테고리{% else %}Category{% endif %}</span>
+        <select id="vendors-category-filter" class="border border-gray-300 rounded px-1.5 py-1 text-xs bg-white"
+                onchange="if(this.value){location.href='/vendors?vendor_category_id='+this.value}else{location.href='/vendors'}">
+          <option value="">{% if lang == 'ko' %}전체 업체{% else %}All vendors{% endif %}</option>
+          {% for vc in vendor_categories %}
+            <option value="{{ vc.id }}" {% if vc.id == active_vendor_category_id %}selected{% endif %}>
+              {{ vc.label }} ({{ vc.investigation_count }})
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+    {% endif %}
     {% if vendors and allowed_models %}
       <label class="flex items-center gap-1 text-xs text-gray-600 shrink-0"
              title="{% if lang == 'ko' %}강점/약점을 클릭해 원인을 분석할 때 사용할 AI 모델. 어려운 인과 추출은 Sonnet이 더 정확합니다.{% else %}Model used when you click a strength/weakness to extract reasons. Sonnet is more accurate for hard causal reasoning.{% endif %}">
@@ -66,12 +81,29 @@
   </div>
 </div>
 
+{% if active_vendor_category_id %}
+  <div class="mb-4 text-xs">
+    <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200">
+      📁 {% if lang == 'ko' %}{{ active_vendor_category_label }}로 필터링됨{% else %}Filtered to {{ active_vendor_category_label }}{% endif %}
+      <a href="/vendors" class="ml-1 text-indigo-600 hover:underline">✕ {% if lang == 'ko' %}전체 보기{% else %}Clear{% endif %}</a>
+    </span>
+  </div>
+{% endif %}
+
 {% if not vendors %}
   <div class="bg-white p-6 rounded text-center text-gray-500 text-sm">
-    {% if lang == 'ko' %}
-      아직 수집된 리뷰가 없습니다. 소스 추가 후 분석을 실행하면 여기서 강점/약점이 보입니다.
+    {% if active_vendor_category_id %}
+      {% if lang == 'ko' %}
+        "{{ active_vendor_category_label }}" 카테고리에 속한 업체가 없습니다. <a href="/vendors" class="text-blue-600 hover:underline">전체 업체 보기</a>
+      {% else %}
+        No vendors belong to the "{{ active_vendor_category_label }}" category. <a href="/vendors" class="text-blue-600 hover:underline">View all vendors</a>
+      {% endif %}
     {% else %}
-      No reviews collected yet. Add sources and run analysis to see strengths and weaknesses here.
+      {% if lang == 'ko' %}
+        아직 수집된 리뷰가 없습니다. 소스 추가 후 분석을 실행하면 여기서 강점/약점이 보입니다.
+      {% else %}
+        No reviews collected yet. Add sources and run analysis to see strengths and weaknesses here.
+      {% endif %}
     {% endif %}
   </div>
 {% endif %}
